@@ -159,4 +159,18 @@ final class OperationsTrashTest extends WP_UnitTestCase {
 		$this->assertSame( 1, $job['counts']['kept'] );
 		$this->assertSame( 3, $job['counts']['trashed'] );
 	}
+
+	public function test_a_trash_another_plugin_answers_true_for_changes_nothing_under_it(): void {
+		$blocked = $this->ids['team'];
+		add_filter( 'pre_trash_post', static fn( $check, $post ) => $post->ID === $blocked ? true : $check, 10, 2 );
+
+		$job = $this->operations->run( $this->job() );
+
+		$this->assertSame( 'publish', get_post_status( $blocked ) );
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'Not expanded past a page that stayed live.' );
+		$this->assertSame( 'draft', get_post_status( $this->ids['plans'] ) );
+		$this->assertSame( '', get_post_meta( $blocked, Markers::trashed_key( $this->ids['about'] ), true ) );
+		$this->assertSame( 1, $job['counts']['kept'] );
+		$this->assertSame( 1, $job['counts']['trashed'] );
+	}
 }

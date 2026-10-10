@@ -315,16 +315,16 @@ final class Operations {
 				++$used;
 				// Marked first, so the row exists even if this request dies right after the trash.
 				Markers::add( $kid, Markers::trashed_key( $root ), '1' );
-				if ( Guard::run( [ $kid ], static fn() => wp_trash_post( $kid ) ) ) {
+				Guard::run( [ $kid ], static fn() => wp_trash_post( $kid ) );
+				// A pre_trash_post filter can answer true without trashing, so the status decides.
+				if ( 'trash' === Subtree::status( $kid ) ) {
 					++$job['counts']['trashed'];
 					$now_trashed[] = $kid;
 					continue;
 				}
 
 				Markers::remove_key( $kid, Markers::trashed_key( $root ) );
-				if ( 'trash' !== Subtree::status( $kid ) ) {
-					$job = $this->keep( $job, $kid, false );
-				}
+				$job = $this->keep( $job, $kid, false );
 			}
 
 			foreach ( array_reverse( Subtree::with_live_children( $now_trashed, $type ) ) as $parent_id ) {
