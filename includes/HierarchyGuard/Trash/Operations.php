@@ -155,6 +155,8 @@ final class Operations {
 		switch ( $job['type'] ?? '' ) {
 			case self::TYPE_REPARENT:
 				return $this->step_reparent( $job, $moves );
+			case self::TYPE_TRASH:
+				return $this->step_trash_children( $job, $moves, $calls );
 		}
 
 		$job['finished'] = true;
@@ -257,6 +259,88 @@ final class Operations {
 
 		$job['finished'] = count( $children ) < $moves;
 		return $this->remember( $job, $moved );
+	}
+
+	/**
+	 * Trashes the trashed root's live descendants, depth first.
+	 *
+	 * @param array<string,mixed> $job   Job.
+	 * @param int                 $moves Most subpages to look at.
+	 * @param int                 $calls Most core trash calls.
+	 * @return array<string,mixed>
+	 */
+	private function step_trash_children( array $job, int $moves, int $calls ): array {
+		$root = (int) $job['root'];
+		// With the trash turned off, wp_trash_post() would delete the subpages for good.
+		if ( 'trash' !== Subtree::status( $root ) || ! EMPTY_TRASH_DAYS ) {
+			$job['finished'] = true;
+			return $job;
+		}
+
+		$type    = (string) $job['post_type'];
+		$core    = Request::core_ids();
+		$special = array_values( array_filter( array_map( 'intval', [ get_option( 'page_on_front' ), get_option( 'page_for_posts' ), get_option( 'wp_page_for_privacy_policy' ) ] ) ) );
+		$stack   = (array) $job['stack'];
+		$seen    = 0;
+		$used    = 0;
+		$trashed = [];
+
+		while ( [] !== $stack && $used < $calls && $seen < $moves ) {
+			$top    = count( $stack ) - 1;
+			$parent = (int) $stack[ $top ][0];
+			$kids   = Subtree::live_children( $parent, $type, min( $calls - $used, $moves - $seen ), (int) $stack[ $top ][1] );
+			if ( [] === $kids ) {
+				array_pop( $stack );
+				continue;
+			}
+			_prime_post_caches( $kids, false, false );
+
+			$now_trashed = [];
+			foreach ( $kids as $kid ) {
+				$stack[ $top ][1] = $kid;
+				++$seen;
+				if ( in_array( $kid, $core, true ) ) {
+					continue;
+				}
+				if ( in_array( $kid, $special, true ) ) {
+					// Trashing the front page, posts page or privacy page would change site settings.
+					$job = $this->keep( $job, $kid, false );
+					continue;
+				}
+				if ( ! $this->can( (int) $job['user'], 'delete_post', $kid ) ) {
+					$job = $this->keep( $job, $kid, true );
+					continue;
+				}
+
+				++$used;
+				// Marked first, so the row exists even if this request dies right after the trash.
+				Markers::add( $kid, Markers::trashed_key( $root ), '1' );
+				if ( Guard::run( [ $kid ], static fn() => wp_trash_post( $kid ) ) ) {
+					++$job['counts']['trashed'];
+					$now_trashed[] = $kid;
+					continue;
+				}
+
+				Markers::remove_key( $kid, Markers::trashed_key( $root ) );
+				if ( 'trash' !== Subtree::status( $kid ) ) {
+					$job = $this->keep( $job, $kid, false );
+				}
+			}
+
+			foreach ( array_reverse( Subtree::with_live_children( $now_trashed, $type ) ) as $parent_id ) {
+				$stack[] = [ $parent_id, 0 ];
+			}
+			$trashed = array_merge( $trashed, $now_trashed );
+		}
+
+		$job['stack']    = $stack;
+		$job['work']     = [
+			'moves' => $seen,
+			'calls' => $used,
+		];
+		$job['finished'] = [] === $stack;
+
+		return $this->remember( $job, $trashed );
 	}
 
 	/**
