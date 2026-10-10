@@ -58,7 +58,12 @@ final class Resolver {
 			}
 
 			$target = get_page_by_path( $candidate, OBJECT, [ $post_type ] );
-			if ( $target instanceof WP_Post && $target->post_type === $post_type && is_post_publicly_viewable( $target ) ) {
+			if (
+				$target instanceof WP_Post
+				&& $target->post_type === $post_type
+				&& is_post_publicly_viewable( $target )
+				&& ! self::has_trashed_segment( Paths::uri( $target ) )
+			) {
 				return $target;
 			}
 
@@ -69,7 +74,23 @@ final class Resolver {
 	}
 
 	/**
+	 * Whether a path runs through a trashed page. Such a URL stops working when
+	 * the trash is emptied, so it must never become a cached 301 target.
+	 *
+	 * @param string $path Normalized path.
+	 */
+	private static function has_trashed_segment( string $path ): bool {
+		foreach ( explode( '/', $path ) as $segment ) {
+			if ( str_ends_with( $segment, '__trashed' ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Replaces the longest prefix the ledger knows with the location it now maps to.
+	 * Ledger hits on trashed posts are skipped so a shorter prefix can match.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -88,7 +109,7 @@ final class Resolver {
 			$base = '';
 			if ( $hit > 0 ) {
 				$post = get_post( $hit );
-				if ( ! $post instanceof WP_Post ) {
+				if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
 					continue;
 				}
 				$base = Paths::uri( $post );

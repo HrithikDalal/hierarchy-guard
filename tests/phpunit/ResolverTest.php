@@ -197,4 +197,72 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->assertSame( 'page', $target->post_type );
 		$this->assertSame( $this->team, $target->ID );
 	}
+
+	public function test_a_renamed_then_trashed_parent_does_not_lead_into_the_trash(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-us',
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( $this->about, (int) get_post( $this->team )->post_parent, 'Precondition: the subpage stays under the trashed parent.' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
+	}
+
+	public function test_a_trashed_ledger_hit_gives_way_to_a_shorter_prefix(): void {
+		// about moves under elsewhere (recording company/about), a new about/team takes
+		// its place, company becomes firm (recording company), then the moved about is trashed.
+		$elsewhere = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'elsewhere',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->about,
+				'post_parent' => $elsewhere,
+			]
+		);
+		$new_about = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $this->company,
+			]
+		);
+		$new_team  = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'team',
+				'post_parent' => $new_about,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->company,
+				'post_name' => 'firm',
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ), 'Precondition: the longest prefix maps to the trashed page.' );
+
+		$this->assertSame( $new_team, $this->resolver->resolve( 'page', 'company/about/team' )->ID );
+	}
+
+	public function test_a_target_under_a_trashed_ancestor_is_refused(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->team,
+				'post_name' => 'crew',
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( 'publish', get_post_status( $this->team ), 'Precondition: the ledger hit itself is live.' );
+		$this->assertSame( 'company/about__trashed/crew', get_page_uri( $this->team ), 'Precondition: its URL runs through the trash.' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
+	}
 }
