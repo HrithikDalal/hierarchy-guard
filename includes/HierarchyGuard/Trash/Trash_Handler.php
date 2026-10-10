@@ -313,8 +313,14 @@ final class Trash_Handler {
 			$this->dispatch( 'cleanup', Operations::new_job( Operations::TYPE_CLEANUP, $id, (string) $post->post_type, 0 ) );
 			return;
 		}
+		$token = $this->queue->lock( $id );
+		if ( 0 === $token ) {
+			// A run holds the lock; it finds the page gone at its next step and ends the job.
+			return;
+		}
 		$this->queue->delete( $id );
 		$this->queue->discard_offer( $id );
+		$this->queue->unlock( $id, $token );
 	}
 
 	/**

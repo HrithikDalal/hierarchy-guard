@@ -247,4 +247,14 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertSame( 0, $this->queue->load( $root )['counts']['moved'], 'The slot keeps what the new holder will read.' );
 		$this->assertFalse( $this->queue->is_scheduled( $root ) );
 	}
+
+	public function test_the_watchdog_leaves_a_job_whose_run_holds_the_lock(): void {
+		$this->age_job( time() - 8 * DAY_IN_SECONDS, time() - HOUR_IN_SECONDS );
+		$token = $this->queue->lock( $this->ids['about'] );
+
+		$this->processor->watchdog();
+
+		$this->assertNotNull( $this->queue->load( $this->ids['about'] ), 'A run holds it, so the job is alive.' );
+		$this->queue->unlock( $this->ids['about'], $token );
+	}
 }

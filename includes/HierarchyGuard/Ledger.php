@@ -290,9 +290,9 @@ final class Ledger {
 			wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
 		}
 
-		// The cache keeps the holder; its status is read on every call, because a
-		// trash or restore of the holder does not touch the ledger.
-		if ( null !== $found && $found > 0 && 'trash' === get_post_status( $found ) ) {
+		// The cache keeps the holder; its status is read on every call, because
+		// trashing, restoring or deleting the holder does not touch the ledger.
+		if ( null !== $found && $found > 0 && in_array( get_post_status( $found ), [ false, 'trash' ], true ) ) {
 			$roots = $this->roots();
 			return in_array( $path, $roots[ $post_type ] ?? [], true ) ? 0 : null;
 		}

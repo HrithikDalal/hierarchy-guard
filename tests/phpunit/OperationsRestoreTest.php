@@ -323,4 +323,20 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['team'], $resolver->resolve( 'page', 'company/about/team' )->ID, 'Moved elsewhere while the parent was in the trash.' );
 		$this->assertSame( $this->ids['history'], $resolver->resolve( 'page', 'company/about/history' )->ID, 'Renamed while the parent was in the trash.' );
 	}
+
+	public function test_the_original_url_is_kept_while_the_parent_s_parent_is_still_in_the_trash(): void {
+		$this->move_out();
+		$this->trash_raw( $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $this->ids['history'],
+			]
+		);
+		$this->untrash_raw( $this->ids['about'] );
+
+		$this->restore();
+
+		$this->assertSame( $this->ids['team'], $this->ledger->find( 'page', 'company/about/team' ), 'Recorded as the URL visitors had, not under company__trashed.' );
+	}
 }

@@ -559,7 +559,7 @@ final class Operations {
 		if ( '' === $original || ! $this->recording() || ! $post instanceof WP_Post || ! $root instanceof WP_Post || ! Paths::is_recordable( $post ) ) {
 			return;
 		}
-		$this->ledger->record( $post_id, Paths::uri( $root ) . '/' . $original );
+		$this->ledger->record( $post_id, Paths::untrashed_uri( $root ) . '/' . $original );
 	}
 
 	/**

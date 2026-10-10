@@ -325,4 +325,21 @@ final class TrashNoticeTest extends WP_UnitTestCase {
 
 		$this->assertContains( 'There was more than 1 subpage, so they moved up instead of going to the Trash.', Trash_Notice::sentences( $change ) );
 	}
+
+	public function test_a_background_trash_says_the_rest_are_going_to_the_trash(): void {
+		$change = $this->change(
+			'trash',
+			[
+				$this->about(
+					[
+						'policy' => Settings::POLICY_TRASH_CHILDREN,
+						'counts' => [ 'trashed' => 25 ],
+						'job'    => true,
+					]
+				),
+			]
+		);
+
+		$this->assertSame( [ '25 subpages moved to the Trash too.', 'The rest are still going to the Trash in the background.' ], Trash_Notice::sentences( $change ) );
+	}
 }

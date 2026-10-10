@@ -586,4 +586,21 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['about'], (int) get_post( $twin )->post_parent );
 		$this->assertSame( 'about', get_post( $twin )->post_name );
 	}
+
+	public function test_deleting_a_page_whose_batch_is_running_leaves_the_job_to_that_batch(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		add_filter( 'hierarchy_guard_core_call_threshold', static fn(): int => 1 );
+		wp_trash_post( $this->ids['about'] );
+		$this->assertNotNull( $this->queue->load( $this->ids['about'] ), 'Precondition: a trash job is queued.' );
+		$token = $this->queue->lock( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['about'], true );
+
+		$this->assertNotNull( $this->queue->load( $this->ids['about'] ), 'The running batch owns the slot.' );
+		$this->queue->unlock( $this->ids['about'], $token );
+
+		$this->processor()->run( $this->ids['about'] );
+
+		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'The batch found the page gone and ended the job.' );
+	}
 }

@@ -185,8 +185,14 @@ final class Processor {
 
 			$gone = Operations::TYPE_CLEANUP !== ( $any['type'] ?? '' ) && '' === Subtree::status( $root_id );
 			if ( $gone || (int) ( $any['created'] ?? 0 ) < $now - self::GIVE_UP_AFTER ) {
+				$token = $this->queue->lock( $root_id );
+				if ( 0 === $token ) {
+					// A run holds the lock, so the job is alive; the next check sees it again.
+					continue;
+				}
 				$this->queue->delete( $root_id );
 				$this->queue->discard_offer( $root_id );
+				$this->queue->unlock( $root_id, $token );
 				continue;
 			}
 

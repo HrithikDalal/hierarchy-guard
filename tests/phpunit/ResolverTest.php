@@ -398,6 +398,11 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->assertSame( $this->about, $this->resolver->resolve( 'page', 'company/about' )->ID );
 		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID );
 		$this->assertNull( $this->resolver->resolve( 'page', 'company' ) );
+
+		// Emptying the trash deletes company without a ledger write; the cached holder must not answer.
+		wp_delete_post( $this->company, true );
+
+		$this->assertSame( $this->about, $this->resolver->resolve( 'page', 'company/about' )->ID );
 	}
 
 	public function test_a_redirect_a_restore_can_undo_is_temporary(): void {
@@ -429,5 +434,21 @@ final class ResolverTest extends WP_UnitTestCase {
 		$temporary = false;
 		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team-old', $temporary )->ID );
 		$this->assertTrue( $temporary );
+	}
+
+	public function test_a_redirect_to_a_page_under_a_moved_subpage_is_temporary(): void {
+		$alice = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'alice',
+				'post_parent' => $this->team,
+			]
+		);
+		$this->ledger->record( $alice, 'company/about/team/alice-old' );
+		Markers::add( $this->team, Markers::moved_key( $this->about ), Markers::encode_moved( $this->about, 'team', 'team', time() ) );
+
+		$temporary = false;
+		$this->assertSame( $alice, $this->resolver->resolve( 'page', 'company/about/team/alice-old', $temporary )->ID );
+		$this->assertTrue( $temporary, 'alice moves back with team when the trashed page is restored.' );
 	}
 }

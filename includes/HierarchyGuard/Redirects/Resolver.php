@@ -68,6 +68,10 @@ final class Resolver {
 				&& is_post_publicly_viewable( $target )
 				&& ! Paths::has_trashed_segment( Paths::uri( $target ) )
 			) {
+				// The target, or a page above it, sits where the trash flow moved it: a restore moves it back.
+				foreach ( array_merge( [ $target->ID ], get_post_ancestors( $target ) ) as $id ) {
+					$temporary = $temporary || Markers::has_moved_row( (int) $id );
+				}
 				return $target;
 			}
 
@@ -86,7 +90,7 @@ final class Resolver {
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
-	 * @param bool   $temporary Set to true when the prefix used belongs to a move a restore could undo.
+	 * @param bool   $temporary Set to true when the prefix used is held by a page in the trash.
 	 * @return string|null The rewritten path, or null when no prefix matched.
 	 */
 	private function rewrite_once( string $post_type, string $path, bool &$temporary ): ?string {
@@ -116,7 +120,7 @@ final class Resolver {
 
 			$remainder = implode( '/', array_slice( $segments, $length ) );
 
-			if ( $this->ledger->held_in_trash( $post_type, $prefix ) || ( $hit > 0 && Markers::has_moved_row( $hit ) ) ) {
+			if ( ! $temporary && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
 				$temporary = true;
 			}
 

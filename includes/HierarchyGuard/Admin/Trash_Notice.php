@@ -106,7 +106,9 @@ final class Trash_Notice {
 
 		foreach ( $roots as $root ) {
 			if ( ! empty( $root['job'] ) ) {
-				$out[] = __( 'The rest are still moving in the background.', 'hierarchy-guard' );
+				$out[] = Settings::POLICY_TRASH_CHILDREN === $root['policy']
+					? __( 'The rest are still going to the Trash in the background.', 'hierarchy-guard' )
+					: __( 'The rest are still moving in the background.', 'hierarchy-guard' );
 				break;
 			}
 		}
