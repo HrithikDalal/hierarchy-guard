@@ -1,0 +1,15 @@
+{
+	"name": "hierarchy-guard",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"wp-env": "wp-env",
+		"env:start": "wp-env start",
+		"env:stop": "wp-env stop",
+		"env:destroy": "wp-env destroy",
+		"test:php": "wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard vendor/bin/phpunit"
+	},
+	"devDependencies": {
+		"@wordpress/env": "^10.0.0"
+	}
+}
