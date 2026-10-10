@@ -277,13 +277,17 @@ final class Server {
 	}
 
 	/**
-	 * Carries the current request's query string over to the target URL.
+	 * Carries the current request's query string over to the target URL. The
+	 * query is read from the request URI, as redirect_canonical() does, because
+	 * some servers rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
 	 *
 	 * @param string $url Target URL.
+	 * @return string
 	 */
 	private function append_query_string( string $url ): string {
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding); wp_validate_redirect() runs wp_sanitize_redirect() on the whole URL.
-		$query = isset( $_SERVER['QUERY_STRING'] ) ? (string) wp_unslash( $_SERVER['QUERY_STRING'] ) : '';
+		$uri   = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+		$query = (string) wp_parse_url( $uri, PHP_URL_QUERY );
 		if ( '' === $query ) {
 			return $url;
 		}

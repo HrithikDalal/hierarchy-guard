@@ -163,9 +163,22 @@ final class ServerTest extends WP_UnitTestCase {
 				'post_name' => 'company-info',
 			]
 		);
-		// go_to() leaves QUERY_STRING unset; the web server sets it on a real request.
 		$this->go_to( '/company/about/team/?utm_source=x' );
-		$_SERVER['QUERY_STRING'] = 'utm_source=x';
+
+		$this->assertTrue( is_404() );
+		$this->assertSame( get_permalink( $this->team ) . '?utm_source=x', $this->server->target_for_current_request()['url'] );
+	}
+
+	public function test_query_string_comes_from_the_request_uri(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/?utm_source=x' );
+		// A rewritten QUERY_STRING, as nginx's `/index.php?q=$uri&$args` produces.
+		$_SERVER['QUERY_STRING'] = 'q=/company/about/team/&utm_source=x';
 
 		$this->assertTrue( is_404() );
 		$this->assertSame( get_permalink( $this->team ) . '?utm_source=x', $this->server->target_for_current_request()['url'] );
@@ -394,7 +407,8 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertTrue( is_404() );
 		$this->assertNull( $this->server->target_for_current_request() );
 
-		$_SERVER['QUERY_STRING'] = 'utm_source=x';
+		$this->go_to( '/x/about/3/?utm_source=x' );
+		$this->assertTrue( is_404() );
 		$this->assertNull( $this->server->target_for_current_request(), 'The carried-over query string must not defeat the guard.' );
 	}
 
