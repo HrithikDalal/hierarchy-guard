@@ -11,7 +11,6 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
-use HierarchyGuard\Subtree;
 use WP_Post;
 
 /**
@@ -106,7 +105,7 @@ final class Resolver {
 				if ( Paths::has_trashed_segment( $base ) ) {
 					continue;
 				}
-				if ( count( $segments ) === $length && Subtree::has_trashed_child( $hit, (string) end( $segments ), $post_type ) ) {
+				if ( count( $segments ) === $length && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
 					return null;
 				}
 			}

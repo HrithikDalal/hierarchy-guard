@@ -329,11 +329,12 @@ final class ResolverTest extends WP_UnitTestCase {
 	public function test_an_old_parent_path_whose_page_is_only_in_the_trash_does_not_redirect(): void {
 		global $wpdb;
 
-		// What the trash flow leaves behind: about in the trash, team moved up, one alias on company.
+		// What the trash flow leaves behind: about in the trash, team moved up, the alias on company, and about's own path on about.
 		wp_trash_post( $this->about );
 		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
 		clean_post_cache( $this->team );
 		$this->ledger->record_alias( 'page', $this->company, 'company/about' );
+		$this->ledger->record( $this->about, 'company/about' );
 
 		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID, 'Subpage URLs still resolve.' );
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'A browser would keep a 301 to the grandparent after a restore.' );
@@ -341,5 +342,43 @@ final class ResolverTest extends WP_UnitTestCase {
 		wp_delete_post( $this->about, true );
 
 		$this->assertSame( $this->company, $this->resolver->resolve( 'page', 'company/about' )->ID, 'Once the page is gone for good, its old URL leads to its parent.' );
+	}
+
+	public function test_an_older_path_of_a_page_in_the_trash_does_not_redirect_either(): void {
+		global $wpdb;
+
+		$this->ledger->record( $this->about, 'company/about-us' );
+		wp_trash_post( $this->about );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
+		clean_post_cache( $this->team );
+		foreach ( [ 'company/about', 'company/about-us' ] as $path ) {
+			$this->ledger->record_alias( 'page', $this->company, $path );
+			$this->ledger->record( $this->about, $path );
+		}
+
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about-us/team' )->ID, 'The live alias wins over the trashed page holding the same path.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ) );
+	}
+
+	public function test_a_page_in_the_trash_under_a_trashed_parent_does_not_redirect(): void {
+		global $wpdb;
+
+		$leadership = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'leadership',
+				'post_parent' => $this->team,
+			]
+		);
+		wp_trash_post( $this->about );
+		wp_trash_post( $this->team );
+		// What the trash flow leaves when team's subpages move past both trashed pages.
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $leadership ] );
+		clean_post_cache( $leadership );
+		$this->ledger->record_alias( 'page', $this->company, 'company/about/team' );
+		$this->ledger->record( $this->team, 'company/about/team' );
+
+		$this->assertSame( $leadership, $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
 	}
 }

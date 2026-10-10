@@ -294,7 +294,36 @@ final class Ledger {
 	}
 
 	/**
-	 * Single index seek on the hashed key, newest entry first.
+	 * Whether a post in the trash holds this path. The trash flow records a
+	 * trashed page's own paths on it, so a hit here means the page at an old
+	 * parent path is only in the trash.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return bool
+	 */
+	public function held_in_trash( string $post_type, string $path ): bool {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; only for a 404 on an exact old parent path.
+		$id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
+
+		return null !== $id;
+	}
+
+	/**
+	 * Single index seek on the hashed key: a live post first, then the newest entry.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -305,7 +334,7 @@ final class Ledger {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; cached by the caller.
 		$id = $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT 1",
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC LIMIT 1",
 				self::key( $post_type, $path ),
 				$post_type
 			)

@@ -189,4 +189,21 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertNotSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'one' ), 'The cached miss is gone.' );
 	}
+
+	public function test_a_live_holder_wins_and_a_trashed_holder_is_found(): void {
+		$other = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'other',
+			]
+		);
+		$this->ledger->record( $other, 'shared' );
+		$this->ledger->record( $this->about, 'shared' );
+		wp_trash_post( $this->about );
+
+		$this->assertSame( $other, $this->ledger->find( 'page', 'shared' ), 'The newer entry is on a page in the trash.' );
+		$this->assertTrue( $this->ledger->held_in_trash( 'page', '/Shared/' ) );
+		$this->assertFalse( $this->ledger->held_in_trash( 'page', 'elsewhere' ) );
+		$this->assertFalse( $this->ledger->held_in_trash( 'page', '' ) );
+	}
 }

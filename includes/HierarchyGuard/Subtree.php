@@ -162,30 +162,6 @@ final class Subtree {
 	}
 
 	/**
-	 * Whether a parent has a trashed child that had the given slug before the trash.
-	 *
-	 * @param int    $parent_id Parent post ID.
-	 * @param string $slug      Slug the child had.
-	 * @param string $post_type Post type name.
-	 * @return bool
-	 */
-	public static function has_trashed_child( int $parent_id, string $slug, string $post_type ): bool {
-		global $wpdb;
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Rare: only for a 404 on an exact old parent path.
-		$id = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID WHERE p.post_parent = %d AND p.post_type = %s AND p.post_status = 'trash' AND m.meta_key = '_wp_desired_post_slug' AND m.meta_value = %s LIMIT 1",
-				$parent_id,
-				$post_type,
-				$slug
-			)
-		);
-
-		return null !== $id;
-	}
-
-	/**
 	 * The closest ancestor that is not in the trash, or 0 for top level.
 	 *
 	 * @param WP_Post $post Post object.

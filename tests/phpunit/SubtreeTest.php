@@ -86,14 +86,6 @@ final class SubtreeTest extends WP_UnitTestCase {
 		$this->assertSame( '', Subtree::status( 999999 ) );
 	}
 
-	public function test_has_trashed_child_matches_the_slug_before_the_trash(): void {
-		$this->trash_raw( $this->ids['history'] );
-
-		$this->assertTrue( Subtree::has_trashed_child( $this->ids['about'], 'history', 'page' ) );
-		$this->assertFalse( Subtree::has_trashed_child( $this->ids['about'], 'team', 'page' ), 'team is live.' );
-		$this->assertFalse( Subtree::has_trashed_child( $this->ids['company'], 'history', 'page' ), 'Only direct children.' );
-	}
-
 	public function test_nearest_live_ancestor_skips_trashed_ones(): void {
 		$this->assertSame( $this->ids['team'], Subtree::nearest_live_ancestor( get_post( $this->ids['leadership'] ) ) );
 
