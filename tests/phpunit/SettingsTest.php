@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
 use WP_UnitTestCase;
 
@@ -29,9 +30,6 @@ final class SettingsTest extends WP_UnitTestCase {
 	}
 
 	public function test_stored_values_override_defaults(): void {
-		// A partial value, as an older save or a direct write leaves it. The sanitize
-		// callback registered on init would fill in every key.
-		remove_filter( 'sanitize_option_' . Settings::OPTION, [ Settings::class, 'sanitize' ] );
 		update_option(
 			Settings::OPTION,
 			[
@@ -100,9 +98,25 @@ final class SettingsTest extends WP_UnitTestCase {
 	}
 
 	public function test_sanitize_without_checkboxes_means_none_selected(): void {
-		$clean = Settings::sanitize( [] );
+		// The form's hidden input always submits the key, so "none checked" arrives as [ '' ].
+		$clean = Settings::sanitize( [ 'post_types' => [ '' ] ] );
 		$this->assertSame( [], $clean['post_types'] );
 		$this->assertFalse( $clean['serve_redirects'] );
+	}
+
+	public function test_sanitize_keeps_post_types_null_when_absent_or_null(): void {
+		$this->assertNull( Settings::sanitize( [] )['post_types'], 'A missing key means every public hierarchical type.' );
+		$this->assertNull( Settings::sanitize( [ 'post_types' => null ] )['post_types'], 'The registered default round-trips unchanged.' );
+	}
+
+	public function test_partial_write_keeps_every_type_supported(): void {
+		$this->assertFalse( get_option( Settings::OPTION, false ), 'Precondition: the option was never saved.' );
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		Post_Types::reset();
+
+		$this->assertContains( 'page', Post_Types::supported() );
+		$this->assertTrue( Settings::serve_redirects() );
 	}
 
 	public function test_sanitize_rejects_non_array_input(): void {

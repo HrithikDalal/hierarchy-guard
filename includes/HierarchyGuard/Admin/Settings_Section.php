@@ -86,6 +86,8 @@ final class Settings_Section {
 		$selected = Post_Types::supported();
 
 		echo '<fieldset><legend class="screen-reader-text"><span>' . esc_html__( 'Post types', 'hierarchy-guard' ) . '</span></legend>';
+		// Always submits the key, so unchecking every box saves [] rather than the null default.
+		printf( '<input type="hidden" name="%s[post_types][]" value="">', esc_attr( Settings::OPTION ) );
 		foreach ( $types as $type ) {
 			printf(
 				'<label><input type="checkbox" name="%1$s[post_types][]" value="%2$s" %3$s> %4$s</label><br>',

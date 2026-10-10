@@ -103,8 +103,14 @@ final class Settings {
 			)
 		);
 
-		$types = isset( $input['post_types'] ) ? array_map( 'sanitize_key', (array) $input['post_types'] ) : [];
-		$types = array_values( array_intersect( $types, $public ) );
+		// Absent or null keeps null: every public hierarchical type. The form always
+		// submits the key through a hidden input, so "none checked" arrives as [ '' ].
+		$types = null;
+		if ( isset( $input['post_types'] ) ) {
+			$types = array_map( 'sanitize_key', (array) $input['post_types'] );
+			$types = array_filter( $types, static fn( string $type ): bool => '' !== $type );
+			$types = array_values( array_intersect( $types, $public ) );
+		}
 
 		$policy = isset( $input['trash_policy'] ) ? sanitize_key( (string) $input['trash_policy'] ) : self::POLICY_REPARENT;
 		if ( ! in_array( $policy, self::POLICIES, true ) ) {

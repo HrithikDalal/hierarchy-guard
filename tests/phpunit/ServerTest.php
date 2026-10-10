@@ -32,14 +32,7 @@ final class ServerTest extends WP_UnitTestCase {
 	public function set_up(): void {
 		parent::set_up();
 		delete_option( Ledger::ROOT_OPTION );
-		// Writes pass through Settings::sanitize(), where a missing post_types key means none.
-		update_option(
-			Settings::OPTION,
-			[
-				'post_types'      => [ 'page' ],
-				'serve_redirects' => true,
-			]
-		);
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
 
@@ -94,13 +87,7 @@ final class ServerTest extends WP_UnitTestCase {
 	}
 
 	public function test_does_nothing_when_serving_is_off(): void {
-		update_option(
-			Settings::OPTION,
-			[
-				'post_types'      => [ 'page' ],
-				'serve_redirects' => false,
-			]
-		);
+		update_option( Settings::OPTION, [ 'serve_redirects' => false ] );
 		wp_update_post(
 			[
 				'ID'        => $this->about,
@@ -309,13 +296,6 @@ final class ServerTest extends WP_UnitTestCase {
 					'slug'         => 'docs',
 					'hierarchical' => true,
 				],
-			]
-		);
-		update_option(
-			Settings::OPTION,
-			[
-				'post_types'      => [ 'page', 'hg_docs' ],
-				'serve_redirects' => true,
 			]
 		);
 		$this->set_permalink_structure( '/%postname%/' );

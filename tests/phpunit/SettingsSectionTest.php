@@ -87,6 +87,16 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Public hierarchical post types appear here automatically.', $html );
 	}
 
+	public function test_post_types_field_always_submits_the_key(): void {
+		ob_start();
+		$this->section->render_post_types();
+		$html = (string) ob_get_clean();
+
+		$hidden = '<input type="hidden" name="hierarchy_guard_settings[post_types][]" value="">';
+		$this->assertStringContainsString( $hidden, $html );
+		$this->assertLessThan( strpos( $html, 'type="checkbox"' ), strpos( $html, $hidden ), 'The hidden input comes before the checkboxes.' );
+	}
+
 	public function test_trash_policy_field_renders_three_radios_with_the_default_selected(): void {
 		ob_start();
 		$this->section->render_trash_policy();
