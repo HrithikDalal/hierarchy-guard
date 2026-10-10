@@ -202,6 +202,9 @@ final class LedgerTest extends WP_UnitTestCase {
 		wp_trash_post( $this->about );
 
 		$this->assertSame( $other, $this->ledger->find( 'page', 'shared' ), 'The newer entry is on a page in the trash.' );
+		wp_trash_post( $other );
+		$this->ledger->record_root( 'page', 'shared' );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'shared' ), 'With every holder in the trash, the root list answers.' );
 		$this->assertTrue( $this->ledger->held_in_trash( 'page', '/Shared/' ) );
 		$this->assertFalse( $this->ledger->held_in_trash( 'page', 'elsewhere' ) );
 		$this->assertFalse( $this->ledger->held_in_trash( 'page', '' ) );

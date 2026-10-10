@@ -247,7 +247,7 @@ final class ResolverTest extends WP_UnitTestCase {
 			]
 		);
 		wp_trash_post( $this->about );
-		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ), 'Precondition: the longest prefix maps to the trashed page.' );
+		$this->assertTrue( $this->ledger->held_in_trash( 'page', 'company/about' ), 'Precondition: the longest prefix is held only by the trashed page.' );
 
 		$this->assertSame( $new_team, $this->resolver->resolve( 'page', 'company/about/team' )->ID );
 	}
@@ -380,5 +380,20 @@ final class ResolverTest extends WP_UnitTestCase {
 
 		$this->assertSame( $leadership, $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
+	}
+
+	public function test_a_top_level_page_in_the_trash_does_not_hide_its_root_list_alias(): void {
+		global $wpdb;
+
+		// What the trash flow leaves when a top-level page's subpages become top level.
+		wp_trash_post( $this->company );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => 0 ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+		$this->ledger->record_alias( 'page', 0, 'company' );
+		$this->ledger->record( $this->company, 'company' );
+
+		$this->assertSame( $this->about, $this->resolver->resolve( 'page', 'company/about' )->ID );
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company' ) );
 	}
 }

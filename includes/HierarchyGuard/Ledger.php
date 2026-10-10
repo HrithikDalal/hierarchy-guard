@@ -323,7 +323,8 @@ final class Ledger {
 	}
 
 	/**
-	 * Single index seek on the hashed key: a live post first, then the newest entry.
+	 * Single index seek on the hashed key, newest entry first. Posts in the trash do not
+	 * count: their entries mean the page is only in the trash, which held_in_trash() answers.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -334,7 +335,7 @@ final class Ledger {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; cached by the caller.
 		$id = $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC LIMIT 1",
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status <> 'trash' ORDER BY pm.meta_id DESC LIMIT 1",
 				self::key( $post_type, $path ),
 				$post_type
 			)
