@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html` is a snapshot of the live spec at https://claude.ai/artifact/6V5RMR2w49uPiEp96ycyzq. Read "Trashing a parent" under How it works, the Data model table, Hooks and handlers, Filters for developers and Testing. The Pages-list trash dialog, the outcome notice with its Undo link and the redirects modal are admin UI and belong to plan 3. This plan builds what they call: the `hierarchy_guard_trash_policy` filter, `Trash\Change_Log`, `Trash_Handler::undo()`, and an interim sentence on core's own trash notice.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (236 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (239 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -30,7 +30,7 @@
 - Order of events: nothing is written in `wp_trash_post`; mutation happens in `trashed_post`; the restore runs at `wp_after_insert_post` priority 20, after the page's own save, or is queued at `shutdown` when that hook never fired. Re-parenting is a direct `post_parent`/`post_name` update plus `clean_post_cache()`, after `wp_unique_post_slug()` under the new parent with drafts and pending posts checked as `publish`. It fires `hierarchy_guard_children_reparented( int[] $ids, int $from, int $to )`.
 - Core's bulk loops: in a Pages-list bulk trash or untrash (`edit.php`, `action` `trash` or `untrash`, IDs from `ids` or `post[]`), the selected IDs are left to core. The plugin does not move, trash, expand or untrash them.
 - Targets and stops: subpages move to the nearest ancestor that is not in the trash, re-checked every step. A trash step stops when its root, read past the object cache, is no longer in the trash; a restore step stops when it is in the trash again or gone. The front page, posts page and privacy policy page are never trashed by the subtree policy.
-- Aliases: the old parent paths are recorded on the new parent, or in the root list, only after the first subpage moved; they are remembered on the root and removed when the restore finishes, and recorded on the root itself if it came back at another path. An exact old parent path whose page is merely in the trash resolves to nothing.
+- Aliases: the old parent paths are recorded on the new parent, or in the root list, only after the first subpage moved, and each is also recorded on the root itself. The aliases are remembered on the root and removed when the restore finishes; the root's own entry is pruned when it is back at that path and stays, leading to it, when it came back elsewhere. Ledger lookups ignore entries held by posts in the trash, and an exact old parent path held by a page in the trash resolves to nothing.
 - Interim URLs: a restore records a moved-back subpage's interim path only when the move is at least an hour old. Every ledger record the trash flow makes for a subpage requires `Paths::is_recordable()` on it before the move.
 - Copy: sentence case, the word "subpages", no product name inside UI text, no exclamation marks, no claims about UI that doesn't exist yet. One translatable string per sentence, `_n()` on the counted noun, a translator comment for every placeholder, titles inside the string as “%s”, `number_format_i18n()` for numbers, "(no title)" as the fallback. "trash" is lowercase in the plugin's own sentences and "Trash" in sentences appended to core's notice. WP-CLI lines are English only.
 
@@ -864,7 +864,7 @@ git commit -m "feat: ID-keyed guard, per-root subpage markers and trash-flow tes
 
 **Interfaces:**
 - Consumes: `Paths::is_trashed_slug()`, `Paths::strip_trashed_suffix()`, `Paths::is_recordable()` (engine); `Trash_Fixtures` (Task 1).
-- Produces: `Subtree::COUNT_CAP`; static `count_cap(): int`, `status( int $post_id ): string` (uncached; `''` when missing), `has_live_children( int $parent_id, string $post_type ): bool`, `live_children( int $parent_id, string $post_type, int $limit, int $after_id = 0 ): int[]`, `count_live_children( int $parent_id, string $post_type, int $cap ): int`, `count_live_descendants( int $root_id, string $post_type, int $cap ): int` (returns `$cap + 1` when there are more), `with_live_children( int[] $ids, string $post_type ): int[]`, `has_trashed_child( int $parent_id, string $slug, string $post_type ): bool`, `nearest_live_ancestor( WP_Post $post ): int`. "Live" means any status except `trash`, `auto-draft` and `inherit`.
+- Produces: `Subtree::COUNT_CAP`; static `count_cap(): int`, `status( int $post_id ): string` (uncached; `''` when missing), `has_live_children( int $parent_id, string $post_type ): bool`, `live_children( int $parent_id, string $post_type, int $limit, int $after_id = 0 ): int[]`, `count_live_children( int $parent_id, string $post_type, int $cap ): int`, `count_live_descendants( int $root_id, string $post_type, int $cap ): int` (returns `$cap + 1` when there are more), `with_live_children( int[] $ids, string $post_type ): int[]`, `nearest_live_ancestor( WP_Post $post ): int`. "Live" means any status except `trash`, `auto-draft` and `inherit`.
 - Produces: `Paths::untrashed_uri( WP_Post $post ): string`.
 - Produces: `Trash\Mover::move( int $post_id, int $new_parent_id, string $preferred_slug = '' ): array{moved:bool,old_path:string,old_slug:string,slug:string,renamed:bool,recordable:bool}` (`old_path` is the untrashed path before the move, `recordable` is `Paths::is_recordable()` before the move); `Mover::reparent( int $post_id, int $new_parent_id ): bool` (parent only, for a post in the trash).
 
@@ -960,14 +960,6 @@ final class SubtreeTest extends WP_UnitTestCase {
 		$this->assertSame( '', Subtree::status( 999999 ) );
 	}
 
-	public function test_has_trashed_child_matches_the_slug_before_the_trash(): void {
-		$this->trash_raw( $this->ids['history'] );
-
-		$this->assertTrue( Subtree::has_trashed_child( $this->ids['about'], 'history', 'page' ) );
-		$this->assertFalse( Subtree::has_trashed_child( $this->ids['about'], 'team', 'page' ), 'team is live.' );
-		$this->assertFalse( Subtree::has_trashed_child( $this->ids['company'], 'history', 'page' ), 'Only direct children.' );
-	}
-
 	public function test_nearest_live_ancestor_skips_trashed_ones(): void {
 		$this->assertSame( $this->ids['team'], Subtree::nearest_live_ancestor( get_post( $this->ids['leadership'] ) ) );
 
@@ -1025,13 +1017,22 @@ final class MoverTest extends WP_UnitTestCase {
 	}
 
 	public function test_moves_a_post_without_touching_its_modified_date(): void {
-		$modified = get_post( $this->ids['team'] )->post_modified;
+		global $wpdb;
+		$wpdb->update(
+			$wpdb->posts,
+			[
+				'post_modified'     => '2001-01-01 00:00:00',
+				'post_modified_gmt' => '2001-01-01 00:00:00',
+			],
+			[ 'ID' => $this->ids['team'] ]
+		);
+		clean_post_cache( $this->ids['team'] );
 
 		$result = $this->mover->move( $this->ids['team'], $this->ids['company'] );
 
 		$this->assertTrue( $result['moved'] );
 		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['team'] )->post_parent );
-		$this->assertSame( $modified, get_post( $this->ids['team'] )->post_modified );
+		$this->assertSame( '2001-01-01 00:00:00', get_post( $this->ids['team'] )->post_modified );
 		$this->assertSame( 'company/about/team', $result['old_path'] );
 		$this->assertSame( 'team', $result['slug'] );
 		$this->assertFalse( $result['renamed'] );
@@ -1302,30 +1303,6 @@ final class Subtree {
 	}
 
 	/**
-	 * Whether a parent has a trashed child that had the given slug before the trash.
-	 *
-	 * @param int    $parent_id Parent post ID.
-	 * @param string $slug      Slug the child had.
-	 * @param string $post_type Post type name.
-	 * @return bool
-	 */
-	public static function has_trashed_child( int $parent_id, string $slug, string $post_type ): bool {
-		global $wpdb;
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Rare: only for a 404 on an exact old parent path.
-		$id = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT p.ID FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID WHERE p.post_parent = %d AND p.post_type = %s AND p.post_status = 'trash' AND m.meta_key = '_wp_desired_post_slug' AND m.meta_value = %s LIMIT 1",
-				$parent_id,
-				$post_type,
-				$slug
-			)
-		);
-
-		return null !== $id;
-	}
-
-	/**
 	 * The closest ancestor that is not in the trash, or 0 for top level.
 	 *
 	 * @param WP_Post $post Post object.
@@ -1519,7 +1496,7 @@ final class Mover {
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter 'SubtreeTest|MoverTest|PathsTest'`
-Expected: `OK (25 tests, 82 assertions)`.
+Expected: `OK (24 tests, 79 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -1540,8 +1517,10 @@ git commit -m "feat: bounded subtree queries, untrashed paths and a raw re-paren
 - Test: `tests/phpunit/LedgerTest.php`, `tests/phpunit/ChangeListenerTest.php`, `tests/phpunit/ResolverTest.php`
 
 **Interfaces:**
-- Consumes: `Paths::untrashed_uri()`, `Subtree::has_trashed_child()` (Task 2); `Markers::has_trashed_row()`, `Markers::add()`, `Markers::trashed_key()` (Task 1).
-- Produces: `Ledger::record_root()` now returns `bool` (true when written); `Ledger::record_alias( string $post_type, int $new_parent_id, string $old_path ): bool`; `Ledger::forget( int $post_id, string $old_path ): bool`; `Ledger::forget_root( string $post_type, string $old_path ): bool`; `Ledger::forget_alias( string $post_type, int $new_parent_id, string $old_path ): bool`; static `Ledger::deferred( callable $callback ): mixed` (cache invalidation held back, then done once). `Change_Listener::pre_trash_uri()` is removed.
+- Consumes: `Paths::untrashed_uri()` (Task 2); `Markers::has_trashed_row()`, `Markers::add()`, `Markers::trashed_key()` (Task 1).
+- Produces: `Ledger::record_root()` now returns `bool` (true when written); `Ledger::record_alias( string $post_type, int $new_parent_id, string $old_path ): bool`; `Ledger::forget( int $post_id, string $old_path ): bool`; `Ledger::forget_root( string $post_type, string $old_path ): bool`; `Ledger::forget_alias( string $post_type, int $new_parent_id, string $old_path ): bool`; static `Ledger::deferred( callable $callback ): mixed` (cache invalidation held back, then done once); `Ledger::held_in_trash( string $post_type, string $path ): bool`. `Ledger::find()` now ignores entries held by posts in the trash, falling back to the root list. `Change_Listener::pre_trash_uri()` is removed.
+
+The trash flow (Task 5) records each alias path on the trashed page itself, so `held_in_trash()` tells the resolver that the page at an exact old parent path is only in the trash.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1588,6 +1567,26 @@ Add to the end of the class in `tests/phpunit/LedgerTest.php`:
 		$this->assertNotSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'one' ), 'The cached miss is gone.' );
 	}
+
+	public function test_a_live_holder_wins_and_a_trashed_holder_is_found(): void {
+		$other = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'other',
+			]
+		);
+		$this->ledger->record( $other, 'shared' );
+		$this->ledger->record( $this->about, 'shared' );
+		wp_trash_post( $this->about );
+
+		$this->assertSame( $other, $this->ledger->find( 'page', 'shared' ), 'The newer entry is on a page in the trash.' );
+		wp_trash_post( $other );
+		$this->ledger->record_root( 'page', 'shared' );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'shared' ), 'With every holder in the trash, the root list answers.' );
+		$this->assertTrue( $this->ledger->held_in_trash( 'page', '/Shared/' ) );
+		$this->assertFalse( $this->ledger->held_in_trash( 'page', 'elsewhere' ) );
+		$this->assertFalse( $this->ledger->held_in_trash( 'page', '' ) );
+	}
 ```
 
 In `tests/phpunit/ChangeListenerTest.php`, add `use HierarchyGuard\Trash\Markers;` after `use HierarchyGuard\Settings;`, and add to the end of the class:
@@ -1631,7 +1630,11 @@ In `tests/phpunit/ChangeListenerTest.php`, add `use HierarchyGuard\Trash\Markers
 	}
 ```
 
-Add to the end of the class in `tests/phpunit/ResolverTest.php`:
+In `tests/phpunit/ResolverTest.php`, `test_a_trashed_ledger_hit_gives_way_to_a_shorter_prefix()`, replace the precondition line `$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ), 'Precondition: the longest prefix maps to the trashed page.' );` with:
+```php
+		$this->assertTrue( $this->ledger->held_in_trash( 'page', 'company/about' ), 'Precondition: the longest prefix is held only by the trashed page.' );
+```
+and add to the end of the class:
 ```php
 	public function test_a_hit_under_a_trashed_ancestor_gives_way_to_a_shorter_prefix(): void {
 		wp_update_post(
@@ -1661,11 +1664,12 @@ Add to the end of the class in `tests/phpunit/ResolverTest.php`:
 	public function test_an_old_parent_path_whose_page_is_only_in_the_trash_does_not_redirect(): void {
 		global $wpdb;
 
-		// What the trash flow leaves behind: about in the trash, team moved up, one alias on company.
+		// What the trash flow leaves behind: about in the trash, team moved up, the alias on company, and about's own path on about.
 		wp_trash_post( $this->about );
 		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
 		clean_post_cache( $this->team );
 		$this->ledger->record_alias( 'page', $this->company, 'company/about' );
+		$this->ledger->record( $this->about, 'company/about' );
 
 		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID, 'Subpage URLs still resolve.' );
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'A browser would keep a 301 to the grandparent after a restore.' );
@@ -1674,12 +1678,65 @@ Add to the end of the class in `tests/phpunit/ResolverTest.php`:
 
 		$this->assertSame( $this->company, $this->resolver->resolve( 'page', 'company/about' )->ID, 'Once the page is gone for good, its old URL leads to its parent.' );
 	}
+
+	public function test_an_older_path_of_a_page_in_the_trash_does_not_redirect_either(): void {
+		global $wpdb;
+
+		$this->ledger->record( $this->about, 'company/about-us' );
+		wp_trash_post( $this->about );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
+		clean_post_cache( $this->team );
+		foreach ( [ 'company/about', 'company/about-us' ] as $path ) {
+			$this->ledger->record_alias( 'page', $this->company, $path );
+			$this->ledger->record( $this->about, $path );
+		}
+
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about-us/team' )->ID, 'The live alias wins over the trashed page holding the same path.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ) );
+	}
+
+	public function test_a_page_in_the_trash_under_a_trashed_parent_does_not_redirect(): void {
+		global $wpdb;
+
+		$leadership = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'leadership',
+				'post_parent' => $this->team,
+			]
+		);
+		wp_trash_post( $this->about );
+		wp_trash_post( $this->team );
+		// What the trash flow leaves when team's subpages move past both trashed pages.
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $leadership ] );
+		clean_post_cache( $leadership );
+		$this->ledger->record_alias( 'page', $this->company, 'company/about/team' );
+		$this->ledger->record( $this->team, 'company/about/team' );
+
+		$this->assertSame( $leadership, $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
+	}
+
+	public function test_a_top_level_page_in_the_trash_does_not_hide_its_root_list_alias(): void {
+		global $wpdb;
+
+		// What the trash flow leaves when a top-level page's subpages become top level.
+		wp_trash_post( $this->company );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => 0 ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+		$this->ledger->record_alias( 'page', 0, 'company' );
+		$this->ledger->record( $this->company, 'company' );
+
+		$this->assertSame( $this->about, $this->resolver->resolve( 'page', 'company/about' )->ID );
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company' ) );
+	}
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npm run test:php -- --filter 'LedgerTest|ChangeListenerTest|ResolverTest'`
-Expected: `Call to undefined method HierarchyGuard\Ledger::record_alias()` (and `forget_alias()`, `deferred()`), and failures in `test_emptying_a_trashed_tree_keeps_paths_through_trashed_ancestors` (resolves to null) and `test_deleting_a_subpage_trashed_with_its_parent_records_nothing` (a path is recorded on about).
+Expected: `Call to undefined method HierarchyGuard\Ledger::record_alias()` (and `forget_alias()`, `deferred()`, `held_in_trash()`), and failures in `test_emptying_a_trashed_tree_keeps_paths_through_trashed_ancestors` (resolves to null) and `test_deleting_a_subpage_trashed_with_its_parent_records_nothing` (a path is recorded on about).
 
 - [ ] **Step 3: Extend the Ledger**
 
@@ -1848,6 +1905,43 @@ Replace the `bump()` method (docblock included) with:
 	}
 ```
 
+Add this method after `find()`:
+```php
+	/**
+	 * Whether a post in the trash holds this path. The trash flow records a
+	 * trashed page's own paths on it, so a hit here means the page at an old
+	 * parent path is only in the trash.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return bool
+	 */
+	public function held_in_trash( string $post_type, string $path ): bool {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; only for a 404 on an exact old parent path.
+		$id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
+
+		return null !== $id;
+	}
+```
+
+In `seek()`, change the docblock's first line to `Single index seek on the hashed key, newest entry first. Posts in the trash do not count: their entries mean the page is only in the trash, which held_in_trash() answers.` and the query's condition from `WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT 1` to:
+```php
+WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status <> 'trash' ORDER BY pm.meta_id DESC LIMIT 1
+```
+
 - [ ] **Step 4: Use untrashed_uri() and record_alias() in Change_Listener**
 
 In `includes/HierarchyGuard/Change_Listener.php`:
@@ -1887,8 +1981,6 @@ Then delete the `pre_trash_uri()` method with its docblock, leaving one blank li
 
 In `includes/HierarchyGuard/Redirects/Resolver.php`:
 
-Add `use HierarchyGuard\Subtree;` after `use HierarchyGuard\Paths;`.
-
 Replace the docblock sentence `Ledger hits on trashed posts are skipped so a shorter prefix can match.` in `rewrite_once()` with:
 ```php
 	 * Ledger hits on trashed posts, or on posts under a trashed ancestor, are
@@ -1908,7 +2000,7 @@ to:
 				if ( Paths::has_trashed_segment( $base ) ) {
 					continue;
 				}
-				if ( count( $segments ) === $length && Subtree::has_trashed_child( $hit, (string) end( $segments ), $post_type ) ) {
+				if ( count( $segments ) === $length && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
 					return null;
 				}
 			}
@@ -1917,7 +2009,7 @@ to:
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter 'LedgerTest|ChangeListenerTest|ResolverTest'`
-Expected: `OK (48 tests, 122 assertions)`, including the engine's existing pre-trash, numbered-slug and strip-suffix tests, which now run through `untrashed_uri()`.
+Expected: `OK (52 tests, 134 assertions)`, including the engine's existing pre-trash, numbered-slug and strip-suffix tests, which now run through `untrashed_uri()`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -2546,6 +2638,7 @@ final class OperationsReparentTest extends WP_UnitTestCase {
 		$this->operations->run( $this->job() );
 
 		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->ids['company'] ) );
+		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->ids['about'] ), 'The page in the trash holds its own path.' );
 		$this->assertSame(
 			[
 				[
@@ -2954,8 +3047,8 @@ final class Operations {
 
 	/**
 	 * Records the old parent paths on the new parent, once per job and only
-	 * after a subpage actually moved. Remembers them on the root so the
-	 * restore can remove them.
+	 * after a subpage actually moved, and on the root itself. Remembers the
+	 * aliases on the root so the restore can remove them.
 	 *
 	 * @param array<string,mixed> $job Job.
 	 * @return array<string,mixed>
@@ -2976,6 +3069,8 @@ final class Operations {
 					'path' => (string) $path,
 				];
 			}
+			// Held by the page in the trash, the path tells the resolver not to redirect it.
+			$this->ledger->record( $root, (string) $path );
 		}
 
 		if ( [] !== $written ) {
@@ -3048,7 +3143,7 @@ final class Operations {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter OperationsReparentTest`
-Expected: `OK (13 tests, 49 assertions)`.
+Expected: `OK (13 tests, 50 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -3340,7 +3435,7 @@ and add this method after `step_reparent()`:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter 'OperationsReparentTest|OperationsTrashTest'`
-Expected: `OK (21 tests, 93 assertions)`.
+Expected: `OK (21 tests, 94 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -3812,27 +3907,19 @@ and add these methods after `step_trash_children()`:
 
 	/**
 	 * Removes the aliases the trash recorded, now that the subpages are back.
-	 * If the root came back at another path, its old path is recorded on it.
+	 * The page's own entry for the path it is back at goes too; an entry for a
+	 * path it no longer has stays and leads to it.
 	 *
 	 * @param array<string,mixed> $job Finished restore job.
 	 */
 	private function finish_restore( array $job ): void {
 		$root    = (int) $job['root'];
 		$aliases = get_post_meta( $root, Markers::ALIASES, true );
-		if ( ! is_array( $aliases ) || [] === $aliases ) {
-			return;
-		}
-
-		$post = get_post( $root );
-		$path = $post instanceof WP_Post ? Paths::uri( $post ) : '';
-		foreach ( $aliases as $alias ) {
-			$old = Paths::normalize( (string) ( $alias['path'] ?? '' ) );
-			$this->ledger->forget_alias( (string) $job['post_type'], (int) ( $alias['to'] ?? 0 ), $old );
-			if ( '' !== $path && '' !== $old && $path !== $old && $this->recording() ) {
-				$this->ledger->record( $root, $old );
-			}
+		foreach ( is_array( $aliases ) ? $aliases : [] as $alias ) {
+			$this->ledger->forget_alias( (string) $job['post_type'], (int) ( $alias['to'] ?? 0 ), (string) ( $alias['path'] ?? '' ) );
 		}
 		delete_post_meta( $root, Markers::ALIASES );
+		$this->ledger->prune( $root );
 	}
 
 	/**
@@ -3863,7 +3950,7 @@ and add these methods after `step_trash_children()`:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter Operations`
-Expected: `OK (34 tests, 133 assertions)`.
+Expected: `OK (34 tests, 134 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -7021,7 +7108,7 @@ Subpages move with a direct database update, the way core moves them when it del
 - [ ] **Step 6: Run the full suite and lint**
 
 Run: `npm run test:php` and `composer lint`
-Expected: `OK (236 tests, 801 assertions)`; lint exit 0.
+Expected: `OK (239 tests, 811 assertions)`; lint exit 0.
 
 - [ ] **Step 7: Verify on the dev site**
 
