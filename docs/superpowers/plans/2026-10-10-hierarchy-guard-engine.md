@@ -23,7 +23,9 @@
 - Recording happens only when the old URL was publicly reachable: pretty permalinks on, supported type, status `publish`, non-empty slug, no `__trashed` segment, neither status in `trash`.
 - Copy rules for any admin string: sentence case, the word "subpages", no product name inside UI text, no exclamation marks.
 - Coding standard: WordPress-Extra (short array syntax allowed, PSR-4 file names allowed), WordPress-VIP-Go, PHPCompatibilityWP with `testVersion 8.0-`. Every file declares `strict_types=1`.
-- Every commit message ends with the line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Every commit message ends with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- `composer lint` must exit 0, warnings included. Run `composer lint:fix` (phpcbf) first; formatting-only changes phpcbf makes (array line breaks, `=`/`=>` alignment) are expected and are not deviations from this plan. Resolve any remaining warning with a behavior-neutral change, or with a targeted `// phpcs:ignore Sniff.Name.Code -- reason` on the line before. If PHPCS misbehaves under the host's PHP 8.5, run it in the container instead: `npx wp-env run cli --env-cwd=wp-content/plugins/hierarchy-guard vendor/bin/phpcs`.
+- Tests that check a hook is registered must find the plugin's own object in `$GLOBALS['wp_filter'][ $hook ]->callbacks[ $priority ]`; `has_action( $hook )` alone is always true because core registers callbacks on the same hooks.
 
 ## Review Focus
 
@@ -81,15 +83,9 @@ Each class has one job. `Paths` and `Ledger` are pure data helpers with no hooks
 - Produces: constants `HIERARCHY_GUARD_VERSION`, `HIERARCHY_GUARD_FILE`, `HIERARCHY_GUARD_DIR`; class `HierarchyGuard\Plugin` with `public static function instance(): Plugin` and `public function register(): void`. Later tasks add lines to `register()`.
 - Produces: the commands `npm run env:start`, `npm run test:php` (accepts `-- --filter Name`), `composer lint`.
 
-- [ ] **Step 1: Commit the spec snapshot and this plan**
+- [ ] **Step 1: Confirm the docs commit exists**
 
-```bash
-cd ~/Work/hierarchy-guard
-git add docs
-git commit -m "docs: add design spec snapshot and engine implementation plan
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
-```
+The controller already committed `docs/` (spec snapshot and this plan) on branch `engine`. Run `git log --oneline -1 -- docs` and confirm a `docs: add design spec snapshot…` commit is listed. Do not re-commit it.
 
 - [ ] **Step 2: Create composer.json**
 
@@ -341,12 +337,12 @@ define( 'HIERARCHY_GUARD_DIR', __DIR__ );
  * Composer dependencies, so vendor/autoload.php is only needed for tests.
  */
 spl_autoload_register(
-	static function ( string $class ): void {
+	static function ( string $class_name ): void {
 		$prefix = 'HierarchyGuard\\';
-		if ( 0 !== strpos( $class, $prefix ) ) {
+		if ( 0 !== strpos( $class_name, $prefix ) ) {
 			return;
 		}
-		$relative = substr( $class, strlen( $prefix ) );
+		$relative = substr( $class_name, strlen( $prefix ) );
 		$file     = __DIR__ . '/includes/HierarchyGuard/' . str_replace( '\\', '/', $relative ) . '.php';
 		if ( is_readable( $file ) ) {
 			require $file;
@@ -506,7 +502,7 @@ Expected: no errors. (If PHPCS reports `WordPress.Files.FileName` anywhere, the 
 git add -A
 git commit -m "chore: scaffold plugin, wp-env test harness and coding standards
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -925,7 +921,7 @@ Expected: no errors.
 git add includes tests
 git commit -m "feat: settings option and supported post types
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1149,7 +1145,7 @@ final class Paths {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter PathsTest`
-Expected: `OK (8 tests, ...)`.
+Expected: `OK (7 tests, ...)`.
 
 Run: `composer lint`
 Expected: no errors.
@@ -1160,7 +1156,7 @@ Expected: no errors.
 git add includes tests
 git commit -m "feat: path normalization and slug-chain URIs
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1563,7 +1559,7 @@ Expected: no errors.
 git add includes tests
 git commit -m "feat: old-path ledger with hashed keys, root list and cached lookups
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1634,8 +1630,22 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 	}
 
 	public function test_listener_is_registered_by_the_plugin(): void {
-		$this->assertNotFalse( has_action( 'post_updated' ) );
-		$this->assertNotFalse( has_action( 'before_delete_post' ) );
+		$this->assertTrue( $this->plugin_listener_on( 'post_updated', 'on_post_updated' ) );
+		$this->assertTrue( $this->plugin_listener_on( 'before_delete_post', 'on_before_delete' ) );
+	}
+
+	/**
+	 * Whether a Change_Listener method is hooked at priority 10. has_action( $hook )
+	 * alone proves nothing: core registers its own callbacks on both hooks.
+	 */
+	private function plugin_listener_on( string $hook, string $method ): bool {
+		global $wp_filter;
+		foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
+			if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Change_Listener && $method === $callback['function'][1] ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public function test_renaming_a_page_records_its_old_path_only_on_that_page(): void {
@@ -1926,7 +1936,7 @@ Expected: no errors.
 git add includes tests
 git commit -m "feat: record URL changes from post_updated and before_delete_post
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2054,14 +2064,22 @@ final class ResolverTest extends WP_UnitTestCase {
 	}
 
 	public function test_attachment_with_same_slug_does_not_hijack(): void {
-		self::factory()->attachment->create_object(
+		global $wpdb;
+
+		$attachment = self::factory()->attachment->create_object(
 			[
 				'file'           => 'team.jpg',
 				'post_parent'    => $this->about,
-				'post_name'      => 'team',
 				'post_mime_type' => 'image/jpeg',
 			]
 		);
+		// Core's wp_unique_post_slug() would suffix a same-slug sibling, so force the
+		// collision the way an import or a direct database edit can produce it.
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'team' ], [ 'ID' => $attachment ] );
+		clean_post_cache( $attachment );
+		$this->assertSame( 'team', get_post( $attachment )->post_name, 'Precondition: attachment and page share the slug.' );
+		$this->assertSame( $this->about, (int) get_post( $attachment )->post_parent, 'Precondition: attachment and page share the parent.' );
+
 		wp_update_post( [ 'ID' => $this->about, 'post_name' => 'company-info' ] );
 
 		$target = $this->resolver->resolve( 'page', 'company/about/team' );
@@ -2201,7 +2219,7 @@ Expected: no errors.
 git add includes tests
 git commit -m "feat: longest-prefix resolver for old hierarchical paths
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2214,8 +2232,10 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Test: `tests/phpunit/ServerTest.php`
 
 **Interfaces:**
-- Consumes: `Resolver::resolve()`, `Settings::serve_redirects()`, `Post_Types::is_supported()`, `Paths::normalize()`.
+- Consumes: `Resolver::resolve()`, `Settings::serve_redirects()`, `Post_Types::supported()`, `Post_Types::is_supported()`, `Paths::normalize()`.
 - Produces: `Server::__construct( Resolver $resolver )`; `register(): void` (hooks `template_redirect` at priority 9); `target_for_current_request(): ?array{url: string, status: int}`; `maybe_redirect(): void`.
+
+**Why the path comes from `$wp->request`, not query vars.** With the default `/%postname%/` structure WordPress uses verbose page rules: `WP::parse_request()` skips every page rule whose path `get_page_by_path()` cannot find. An old page path therefore matches no page rule, and the 404 either carries no `pagename` at all (three or more segments) or matches a post-attachment rule and carries `attachment=<last segment>` (two segments). `$wp->request` always holds the requested path with the home path removed. The server strips the `index.php` root and the pagination, feed and embed suffixes from it, tries hierarchical custom types whose rewrite prefix the path starts with, then pages, and re-applies the suffixes to the target.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2331,6 +2351,30 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( user_trailingslashit( trailingslashit( get_permalink( $this->team ) ) . '2', 'single_paged' ), $target['url'] );
 	}
 
+	public function test_preserves_feed_and_embed_suffixes(): void {
+		wp_update_post( [ 'ID' => $this->about, 'post_name' => 'company-info' ] );
+
+		$this->go_to( '/company/about/team/feed/' );
+		$this->assertTrue( is_404() );
+		$this->assertSame( get_post_comments_feed_link( $this->team ), $this->server->target_for_current_request()['url'] );
+
+		$this->go_to( '/company/about/team/embed/' );
+		$this->assertTrue( is_404() );
+		$this->assertSame( user_trailingslashit( trailingslashit( get_permalink( $this->team ) ) . 'embed', 'embed' ), $this->server->target_for_current_request()['url'] );
+	}
+
+	public function test_two_segment_old_url_redirects(): void {
+		// Two segments match core's post-attachment rule, so the 404 carries
+		// attachment=design rather than a pagename. The path must still resolve.
+		$services = self::factory()->post->create( [ 'post_type' => 'page', 'post_name' => 'services' ] );
+		$design   = self::factory()->post->create( [ 'post_type' => 'page', 'post_name' => 'design', 'post_parent' => $services ] );
+		wp_update_post( [ 'ID' => $services, 'post_name' => 'solutions' ] );
+
+		$this->go_to( '/services/design/' );
+		$this->assertTrue( is_404() );
+		$this->assertSame( get_permalink( $design ), $this->server->target_for_current_request()['url'] );
+	}
+
 	public function test_status_and_url_filters_apply_and_offsite_urls_are_refused(): void {
 		wp_update_post( [ 'ID' => $this->about, 'post_name' => 'company-info' ] );
 		$this->go_to( '/company/about/team/' );
@@ -2434,7 +2478,9 @@ namespace HierarchyGuard\Redirects;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
-use WP_Query;
+use WP;
+use WP_Post;
+use WP_Rewrite;
 
 /**
  * Runs on 404s at template_redirect priority 9, before redirect_canonical()
@@ -2487,7 +2533,7 @@ final class Server {
 	 * @return array{url:string,status:int}|null
 	 */
 	public function target_for_current_request(): ?array {
-		global $wp_query;
+		global $wp;
 
 		if ( ! is_404() || ! Settings::serve_redirects() ) {
 			return null;
@@ -2498,16 +2544,22 @@ final class Server {
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
 			return null;
 		}
-		if ( ! $wp_query instanceof WP_Query ) {
+		if ( ! $wp instanceof WP ) {
 			return null;
 		}
 
-		[ $post_type, $path ] = $this->requested( $wp_query );
-		if ( null === $post_type || '' === $path ) {
+		$request = $this->parse_request( (string) $wp->request );
+		if ( '' === $request['path'] ) {
 			return null;
 		}
 
-		$target = $this->resolver->resolve( $post_type, $path );
+		$target = null;
+		foreach ( $this->candidates( $request['path'] ) as [ $post_type, $path ] ) {
+			$target = $this->resolver->resolve( $post_type, $path );
+			if ( null !== $target ) {
+				break;
+			}
+		}
 		if ( null === $target ) {
 			return null;
 		}
@@ -2516,16 +2568,16 @@ final class Server {
 		if ( ! is_string( $url ) || '' === $url ) {
 			return null;
 		}
-		$url = $this->reapply_suffixes( $url );
+		$url = $this->reapply_suffixes( $url, $target, $request );
 
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
 		 *
-		 * @param int      $status Status code, 301 by default.
-		 * @param \WP_Post $target The post being redirected to.
-		 * @param string   $path   The requested path.
+		 * @param int     $status Status code, 301 by default.
+		 * @param WP_Post $target The post being redirected to.
+		 * @param string  $path   The requested path, normalized, suffixes removed.
 		 */
-		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', 301, $target, $path );
+		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', 301, $target, $request['path'] );
 		if ( ! in_array( $status, [ 301, 302, 307, 308 ], true ) ) {
 			$status = 301;
 		}
@@ -2533,11 +2585,11 @@ final class Server {
 		/**
 		 * Filters the URL a hierarchy redirect sends visitors to.
 		 *
-		 * @param string   $url    Target URL.
-		 * @param \WP_Post $target The post being redirected to.
-		 * @param string   $path   The requested path.
+		 * @param string  $url    Target URL.
+		 * @param WP_Post $target The post being redirected to.
+		 * @param string  $path   The requested path, normalized, suffixes removed.
 		 */
-		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $target, $path );
+		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $target, $request['path'] );
 		$url = wp_validate_redirect( $url, '' );
 		if ( '' === $url ) {
 			return null;
@@ -2550,57 +2602,119 @@ final class Server {
 	}
 
 	/**
-	 * Which supported post type was requested and the path within it.
+	 * Splits $wp->request into the page path and the suffixes core appends to it.
 	 *
-	 * Reads $wp_query->query, the untouched copy of the query vars: get_posts()
-	 * truncates pagename to its last segment in query_vars by the time a 404 is known.
-	 *
-	 * @param WP_Query $query The main query.
-	 * @return array{0:?string,1:string}
+	 * @param string $request Home path removed, slashes trimmed, still percent-encoded.
+	 * @return array{path:string,page:int,paged:int,feed:string,embed:bool}
 	 */
-	private function requested( WP_Query $query ): array {
-		$vars = is_array( $query->query ) ? $query->query : [];
+	private function parse_request( string $request ): array {
+		global $wp_rewrite;
 
-		$post_type = $vars['post_type'] ?? '';
-		if ( is_array( $post_type ) ) {
-			$post_type = 1 === count( $post_type ) ? (string) reset( $post_type ) : '';
+		$index = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->index : 'index.php';
+		$feeds = $wp_rewrite instanceof WP_Rewrite ? (array) $wp_rewrite->feeds : [ 'feed', 'rdf', 'rss', 'rss2', 'atom' ];
+		$base  = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->pagination_base : 'page';
+		$parts = [
+			'path'  => '',
+			'page'  => 0,
+			'paged' => 0,
+			'feed'  => '',
+			'embed' => false,
+		];
+
+		$request = trim( $request, '/' );
+		if ( str_starts_with( $request, $index . '/' ) ) {
+			$request = substr( $request, strlen( $index ) + 1 );
 		}
-		$post_type = (string) $post_type;
 
-		if ( '' !== $post_type && Post_Types::is_supported( $post_type ) ) {
-			$object = get_post_type_object( $post_type );
-			$var    = $object && is_string( $object->query_var ) && '' !== $object->query_var ? $object->query_var : $post_type;
-			$path   = (string) ( $vars[ $var ] ?? $vars['name'] ?? '' );
-			return [ $post_type, Paths::normalize( $path ) ];
+		$segments = array_values( array_filter( explode( '/', $request ), static fn( string $segment ): bool => '' !== $segment ) );
+		$last     = (string) end( $segments );
+
+		if ( 'embed' === $last ) {
+			array_pop( $segments );
+			$parts['embed'] = true;
+		} elseif ( in_array( $last, $feeds, true ) ) {
+			array_pop( $segments );
+			$parts['feed'] = 'feed' === $last ? get_default_feed() : $last;
+			if ( 'feed' === end( $segments ) ) {
+				array_pop( $segments );
+			}
+		} elseif ( '' !== $last && ctype_digit( $last ) ) {
+			array_pop( $segments );
+			if ( end( $segments ) === $base ) {
+				array_pop( $segments );
+				$parts['paged'] = (int) $last;
+			} else {
+				$parts['page'] = (int) $last;
+			}
 		}
 
-		if ( ! empty( $vars['pagename'] ) && Post_Types::is_supported( 'page' ) ) {
-			return [ 'page', Paths::normalize( (string) $vars['pagename'] ) ];
-		}
+		$parts['path'] = Paths::normalize( implode( '/', $segments ) );
 
-		return [ null, '' ];
+		return $parts;
 	}
 
 	/**
-	 * Re-applies pagination and embed suffixes the way wp_old_slug_redirect() does.
+	 * The (post type, path) pairs a request path could stand for, most specific first:
+	 * hierarchical custom types whose rewrite prefix the path starts with, then pages.
 	 *
-	 * @param string $url Target permalink.
+	 * @param string $path Normalized request path, suffixes removed.
+	 * @return array<int,array{0:string,1:string}>
 	 */
-	private function reapply_suffixes( string $url ): string {
-		$page = (int) get_query_var( 'page' );
-		if ( $page > 1 ) {
-			return user_trailingslashit( trailingslashit( $url ) . $page, 'single_paged' );
+	private function candidates( string $path ): array {
+		global $wp_rewrite;
+
+		$typed = [];
+		if ( $wp_rewrite instanceof WP_Rewrite ) {
+			foreach ( Post_Types::supported() as $type ) {
+				if ( 'page' === $type ) {
+					continue;
+				}
+				$struct = $wp_rewrite->get_extra_permastruct( $type );
+				if ( ! is_string( $struct ) || '' === $struct ) {
+					continue;
+				}
+				$prefix = trim( str_replace( '%' . $type . '%', '', $struct ), '/' );
+				if ( str_starts_with( $prefix, $wp_rewrite->index . '/' ) ) {
+					$prefix = substr( $prefix, strlen( $wp_rewrite->index ) + 1 );
+				}
+				$prefix = Paths::normalize( $prefix );
+				if ( '' !== $prefix && str_starts_with( $path, $prefix . '/' ) ) {
+					$typed[] = [ strlen( $prefix ), $type, substr( $path, strlen( $prefix ) + 1 ) ];
+				}
+			}
 		}
 
-		$paged = (int) get_query_var( 'paged' );
-		if ( $paged > 1 ) {
-			return user_trailingslashit( trailingslashit( $url ) . 'page/' . $paged, 'paged' );
+		usort( $typed, static fn( array $a, array $b ): int => $b[0] <=> $a[0] );
+
+		$candidates = array_map( static fn( array $entry ): array => [ $entry[1], $entry[2] ], $typed );
+		if ( Post_Types::is_supported( 'page' ) ) {
+			$candidates[] = [ 'page', $path ];
 		}
 
-		if ( is_embed() ) {
+		return $candidates;
+	}
+
+	/**
+	 * Re-applies the suffixes parse_request() set aside, in the shapes core builds them.
+	 *
+	 * @param string                                                       $url     Target permalink.
+	 * @param WP_Post                                                      $target  Target post.
+	 * @param array{path:string,page:int,paged:int,feed:string,embed:bool} $request Parsed request.
+	 */
+	private function reapply_suffixes( string $url, WP_Post $target, array $request ): string {
+		if ( $request['embed'] ) {
 			return user_trailingslashit( trailingslashit( $url ) . 'embed', 'embed' );
 		}
-
+		if ( '' !== $request['feed'] ) {
+			$feed = get_post_comments_feed_link( $target->ID, $request['feed'] );
+			return '' !== $feed ? $feed : $url;
+		}
+		if ( $request['paged'] > 1 ) {
+			return user_trailingslashit( trailingslashit( $url ) . 'page/' . $request['paged'], 'paged' );
+		}
+		if ( $request['page'] > 1 ) {
+			return user_trailingslashit( trailingslashit( $url ) . $request['page'], 'single_paged' );
+		}
 		return $url;
 	}
 
@@ -2624,9 +2738,9 @@ Add after the Change_Listener line in `includes/HierarchyGuard/Plugin.php`:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter ServerTest`
-Expected: `OK (12 tests, ...)`.
+Expected: `OK (13 tests, ...)`.
 
-If `test_preserves_pagination` fails on the exact trailing slash, compare against what `wp_old_slug_redirect()` produces for a paged post on this WordPress version and adjust the `user_trailingslashit()` type argument in both the test and `reapply_suffixes()` so they agree; the contract is "same shape as core".
+If `test_preserves_pagination` fails on the exact trailing slash, compare against what `wp_old_slug_redirect()` produces for a paged post on this WordPress version and adjust the `user_trailingslashit()` type argument in both the test and `reapply_suffixes()` so they agree; the contract is "same shape as core". If any test's `is_404()` precondition fails, stop and report it with the request path and `$GLOBALS['wp']->matched_rule`; do not change the precondition.
 
 Run: `npm run test:php`
 Expected: all green.
@@ -2640,7 +2754,7 @@ Expected: no errors.
 git add includes tests
 git commit -m "feat: serve 301s for old hierarchical URLs at template_redirect priority 9
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -2775,7 +2889,15 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 	}
 
 	public function test_registration_is_hooked_to_admin_init_by_the_plugin(): void {
-		$this->assertNotFalse( has_action( 'admin_init' ) );
+		global $wp_filter;
+
+		$found = false;
+		foreach ( $wp_filter['admin_init']->callbacks[10] ?? [] as $callback ) {
+			if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Settings_Section && 'add' === $callback['function'][1] ) {
+				$found = true;
+			}
+		}
+		$this->assertTrue( $found, 'has_action( "admin_init" ) alone proves nothing: core hooks admin_init too.' );
 	}
 
 	public function test_post_types_field_lists_hierarchical_types_with_current_state(): void {
@@ -3113,7 +3235,7 @@ Open http://localhost:8888/wp-admin/options-writing.php (admin / password). Expe
 git add includes tests
 git commit -m "feat: redirect plugin detection and Page hierarchy section on Settings > Writing
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -3197,7 +3319,7 @@ Expected: prints the line count and `jobs:  lint:  test:` style output with no e
 git add .github
 git commit -m "ci: run PHPCS and PHPUnit across PHP and WordPress versions
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 If a GitHub remote exists, push and confirm both jobs are green on the Actions tab. If not, creating the remote is the user's call; leave the branch local.
@@ -3206,10 +3328,10 @@ If a GitHub remote exists, push and confirm both jobs are green on the Actions t
 
 ## Self-Review
 
-**Spec coverage for this plan's scope.** Recording URL changes (Paths, Ledger, Change_Listener): Tasks 3 to 5. Root list for children that become top level: Task 4 and Task 5. Serving a redirect at priority 9, GET/HEAD only, normalized query vars, viewable target, validated URL, filters: Tasks 6 and 7. Provider detection with CSV layout slugs: Task 8. Settings option with three keys, sanitization, defaults, Settings › Writing section with the spec's copy: Tasks 2 and 8. Supported post types with filter and settings override: Task 2. Cache group with its own last-changed key and 12-hour misses: Task 4. PHPCS with WordPress, VIP and PHPCompatibility, PHPUnit in wp-env, CI matrix including WP 6.6: Tasks 1 and 9. Out of this plan, by design: trash flow and markers, batch jobs, REST routes, editor panel, list table, tree view, DataViews, notices, CSV export, uninstall, readme.
+**Spec coverage for this plan's scope.** Recording URL changes (Paths, Ledger, Change_Listener): Tasks 3 to 5. Root list for children that become top level: Task 4 and Task 5. Serving a redirect at priority 9, GET/HEAD only, path from `$wp->request` with suffixes set aside and re-applied, viewable target, validated URL, filters: Tasks 6 and 7. Provider detection with CSV layout slugs: Task 8. Settings option with three keys, sanitization, defaults, Settings › Writing section with the spec's copy: Tasks 2 and 8. Supported post types with filter and settings override: Task 2. Cache group with its own last-changed key and 12-hour misses: Task 4. PHPCS with WordPress, VIP and PHPCompatibility, PHPUnit in wp-env, CI matrix including WP 6.6: Tasks 1 and 9. Out of this plan, by design: trash flow and markers, batch jobs, REST routes, editor panel, list table, tree view, DataViews, notices, CSV export, uninstall, readme.
 
 **Placeholder scan.** No TBD/TODO. Every code step has full code. The only conditional instruction is the trailing-slash reconciliation note in Task 7 Step 5, which names the exact function and argument to adjust.
 
-**Type consistency.** `Ledger::find()` returns `?int` with `0` for root and `null` for miss; `Resolver::rewrite_once()` treats `null` as skip and `0` as empty base; tests assert `0` and `null` accordingly. `Settings::sanitize( $input ): array` matches the `register_setting` callback in Task 8. `Change_Listener::__construct( Ledger )`, `Resolver::__construct( Ledger )`, `Server::__construct( Resolver )`, `Settings_Section::__construct( Providers )` match their uses in `Plugin::register()`. `Paths::normalize()` is the single normalization used by `Ledger::record()`, `Ledger::find()`, `Resolver::resolve()` and `Server::requested()`.
+**Type consistency.** `Ledger::find()` returns `?int` with `0` for root and `null` for miss; `Resolver::rewrite_once()` treats `null` as skip and `0` as empty base; tests assert `0` and `null` accordingly. `Settings::sanitize( $input ): array` matches the `register_setting` callback in Task 8. `Change_Listener::__construct( Ledger )`, `Resolver::__construct( Ledger )`, `Server::__construct( Resolver )`, `Settings_Section::__construct( Providers )` match their uses in `Plugin::register()`. `Paths::normalize()` is the single normalization used by `Ledger::record()`, `Ledger::find()`, `Resolver::resolve()` and `Server::parse_request()`.
 
 **Review Focus.** Each of the five lines names its test and task; all five tests are present in Tasks 3, 5, 6 and 7.
