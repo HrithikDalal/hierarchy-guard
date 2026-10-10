@@ -313,6 +313,9 @@ final class Trash_Handler {
 			$this->dispatch( 'cleanup', Operations::new_job( Operations::TYPE_CLEANUP, $id, (string) $post->post_type, 0 ) );
 			return;
 		}
+		if ( null === $this->queue->load( $id ) && null === $this->queue->offered( $id ) ) {
+			return;
+		}
 		$token = $this->queue->lock( $id );
 		if ( 0 === $token ) {
 			// A run holds the lock; it finds the page gone at its next step and ends the job.

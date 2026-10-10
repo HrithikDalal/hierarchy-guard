@@ -603,4 +603,21 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'The batch found the page gone and ended the job.' );
 	}
+
+	public function test_deleting_a_page_without_a_job_writes_no_lock(): void {
+		$locks = [];
+		add_filter(
+			'query',
+			static function ( $sql ) use ( &$locks ) {
+				if ( str_contains( (string) $sql, 'hierarchy_guard_lock_' ) ) {
+					$locks[] = $sql;
+				}
+				return $sql;
+			}
+		);
+
+		wp_delete_post( $this->ids['history'], true );
+
+		$this->assertSame( [], $locks );
+	}
 }
