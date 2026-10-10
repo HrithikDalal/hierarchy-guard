@@ -53,7 +53,30 @@ final class Paths {
 	 * @return string Normalized path, for example `company/about`.
 	 */
 	public static function uri( WP_Post $post ): string {
-		$segments  = [ (string) $post->post_name ];
+		return self::chain( $post, static fn( WP_Post $item ): string => (string) $item->post_name );
+	}
+
+	/**
+	 * The path a post had before it or any ancestor was trashed: each segment
+	 * carrying core's trashed suffix gets back the slug core kept in
+	 * _wp_desired_post_slug, or the slug with the suffix stripped.
+	 *
+	 * @param WP_Post $post Post object.
+	 * @return string Normalized path.
+	 */
+	public static function untrashed_uri( WP_Post $post ): string {
+		return self::chain( $post, static fn( WP_Post $item ): string => self::untrashed_slug( $item ) );
+	}
+
+	/**
+	 * Joins the slugs of a post and its ancestors, root first.
+	 *
+	 * @param WP_Post  $post    Post object.
+	 * @param callable $slug_of Returns the slug to use for one post.
+	 * @return string Normalized path.
+	 */
+	private static function chain( WP_Post $post, callable $slug_of ): string {
+		$segments  = [ (string) $slug_of( $post ) ];
 		$parent_id = (int) $post->post_parent;
 		$guard     = 0;
 
@@ -63,13 +86,29 @@ final class Paths {
 			if ( ! $parent instanceof WP_Post ) {
 				break;
 			}
-			if ( '' !== (string) $parent->post_name ) {
-				array_unshift( $segments, (string) $parent->post_name );
+			$slug = (string) $slug_of( $parent );
+			if ( '' !== $slug ) {
+				array_unshift( $segments, $slug );
 			}
 			$parent_id = (int) $parent->post_parent;
 		}
 
 		return self::normalize( implode( '/', $segments ) );
+	}
+
+	/**
+	 * A post's slug as it was before core trashed it.
+	 *
+	 * @param WP_Post $post Post object.
+	 * @return string
+	 */
+	private static function untrashed_slug( WP_Post $post ): string {
+		$slug = (string) $post->post_name;
+		if ( ! self::is_trashed_slug( $slug ) ) {
+			return $slug;
+		}
+		$desired = (string) get_post_meta( $post->ID, '_wp_desired_post_slug', true );
+		return '' !== $desired ? $desired : self::strip_trashed_suffix( $slug );
 	}
 
 	/**
