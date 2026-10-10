@@ -23,6 +23,13 @@ final class SettingsTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 	}
 
+	public function tear_down(): void {
+		unregister_post_type( 'hg_docs' );
+		unregister_post_type( 'hg_later' );
+		Post_Types::reset();
+		parent::tear_down();
+	}
+
 	public function test_defaults_when_nothing_is_stored(): void {
 		$this->assertNull( Settings::get( 'post_types' ) );
 		$this->assertSame( Settings::POLICY_REPARENT, Settings::trash_policy() );
@@ -43,6 +50,14 @@ final class SettingsTest extends WP_UnitTestCase {
 	}
 
 	public function test_sanitize_normalizes_input(): void {
+		// A second public hierarchical type, so selecting only pages is a partial choice.
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
 		$clean = Settings::sanitize(
 			[
 				'post_types'      => [ 'page', 'bogus', '<script>' ],
@@ -95,6 +110,28 @@ final class SettingsTest extends WP_UnitTestCase {
 
 		$this->assertSame( Settings::sanitize( $input ), get_option( Settings::OPTION ) );
 		$this->assertFalse( Settings::serve_redirects() );
+	}
+
+	public function test_every_type_checked_keeps_the_all_types_default(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		$every = [ '', 'page', 'hg_docs' ];
+		$this->assertNull( Settings::sanitize( [ 'post_types' => $every ] )['post_types'] );
+
+		update_option( Settings::OPTION, [ 'post_types' => $every ] );
+		register_post_type(
+			'hg_later',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		$this->assertContains( 'hg_later', Post_Types::supported(), 'A type registered after saving with every box checked is supported.' );
 	}
 
 	public function test_sanitize_without_checkboxes_means_none_selected(): void {

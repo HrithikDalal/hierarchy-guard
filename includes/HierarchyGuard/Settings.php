@@ -64,6 +64,8 @@ final class Settings {
 
 	/**
 	 * Whether the built-in redirect server is on. Reads the strings "false" and "0" as off.
+	 *
+	 * @return bool
 	 */
 	public static function serve_redirects(): bool {
 		return rest_sanitize_boolean( self::get( 'serve_redirects' ) );
@@ -71,6 +73,8 @@ final class Settings {
 
 	/**
 	 * The policy used when no dialog could ask the editor.
+	 *
+	 * @return string One of Settings::POLICIES.
 	 */
 	public static function trash_policy(): string {
 		$policy = (string) self::get( 'trash_policy' );
@@ -110,6 +114,10 @@ final class Settings {
 			$types = array_map( 'sanitize_key', (array) $input['post_types'] );
 			$types = array_filter( $types, static fn( string $type ): bool => '' !== $type );
 			$types = array_values( array_intersect( $types, $public ) );
+			// Every box checked keeps the default: all types, including ones registered later.
+			if ( [] !== $public && [] === array_diff( $public, $types ) ) {
+				$types = null;
+			}
 		}
 
 		$policy = isset( $input['trash_policy'] ) ? sanitize_key( (string) $input['trash_policy'] ) : self::POLICY_REPARENT;
