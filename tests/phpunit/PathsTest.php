@@ -125,6 +125,19 @@ final class PathsTest extends WP_UnitTestCase {
 		$this->assertSame( get_page_uri( $child ), Paths::uri( get_post( $child ) ) );
 	}
 
+	public function test_trashed_slug_helpers_match_numbered_suffixes(): void {
+		foreach ( [ 'about__trashed', 'about__trashed-2', 'about__trashed-12' ] as $slug ) {
+			$this->assertTrue( Paths::is_trashed_slug( $slug ), $slug );
+		}
+		foreach ( [ 'about', 'trashed', 'about-trashed', 'about__trashed-x', '__trashed-about' ] as $slug ) {
+			$this->assertFalse( Paths::is_trashed_slug( $slug ), $slug );
+		}
+		$this->assertSame( 'about', Paths::strip_trashed_suffix( 'about__trashed-2' ) );
+		$this->assertSame( 'about', Paths::strip_trashed_suffix( 'about__trashed' ) );
+		$this->assertTrue( Paths::has_trashed_segment( 'company/about__trashed-2/team' ) );
+		$this->assertFalse( Paths::has_trashed_segment( 'company/about/team' ) );
+	}
+
 	public function test_is_recordable_requires_pretty_permalinks(): void {
 		$page = get_post(
 			self::factory()->post->create(

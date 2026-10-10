@@ -58,6 +58,8 @@ final class Change_Listener {
 
 	/**
 	 * Whether recording is suspended.
+	 *
+	 * @return bool
 	 */
 	public static function is_suspended(): bool {
 		return self::$suspended;
@@ -116,7 +118,7 @@ final class Change_Listener {
 		$paths = array_unique(
 			array_filter(
 				$paths,
-				static fn( string $path ): bool => '' !== $path && ! str_contains( $path, '__trashed' )
+				static fn( string $path ): bool => '' !== $path && ! Paths::has_trashed_segment( $path )
 			)
 		);
 
@@ -131,21 +133,22 @@ final class Change_Listener {
 	}
 
 	/**
-	 * The path a trashed post had before core suffixed its slug with __trashed,
-	 * built from the slug core kept in _wp_desired_post_slug. Empty when the
-	 * slug carries no suffix.
+	 * The path a trashed post had before core suffixed its slug with __trashed
+	 * (or __trashed-N), built from the slug core kept in _wp_desired_post_slug.
+	 * Empty when the slug carries no suffix.
 	 *
 	 * @param WP_Post $post Post being deleted.
+	 * @return string
 	 */
 	private function pre_trash_uri( WP_Post $post ): string {
 		$name = (string) $post->post_name;
-		if ( ! str_ends_with( $name, '__trashed' ) ) {
+		if ( ! Paths::is_trashed_slug( $name ) ) {
 			return '';
 		}
 
 		$slug = (string) get_post_meta( $post->ID, '_wp_desired_post_slug', true );
 		if ( '' === $slug ) {
-			$slug = substr( $name, 0, -strlen( '__trashed' ) );
+			$slug = Paths::strip_trashed_suffix( $name );
 		}
 		if ( '' === $slug ) {
 			return '';

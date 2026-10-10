@@ -265,4 +265,39 @@ final class ResolverTest extends WP_UnitTestCase {
 
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
 	}
+
+	public function test_a_target_under_a_numbered_trashed_ancestor_is_refused(): void {
+		// Trash an earlier "about" first, so core has to suffix this one __trashed-2.
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-tmp',
+			]
+		);
+		$earlier = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $this->company,
+			]
+		);
+		wp_trash_post( $earlier );
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->team,
+				'post_name' => 'crew',
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( 'about__trashed-2', get_post( $this->about )->post_name, 'Precondition: core numbered the trashed slug.' );
+		$this->assertSame( 'company/about__trashed-2/crew', get_page_uri( $this->team ), 'Precondition: the live subpage sits under it.' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
+	}
 }

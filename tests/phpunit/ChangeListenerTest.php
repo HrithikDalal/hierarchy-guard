@@ -236,6 +236,37 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$this->assertSame( $this->team, ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team' )->ID );
 	}
 
+	public function test_emptying_the_trash_records_the_pre_trash_path_of_a_numbered_slug(): void {
+		// Trash an earlier "about" first, so core has to suffix this one __trashed-2.
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-tmp',
+			]
+		);
+		$earlier = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $this->company,
+			]
+		);
+		wp_trash_post( $earlier );
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about',
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( 'about__trashed-2', get_post( $this->about )->post_name, 'Precondition: core numbered the trashed slug.' );
+
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->company, $this->ledger->find( 'page', 'company/about' ) );
+		$this->assertSame( $this->team, ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team' )->ID );
+	}
+
 	public function test_emptying_the_trash_without_the_desired_slug_strips_the_suffix(): void {
 		wp_trash_post( $this->about );
 		delete_post_meta( $this->about, '_wp_desired_post_slug' );

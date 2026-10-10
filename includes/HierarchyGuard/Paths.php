@@ -20,9 +20,17 @@ use WP_Post;
 final class Paths {
 
 	/**
+	 * Core's trashed-slug suffix: `__trashed`, or `__trashed-2` and up when
+	 * wp_unique_post_slug() had to disambiguate it from a trashed sibling.
+	 */
+	private const TRASHED_SUFFIX = '/__trashed(?:-\d+)?$/';
+
+	/**
 	 * Normalizes a path the way get_page_by_path() does before matching.
+	 * Unlike core, empty segments are dropped.
 	 *
 	 * @param string $path Raw or decoded path, with or without slashes.
+	 * @return string Normalized path without leading, trailing or empty segments.
 	 */
 	public static function normalize( string $path ): string {
 		$path  = rawurlencode( urldecode( $path ) );
@@ -42,6 +50,7 @@ final class Paths {
 	 * an empty slug are skipped, matching get_page_uri().
 	 *
 	 * @param WP_Post $post Post object.
+	 * @return string Normalized path, for example `company/about`.
 	 */
 	public static function uri( WP_Post $post ): string {
 		$segments  = [ (string) $post->post_name ];
@@ -67,6 +76,7 @@ final class Paths {
 	 * Whether this post's URL is publicly reachable and worth recording.
 	 *
 	 * @param WP_Post $post Post object, usually the before-state.
+	 * @return bool
 	 */
 	public static function is_recordable( WP_Post $post ): bool {
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
@@ -79,9 +89,45 @@ final class Paths {
 			return false;
 		}
 		$name = (string) $post->post_name;
-		if ( '' === $name || str_ends_with( $name, '__trashed' ) ) {
+		if ( '' === $name || self::is_trashed_slug( $name ) ) {
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * Whether a slug carries core's trashed suffix.
+	 *
+	 * @param string $slug Post slug or path segment.
+	 * @return bool
+	 */
+	public static function is_trashed_slug( string $slug ): bool {
+		return 1 === preg_match( self::TRASHED_SUFFIX, $slug );
+	}
+
+	/**
+	 * Removes core's trashed suffix from a slug.
+	 *
+	 * @param string $slug Post slug.
+	 * @return string The slug without `__trashed` or `__trashed-N`.
+	 */
+	public static function strip_trashed_suffix( string $slug ): string {
+		return (string) preg_replace( self::TRASHED_SUFFIX, '', $slug );
+	}
+
+	/**
+	 * Whether any segment of a path is a trashed slug. Such a URL stops working
+	 * when the trash is emptied, so it must never become a cached 301 target.
+	 *
+	 * @param string $path Normalized path.
+	 * @return bool
+	 */
+	public static function has_trashed_segment( string $path ): bool {
+		foreach ( explode( '/', $path ) as $segment ) {
+			if ( self::is_trashed_slug( $segment ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

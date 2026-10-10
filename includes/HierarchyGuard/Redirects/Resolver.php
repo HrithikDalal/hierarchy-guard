@@ -41,6 +41,7 @@ final class Resolver {
 	 *
 	 * @param string $post_type Post type the request was for.
 	 * @param string $path      Requested path, any form.
+	 * @return WP_Post|null
 	 */
 	public function resolve( string $post_type, string $path ): ?WP_Post {
 		$path = Paths::normalize( $path );
@@ -62,7 +63,7 @@ final class Resolver {
 				$target instanceof WP_Post
 				&& $target->post_type === $post_type
 				&& is_post_publicly_viewable( $target )
-				&& ! self::has_trashed_segment( Paths::uri( $target ) )
+				&& ! Paths::has_trashed_segment( Paths::uri( $target ) )
 			) {
 				return $target;
 			}
@@ -71,21 +72,6 @@ final class Resolver {
 		}
 
 		return null;
-	}
-
-	/**
-	 * Whether a path runs through a trashed page. Such a URL stops working when
-	 * the trash is emptied, so it must never become a cached 301 target.
-	 *
-	 * @param string $path Normalized path.
-	 */
-	private static function has_trashed_segment( string $path ): bool {
-		foreach ( explode( '/', $path ) as $segment ) {
-			if ( str_ends_with( $segment, '__trashed' ) ) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	/**
