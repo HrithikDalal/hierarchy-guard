@@ -68,6 +68,7 @@ final class Plugin {
 		$processor  = new Batch\Processor( $queue, $operations, $log );
 		$processor->register();
 		( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
+		( new Admin\Trash_Notice( $log ) )->register();
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'hierarchy-guard', new Batch\CLI_Command( $queue, $processor ) );
