@@ -55,5 +55,6 @@ final class Plugin {
 
 		$ledger = new Ledger();
 		( new Change_Listener( $ledger ) )->register();
+		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
 	}
 }
