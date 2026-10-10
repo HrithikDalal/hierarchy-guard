@@ -201,17 +201,48 @@ final class Queue {
 	}
 
 	/**
-	 * Schedules a run for a root through Action Scheduler when a site has it, else WP-Cron.
+	 * Renews a root's lock for another LOCK_TTL, if this process still holds it.
 	 *
-	 * @param int  $root_id      Root page.
-	 * @param bool $continuation True when called from the run itself, which Action Scheduler still lists as in progress.
+	 * @param int $root_id Root page.
+	 * @param int $token   Token from lock() or the last extend().
+	 * @return int The new token, or 0 when another process has taken the lock over.
+	 */
+	public function extend( int $root_id, int $token ): int {
+		global $wpdb;
+
+		// Always a new value, so the update changes a row only while the lock is still ours.
+		$renewed = max( time() + self::LOCK_TTL, $token + 1 );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Renews only this process's own lock.
+		$updated = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", (string) $renewed, self::lock_option( $root_id ), (string) $token ) );
+
+		return 1 === $updated ? $renewed : 0;
+	}
+
+	/**
+	 * Schedules a run for a root through Action Scheduler when a site has it,
+	 * else WP-Cron. A run already in progress does not count: it may be the one
+	 * about to finish.
+	 *
+	 * @param int $root_id Root page.
 	 * @return bool Whether a run is scheduled.
 	 */
-	public function schedule( int $root_id, bool $continuation = false ): bool {
+	public function schedule( int $root_id ): bool {
 		$args = [ $root_id ];
 
 		if ( function_exists( 'as_enqueue_async_action' ) ) {
-			if ( ! $continuation && function_exists( 'as_has_scheduled_action' ) && as_has_scheduled_action( self::HOOK, $args, self::GROUP ) ) {
+			$pending = function_exists( 'as_get_scheduled_actions' )
+				? as_get_scheduled_actions(
+					[
+						'hook'     => self::HOOK,
+						'args'     => $args,
+						'group'    => self::GROUP,
+						'status'   => 'pending',
+						'per_page' => 1,
+					],
+					'ids'
+				)
+				: [];
+			if ( [] !== $pending ) {
 				return true;
 			}
 			if ( as_enqueue_async_action( self::HOOK, $args, self::GROUP ) ) {

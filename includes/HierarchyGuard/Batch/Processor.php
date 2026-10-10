@@ -84,7 +84,7 @@ final class Processor {
 	 * @param int $time_limit Seconds before the run stops and schedules the rest, 0 for no limit.
 	 * @param int $pause_ms   Pause between steps, in milliseconds.
 	 * @param int $max_steps  Steps before the run stops and schedules the rest, 0 for no limit.
-	 * @return array{state:string,job:array<string,mixed>|null} state is busy, idle, done or queued; job is the last one stepped.
+	 * @return array{state:string,job:array<string,mixed>|null} state is busy (another run holds the lock, or took it over), idle, done or queued; job is the last one stepped.
 	 */
 	public function run( int $root_id, int $time_limit = 0, int $pause_ms = 0, int $max_steps = 0 ): array {
 		$token = $this->queue->lock( $root_id );
@@ -100,6 +100,7 @@ final class Processor {
 		$job   = null;
 		$last  = null;
 		$steps = 0;
+		$lost  = false;
 		try {
 			while ( true ) {
 				$job = $this->adopt( $root_id, $job );
@@ -107,8 +108,14 @@ final class Processor {
 					break;
 				}
 
-				$job  = Ledger::deferred( fn() => $this->operations->step( $job, Operations::threshold(), Operations::core_threshold() ) );
-				$last = $job;
+				$job   = Ledger::deferred( fn() => $this->operations->step( $job, Operations::threshold(), Operations::core_threshold() ) );
+				$last  = $job;
+				$token = $this->queue->extend( $root_id, $token );
+				if ( 0 === $token ) {
+					// Another run took the lock over after it expired; that run owns the job now.
+					$lost = true;
+					break;
+				}
 				$done = ! empty( $job['finished'] );
 				$this->log->update( (int) $job['user'], (string) $job['change'], $root_id, $job['counts'], $job['kept_ids'], $job['ids'], ! $done );
 
@@ -139,9 +146,16 @@ final class Processor {
 			$this->queue->unlock( $root_id, $token );
 		}
 
+		if ( $lost ) {
+			return [
+				'state' => 'busy',
+				'job'   => $last,
+			];
+		}
+
 		// Scheduled after the unlock, so the next run cannot find this one still holding it.
 		if ( null !== $job || null !== $this->queue->offered( $root_id ) ) {
-			$this->queue->schedule( $root_id, true );
+			$this->queue->schedule( $root_id );
 		}
 
 		if ( null !== $job ) {

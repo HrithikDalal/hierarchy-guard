@@ -229,4 +229,22 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ) );
 		$this->assertNotNull( $this->queue->load( $this->ids['about'] ), 'Jobs survive deactivation.' );
 	}
+
+	public function test_a_run_whose_lock_was_taken_over_stops_without_writing(): void {
+		$root = $this->ids['about'];
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function () use ( $root ): void {
+				global $wpdb;
+				// Another process holds the lock now, as if this run had held it too long.
+				$wpdb->update( $wpdb->options, [ 'option_value' => (string) ( time() + 999 ) ], [ 'option_name' => Queue::lock_option( $root ) ] );
+			}
+		);
+
+		$result = $this->processor->run( $root );
+
+		$this->assertSame( 'busy', $result['state'] );
+		$this->assertSame( 0, $this->queue->load( $root )['counts']['moved'], 'The slot keeps what the new holder will read.' );
+		$this->assertFalse( $this->queue->is_scheduled( $root ) );
+	}
 }

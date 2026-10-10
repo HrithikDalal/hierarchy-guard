@@ -108,4 +108,18 @@ final class QueueTest extends WP_UnitTestCase {
 		$this->assertTrue( $this->queue->is_scheduled( 10 ) );
 		$this->assertCount( 1, array_filter( _get_cron_array(), static fn( array $hooks ): bool => isset( $hooks[ Queue::HOOK ] ) ) );
 	}
+
+	public function test_extend_renews_only_the_owner_s_lock(): void {
+		global $wpdb;
+
+		$token   = $this->queue->lock( 10 );
+		$renewed = $this->queue->extend( 10, $token );
+		$this->assertGreaterThan( $token, $renewed );
+
+		$wpdb->update( $wpdb->options, [ 'option_value' => (string) ( time() - 1 ) ], [ 'option_name' => Queue::lock_option( 10 ) ] );
+		$other = $this->queue->lock( 10 );
+
+		$this->assertSame( 0, $this->queue->extend( 10, $renewed ), 'A run whose lock was taken over learns it.' );
+		$this->assertGreaterThan( $other, $this->queue->extend( 10, $other ) );
+	}
 }
