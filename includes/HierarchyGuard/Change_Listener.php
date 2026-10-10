@@ -112,7 +112,7 @@ final class Change_Listener {
 			return;
 		}
 
-		$paths = array_merge( [ Paths::uri( $post ) ], $this->ledger->paths_for( $post_id ) );
+		$paths = array_merge( [ Paths::uri( $post ), $this->pre_trash_uri( $post ) ], $this->ledger->paths_for( $post_id ) );
 		$paths = array_unique(
 			array_filter(
 				$paths,
@@ -128,6 +128,33 @@ final class Change_Listener {
 				$this->ledger->record_root( (string) $post->post_type, $path );
 			}
 		}
+	}
+
+	/**
+	 * The path a trashed post had before core suffixed its slug with __trashed,
+	 * built from the slug core kept in _wp_desired_post_slug. Empty when the
+	 * slug carries no suffix.
+	 *
+	 * @param WP_Post $post Post being deleted.
+	 */
+	private function pre_trash_uri( WP_Post $post ): string {
+		$name = (string) $post->post_name;
+		if ( ! str_ends_with( $name, '__trashed' ) ) {
+			return '';
+		}
+
+		$slug = (string) get_post_meta( $post->ID, '_wp_desired_post_slug', true );
+		if ( '' === $slug ) {
+			$slug = substr( $name, 0, -strlen( '__trashed' ) );
+		}
+		if ( '' === $slug ) {
+			return '';
+		}
+
+		$before            = clone $post;
+		$before->post_name = $slug;
+
+		return Paths::uri( $before );
 	}
 
 	/**

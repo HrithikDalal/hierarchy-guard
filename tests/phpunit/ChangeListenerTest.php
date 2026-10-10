@@ -12,6 +12,7 @@ namespace HierarchyGuard\Tests;
 use HierarchyGuard\Change_Listener;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use WP_UnitTestCase;
 
@@ -222,6 +223,26 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		foreach ( $paths as $path ) {
 			$this->assertStringNotContainsString( '__trashed', $path );
 		}
+	}
+
+	public function test_emptying_the_trash_records_the_pre_trash_path(): void {
+		wp_trash_post( $this->about );
+		$this->assertSame( 'about', get_post_meta( $this->about, '_wp_desired_post_slug', true ), 'Precondition: core keeps the slug it replaced with about__trashed.' );
+		$this->assertSame( $this->about, (int) get_post( $this->team )->post_parent, 'Precondition: the subpage stays under the trashed parent.' );
+
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->company, $this->ledger->find( 'page', 'company/about' ) );
+		$this->assertSame( $this->team, ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team' )->ID );
+	}
+
+	public function test_emptying_the_trash_without_the_desired_slug_strips_the_suffix(): void {
+		wp_trash_post( $this->about );
+		delete_post_meta( $this->about, '_wp_desired_post_slug' );
+
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->company, $this->ledger->find( 'page', 'company/about' ) );
 	}
 
 	public function test_deleting_a_parent_whose_only_child_is_trashed_records_its_path(): void {
