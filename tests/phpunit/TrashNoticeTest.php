@@ -307,4 +307,22 @@ final class TrashNoticeTest extends WP_UnitTestCase {
 		);
 		$this->assertSame( [ '1 subpage moved back under its parent.', '2 subpages were restored too.' ], Trash_Notice::sentences( $change ) );
 	}
+
+	public function test_the_fallback_sentence_agrees_with_the_cap(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
+
+		$change = $this->change(
+			'trash',
+			[
+				$this->about(
+					[
+						'fallback' => true,
+						'counts'   => [ 'moved' => 2 ],
+					]
+				),
+			]
+		);
+
+		$this->assertContains( 'There was more than 1 subpage, so they moved up instead of going to the Trash.', Trash_Notice::sentences( $change ) );
+	}
 }

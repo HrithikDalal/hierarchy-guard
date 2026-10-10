@@ -161,8 +161,9 @@ final class Trash_Notice {
 
 		foreach ( $roots as $root ) {
 			if ( ! empty( $root['fallback'] ) ) {
+				$cap = Subtree::count_cap();
 				/* translators: %s: the most subpages the plugin trashes together with a page, such as 1,000. */
-				$out[] = sprintf( __( 'There were more than %s subpages, so they moved up instead of going to the Trash.', 'hierarchy-guard' ), number_format_i18n( Subtree::count_cap() ) );
+				$out[] = sprintf( _n( 'There was more than %s subpage, so they moved up instead of going to the Trash.', 'There were more than %s subpages, so they moved up instead of going to the Trash.', $cap, 'hierarchy-guard' ), number_format_i18n( $cap ) );
 				break;
 			}
 		}
