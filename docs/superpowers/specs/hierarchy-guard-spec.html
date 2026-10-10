@@ -1,0 +1,788 @@
+<title>Hierarchy Guard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  /* Layout: one 72ch reading column; figures and admin mockups widen to 960px. */
+  --bg:#f4f6f8; --surface:#ffffff; --fg:#19222c; --muted:#5d6977; --line:#d9e0e7;
+  --accent:#0f766e; --accent-soft:#d8efea; --accent-ink:#0b5a54;
+  --warn:#9a5b00; --warn-soft:#fbf1dc; --danger:#b3261e; --danger-soft:#fbe5e3; --ok:#1f7a3f;
+  --display:"Bricolage Grotesque","Avenir Next","Helvetica Neue",Arial,sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f141a; --surface:#161d26; --fg:#e5eaef; --muted:#9aa6b3; --line:#28333f;
+    --accent:#4fc4b3; --accent-soft:#12302c; --accent-ink:#8fe0d4;
+    --warn:#efb760; --warn-soft:#30250f; --danger:#f2938b; --danger-soft:#3a1816; --ok:#6fd392;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --surface:#161d26; --fg:#e5eaef; --muted:#9aa6b3; --line:#28333f;
+  --accent:#4fc4b3; --accent-soft:#12302c; --accent-ink:#8fe0d4;
+  --warn:#efb760; --warn-soft:#30250f; --danger:#f2938b; --danger-soft:#3a1816; --ok:#6fd392;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.55;margin:0;padding-inline:16px;padding-block:0 72px;-webkit-font-smoothing:antialiased}
+a{color:var(--accent-ink)}
+.wrap{max-width:960px;margin:0 auto}
+.prose{max-width:72ch}
+.prose p{margin:0 0 14px}
+.prose ul,.prose ol{margin:0 0 14px;padding-left:22px}
+.prose li{margin:0 0 6px}
+code,kbd{font-family:var(--mono);font-size:.9em;background:var(--accent-soft);color:var(--accent-ink);padding:1px 5px;border-radius:4px}
+pre{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;overflow-x:auto;margin:16px 0}
+pre code{background:none;color:inherit;padding:0;font-size:inherit}
+header.hero{padding-block:52px 28px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(38px,6.5vw,64px);line-height:1;letter-spacing:-.015em;margin:12px 0 16px;text-wrap:balance}
+.lede{font-size:19px;color:var(--muted);max-width:58ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:6px 22px;font-size:14px;color:var(--muted);margin-top:22px}
+.meta b{color:var(--fg);font-weight:500}
+nav.toc{display:flex;flex-wrap:wrap;gap:8px;padding-block:18px;border-bottom:1px solid var(--line)}
+nav.toc a{font-size:13px;text-decoration:none;color:var(--fg);border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 11px}
+nav.toc a:hover,nav.toc a:focus-visible{border-color:var(--accent);outline:none}
+section{padding-block:44px;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:0}
+h2{font-family:var(--display);font-weight:700;font-size:clamp(28px,3.8vw,36px);line-height:1.08;letter-spacing:-.01em;margin:0 0 16px;text-wrap:balance}
+h3{font-family:var(--display);font-weight:700;font-size:21px;line-height:1.2;margin:30px 0 10px;text-wrap:balance}
+h4{font-size:15px;margin:22px 0 8px;letter-spacing:.02em}
+.sec-eyebrow{display:block;margin-bottom:8px}
+table.t{width:100%;border-collapse:collapse;font-size:14.5px;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+table.t th,table.t td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+table.t th{font-weight:600;font-size:13px;letter-spacing:.02em;color:var(--muted);background:var(--bg)}
+table.t tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scroll table.t{min-width:620px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin:20px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 18px 16px}
+.card h3{margin:0 0 8px;font-size:19px}
+.card p{margin:0;font-size:14.5px;color:var(--muted)}
+.card .tag{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-soft);border-radius:4px;padding:2px 7px;margin-bottom:10px}
+.pill{display:inline-block;font-size:12px;font-weight:500;border-radius:999px;padding:1px 9px;white-space:nowrap}
+.pill.bad{background:var(--danger-soft);color:var(--danger)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.good{background:var(--accent-soft);color:var(--accent-ink)}
+.pill.neutral{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.callout{border-left:3px solid var(--accent);background:var(--surface);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0;font-size:15px}
+.callout.warn{border-left-color:var(--warn)}
+figure{margin:26px 0}
+figure .scroll{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:14px}
+svg.dg{display:block;width:100%;height:auto;min-width:660px;color:var(--fg)}
+.dg text{fill:currentColor;font-family:var(--body);font-size:12px}
+.dg .b{font-weight:600;font-size:12.5px}
+.dg .sub{font-family:var(--mono);font-size:10.5px;opacity:.74}
+.dg .lab{font-family:var(--mono);font-size:10.5px;opacity:.8}
+.dg .box{fill:var(--surface);stroke:currentColor;stroke-width:1.2}
+.dg .dec{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.4}
+.dg .note{fill:none;stroke:currentColor;stroke-width:1;stroke-dasharray:4 4;opacity:.7}
+.dg .ar{stroke:currentColor;stroke-width:1.3;fill:none}
+.dg .bus{stroke:currentColor;stroke-width:1.3;fill:none;opacity:.6}
+.dg .dash{stroke-dasharray:5 4}
+figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
+
+/* ---- WordPress admin mockups: fixed light palette matching the default "Modern" admin scheme ---- */
+.mock{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface);margin:20px 0}
+.mock-bar{font-family:var(--mono);font-size:12px;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.mock-bar::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--line);flex:none}
+.wp{--w-bg:#f0f0f1;--w-panel:#ffffff;--w-text:#1e1e1e;--w-muted:#757575;--w-line:#c3c4c7;--w-line-soft:#dcdcde;--w-accent:#3858e9;--w-accent-ink:#2145e6;--w-warn:#f0b849;--w-ok:#4ab866;--w-err:#cc1818;--w-warn-bg:#fef8ee;--w-ok-bg:#eff9f1;--w-code:#f0f0f0;--w-dark:#1e1e1e;
+  background:var(--w-bg);color:var(--w-text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen-Sans,Ubuntu,Cantarell,"Helvetica Neue",sans-serif;font-size:13px;line-height:1.54;padding:16px;color-scheme:light}
+.wp a{color:var(--w-accent);text-decoration:underline;cursor:default}
+.wp code{font-family:Menlo,Consolas,monospace;font-size:12px;background:var(--w-code);color:var(--w-text);padding:1px 4px;border-radius:2px}
+.wp strong{color:var(--w-text)}
+.w-muted{color:var(--w-muted)}
+.w-small{font-size:12px}
+.w-h1{font-size:23px;font-weight:400;color:var(--w-text);display:inline-block;margin-right:8px;line-height:1.3}
+.w-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.w-subtitle{font-size:14px;color:var(--w-text);padding-left:4px}
+.w-subtitle a{margin-left:6px;font-size:13px}
+.w-btn,.w-btn-sec,.w-btn-ter{display:inline-block;font-size:13px;line-height:2.3;padding:0 12px;border-radius:2px;text-decoration:none!important;white-space:nowrap}
+.w-btn{background:var(--w-accent);color:#fff!important;border:1px solid var(--w-accent)}
+.w-btn.danger{background:var(--w-err);border-color:var(--w-err)}
+.w-btn-sec{background:#fff;color:var(--w-accent)!important;border:1px solid var(--w-accent)}
+.w-btn-ter{color:var(--w-accent)!important;border:1px solid transparent}
+.w-note{background:var(--w-panel);border:1px solid var(--w-line);border-left-width:4px;padding:8px 12px;margin:0 0 12px;border-radius:0 2px 2px 0}
+.w-note.warn{border-left-color:var(--w-warn)}
+.w-note.ok{border-left-color:var(--w-ok)}
+.w-note p{margin:0 0 6px}
+.w-note p:last-child{margin:0}
+.w-cnotice{border-left:4px solid var(--w-warn);background:var(--w-warn-bg);padding:8px 12px;font-size:13px}
+/* sidebar panel */
+.wp.w-side{padding:0;background:var(--w-panel)}
+.w-ph{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;font-weight:500;font-size:13px;border-bottom:1px solid var(--w-line-soft)}
+.w-pb{padding:16px}
+.w-stack{display:flex;flex-direction:column;gap:16px}
+.w-lbl{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.04em;color:var(--w-text);margin:0 0 6px}
+.w-lbl .w-norm{text-transform:none;letter-spacing:0;font-weight:400;font-size:12px;margin-left:6px}
+.w-crumb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.w-crumb span{color:var(--w-muted)}
+.w-rows{display:flex;flex-direction:column;gap:8px}
+.w-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.w-row .w-muted{font-size:12px;white-space:nowrap}
+.w-link{font-size:13px}
+/* list table */
+.w-views{list-style:none;margin:0 0 10px;padding:0;display:flex;flex-wrap:wrap;gap:0 6px;font-size:13px}
+.w-views .cur{color:var(--w-text);font-weight:600;text-decoration:none}
+.w-filters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.w-select,.w-input{display:inline-block;border:1px solid #8c8f94;border-radius:2px;background:#fff;padding:0 10px;line-height:2.15;color:var(--w-text);font-size:13px}
+.w-input{min-width:220px;color:var(--w-muted)}
+.w-tablewrap{overflow-x:auto}
+.w-table{width:100%;border-collapse:collapse;background:var(--w-panel);border:1px solid var(--w-line);min-width:620px}
+.w-table th,.w-table td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--w-line-soft);vertical-align:top;font-size:13px}
+.w-table th{font-weight:400;color:var(--w-text);border-bottom-color:var(--w-line)}
+.w-table tr:last-child td{border-bottom:0}
+.w-box{display:inline-block;width:16px;height:16px;border:1px solid #8c8f94;border-radius:2px;background:#fff;vertical-align:middle;position:relative}
+.w-box.on{border-color:var(--w-accent);background:var(--w-accent)}
+.w-box.on::after{content:"";position:absolute;left:4px;top:1px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.w-radio{display:inline-block;width:16px;height:16px;border:1px solid #8c8f94;border-radius:50%;background:#fff;vertical-align:middle;position:relative;flex:none}
+.w-radio.on{border-color:var(--w-accent)}
+.w-radio.on::after{content:"";position:absolute;left:3px;top:3px;width:8px;height:8px;border-radius:50%;background:var(--w-accent)}
+.w-row-title{font-weight:600;text-decoration:none!important}
+.w-actions{font-size:12px;color:var(--w-muted);margin-top:3px}
+.w-actions a{text-decoration:none}
+.w-actions .w-trash{color:var(--w-err)}
+.w-indent1{padding-left:28px!important}
+.w-indent2{padding-left:52px!important}
+.w-indent3{padding-left:76px!important}
+.w-tw{display:inline-block;width:16px;color:var(--w-muted);margin-right:4px}
+/* modal */
+.wp.w-dim{background:rgba(30,30,30,.72);padding:28px 16px}
+.w-modal{background:var(--w-panel);border-radius:4px;box-shadow:0 10px 40px rgba(0,0,0,.35);margin:0 auto;padding:24px 24px 20px;display:flex;flex-direction:column;gap:16px}
+.w-modal.small{max-width:440px}
+.w-modal.medium{max-width:640px}
+.w-modal p{margin:0}
+.w-dialog-title{font-size:15px;font-weight:600}
+.w-radios{display:flex;flex-direction:column;gap:10px;padding:4px 0 0}
+.w-radios label{display:flex;gap:10px;align-items:flex-start}
+.w-radios .w-muted{font-size:12px;display:block}
+.w-btns{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.w-btns.left{justify-content:flex-start}
+.w-snack{display:inline-flex;gap:16px;align-items:center;background:var(--w-dark);color:#fff;border-radius:2px;padding:12px 16px;font-size:13px;box-shadow:0 2px 6px rgba(0,0,0,.25);max-width:100%}
+.w-snack a{color:#fff;text-decoration:underline}
+.w-variants{display:grid;gap:10px;margin-top:14px}
+.w-variants .w-note{margin:0}
+/* settings */
+.w-form{width:100%;border-collapse:collapse}
+.w-form th{width:200px;text-align:left;vertical-align:top;padding:16px 10px 16px 0;font-weight:600}
+.w-form td{padding:16px 0}
+.w-form label{display:flex;gap:8px;align-items:center;margin:0 0 8px}
+.w-form .w-muted{font-size:13px;margin-top:4px}
+@media (max-width:560px){.w-form th{display:block;width:auto;padding-bottom:0}.w-form td{display:block;padding-top:6px}}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="hero">
+  <span class="eyebrow">WordPress plugin · design spec</span>
+  <h1>Hierarchy Guard</h1>
+  <p class="lede">Shows the parent and child structure of pages inside wp-admin, warns before a slug change, re-parenting, or trash breaks a subtree, and makes sure every old URL has somewhere to go.</p>
+  <div class="meta">
+    <span>Status <b>Design agreed, ready to plan</b></span>
+    <span>Date <b>10 October 2026</b></span>
+    <span>Slug <b>hierarchy-guard</b></span>
+    <span>Requires <b>WordPress 6.6 · PHP 8.0</b></span>
+    <span>Target <b>WordPress.org directory</b></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#problem">The problem</a>
+  <a href="#decisions">Decisions</a>
+  <a href="#features">Features and mockups</a>
+  <a href="#flows">How it works</a>
+  <a href="#data">Data model</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#testing">Testing</a>
+  <a href="#build">Build order</a>
+  <a href="#scope">Out of scope</a>
+</nav>
+
+
+<section id="problem">
+  <span class="eyebrow sec-eyebrow">Why this exists</span>
+  <h2>WordPress protects posts from broken URLs. It does nothing for pages.</h2>
+  <div class="prose">
+    <p>Pages and every hierarchical custom post type build their URLs from the chain of ancestors. Change one link in that chain and every URL below it changes too. Core knows how to redirect an old slug for a post, but both halves of that mechanism explicitly skip hierarchical types. The behaviour below was verified by reading WordPress 6.8.1 source.</p>
+  </div>
+  <div class="scroll">
+  <table class="t">
+    <thead><tr><th>Editor action</th><th>What core does</th><th>What visitors get</th></tr></thead>
+    <tbody>
+      <tr><td>Rename a page's slug</td><td>Nothing stored. <code>wp_check_for_changed_slugs()</code> returns early for hierarchical types, and <code>wp_old_slug_redirect()</code> returns early as well.</td><td><span class="pill bad">404</span> on the page's old URL and on every subpage's old URL</td></tr>
+      <tr><td>Move a page under a different parent</td><td>Nothing stored, same two early returns.</td><td><span class="pill bad">404</span> across the whole moved subtree</td></tr>
+      <tr><td>Trash a parent</td><td>The parent's slug is renamed to <code>about__trashed</code> on the spot. Subpages are left attached to it. No warning.</td><td><span class="pill bad">404</span> on <code>/about/team/</code> while the subpage stays live at <code>/about__trashed/team/</code></td></tr>
+      <tr><td>Delete a parent permanently</td><td>Subpages are re-parented to the grandparent with a direct database update. No per-child hook fires.</td><td><span class="pill bad">404</span> on every subpage's old URL, silently</td></tr>
+      <tr><td>Visit any of those dead URLs</td><td><code>redirect_canonical()</code> guesses: it matches the last path segment with <code>LIKE 'team%'</code> across every public post type and redirects to the first row it finds, in no particular order.</td><td><span class="pill warn">Lottery</span> sometimes the right page, sometimes an unrelated post whose slug starts the same way</td></tr>
+      <tr><td>Look at the hierarchy in wp-admin</td><td>The Pages list indents subpages only in the default unsorted, unfiltered view. The block editor shows a Parent dropdown and never shows subpages.</td><td><span class="pill warn">Blind</span> editors act without seeing what sits underneath</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose">
+    <p style="margin-top:18px">Core ticket <a href="https://core.trac.wordpress.org/ticket/4328">#4328</a> has tracked this since 2007. Three plugins each cover one slice: <a href="https://wordpress.org/plugins/easy-hierarchy/">Easy Hierarchy</a> adds a tree view and a parent column, <a href="https://wordpress.org/plugins/completely-delete/">Completely Delete</a> trashes and restores children with the parent, and <a href="https://root.packagist.org/packages/helsingborg-stad/redirection-extended">Redirection Extended</a> redirects children on a parent permalink change but only as an add-on to the Redirection plugin. None of them combines visibility, warnings before the damage, and a plan for the old URLs.</p>
+  </div>
+</section>
+
+<section id="decisions">
+  <span class="eyebrow sec-eyebrow">Agreed</span>
+  <h2>Decisions</h2>
+  <div class="scroll">
+  <table class="t">
+    <thead><tr><th style="width:22%">Topic</th><th style="width:38%">Decision</th><th>Reasoning</th></tr></thead>
+    <tbody>
+      <tr><td>Audience</td><td>Public plugin on WordPress.org from day one</td><td>Sets the compatibility and polish bar early rather than retrofitting it.</td></tr>
+      <tr><td>Scope</td><td>Three layers: visibility, guard rails, safety net</td><td>Visibility alone already exists. The value is in seeing, warning, and recovering together.</td></tr>
+      <tr><td>Redirects</td><td>Always record URL changes. Serving redirects is off by default. Detect installed redirect plugins and tell the editor what to add.</td><td>Most sites run Redirection, Yoast, Rank Math or Safe Redirect Manager already. Don't duplicate them; cover the sites that have none.</td></tr>
+      <tr><td>Ledger shape</td><td>One entry on the post whose slug or parent changed. When children move together through a trash or a delete, one entry on their new parent recording the old parent path, or in a small root list when they become top level, with a per-child entry only for a child whose slug had to change. Descendants are resolved at 404 time by longest-prefix match.</td><td>Write cost is independent of subtree size. Core's <code>get_page_by_path()</code> does the rest.</td></tr>
+      <tr><td>Scale rule</td><td>No operation inside a web request may grow with subtree size. Counts cap at 1,000. Anything larger runs in background batches with visible progress.</td><td>The plugin must be safe to install on a site with a million posts without anyone noticing it in the dashboard.</td></tr>
+      <tr><td>Trash policy</td><td>Ask when the plugin can intercept. Elsewhere apply the default policy, move subpages up to the grandparent, and offer Undo.</td><td>Never leave <code>__trashed</code> URLs live by default. Keep the editor in control where a dialog is possible.</td></tr>
+      <tr><td>Visibility surfaces</td><td>Editor sidebar panel, a Hierarchy column with a subtree filter, and a Tree view of the Pages list</td><td>Covers editing, bulk management, and overview without adding a menu item. No redirect log screen.</td></tr>
+      <tr><td>UI rule</td><td>Core components and core admin classes only. No colours, radii or type sizes of our own. Status as text, not pills. "Subpages" is the word.</td><td>Inherits the user's admin colour scheme today and the design tokens and any dark mode core ships later.</td></tr>
+      <tr><td>Storage</td><td>Post meta and one option, no custom tables</td><td>Data travels with the post, works on VIP and multisite, cleaned up by core on delete.</td></tr>
+      <tr><td>Versions</td><td>WordPress 6.6 or newer, PHP 8.0 or newer</td><td>6.6 moved the document settings panel slot into the editor package. Modern PHP without excluding most hosts.</td></tr>
+      <tr><td>Repository</td><td>Standalone git repo at <code>~/Work/hierarchy-guard</code>, symlinked into a Local site for manual testing</td><td>Clean for GitHub and the WordPress.org SVN. Sits beside your other plugin repos.</td></tr>
+      <tr><td>Name</td><td>Hierarchy Guard, slug <code>hierarchy-guard</code></td><td>Describes the job, isn't page-only, and no directory plugin uses it.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="features">
+  <span class="eyebrow sec-eyebrow">What ships in 1.0</span>
+  <h2>Features and mockups</h2>
+  <div class="cards">
+    <div class="card"><span class="tag">See</span><h3>Visibility</h3><p>Parent and child pages in the editor, a Hierarchy column and subtree filter in the list, and a Tree view of the same list.</p></div>
+    <div class="card"><span class="tag">Warn</span><h3>Guard rails</h3><p>A warning when the slug or parent changes on a page with subpages, and a one-sentence dialog before trashing a parent from the Pages list.</p></div>
+    <div class="card"><span class="tag">Recover</span><h3>Safety net</h3><p>Every URL change is recorded. The editor gets the exact redirects to add in their redirect plugin, or Hierarchy Guard serves them itself.</p></div>
+  </div>
+  <div class="prose"><p>Mockups below use the default "Modern" admin colour scheme. The real plugin sets no colours: React surfaces come from <code>@wordpress/components</code> and PHP surfaces use core admin classes, so they follow whatever scheme and tokens the site has.</p></div>
+
+  <h3>Editor sidebar panel</h3>
+  <div class="prose"><p>A "Hierarchy" document settings panel. It answers the two questions an editor has before changing anything: what is above this page, and what is underneath it. A warning appears the moment the slug or parent field differs from the saved value and the page has subpages. Status is shown only when it isn't Published. The classic editor gets the same data as a read-only meta box plus a plain confirmation when the form is submitted with a changed slug or parent.</p></div>
+  <div class="mock" style="max-width:380px">
+    <div class="mock-bar">Block editor · Settings sidebar · Page tab</div>
+    <div class="wp w-side">
+      <div class="w-ph"><span>Hierarchy</span><span class="w-muted">︿</span></div>
+      <div class="w-pb w-stack">
+        <div><div class="w-lbl">Parent pages</div><div class="w-crumb"><a>Company</a><span>/</span><strong>About</strong></div></div>
+        <div>
+          <div class="w-lbl">Child pages<span class="w-norm w-muted">4 direct · 12 in total</span></div>
+          <div class="w-rows">
+            <div class="w-row"><a>Team</a><span class="w-muted">3 subpages</span></div>
+            <div class="w-row"><a>History</a><span class="w-muted">No subpages</span></div>
+            <div class="w-row"><a>Careers</a><span class="w-muted">5 subpages</span></div>
+            <div class="w-row"><span><a>Press</a> <span class="w-muted">· Draft</span></span><span class="w-muted">No subpages</span></div>
+          </div>
+          <a class="w-link" style="display:inline-block;margin-top:8px">View all 12 in Pages</a>
+        </div>
+        <div class="w-cnotice">Saving changes this page's URL and the URLs of 12 subpages. You'll get the redirects to add after saving.</div>
+        <div><div class="w-lbl">Previous URLs</div><div class="w-row"><code>/about-us/</code><span class="w-muted">Not redirected</span></div></div>
+        <div class="w-muted w-small">Trashing this page moves its 4 subpages under "Company". <a>Settings</a></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Hierarchy column, subtree filter and Tree view</h3>
+  <div class="prose"><p>On every supported post type the list gains a one-line Hierarchy column: the parent as a link, then the subpage count as a link that filters the list to that subtree. The filter is also reachable from a parent dropdown and a "View subpages" row action, and its active state shows as a subtitle beside the heading, the way core shows search results. Filtering carries a sort order so core renders normal paginated rows rather than its unsorted tree mode. "Tree" joins the views row next to All and Published; it shows the same table in hierarchical order with disclosure toggles, loads children on demand, and searches on the server.</p></div>
+  <div class="mock">
+    <div class="mock-bar">Pages › All Pages · filtered to one subtree</div>
+    <div class="wp">
+      <div class="w-top"><span class="w-h1">Pages</span><a class="w-btn-sec">Add Page</a><span class="w-subtitle">Under: About<a>Clear</a></span></div>
+      <ul class="w-views"><li><a>All (347)</a> |</li><li><a>Published (301)</a> |</li><li><a>Drafts (40)</a> |</li><li><a>Trash (6)</a> |</li><li><a>Tree</a></li></ul>
+      <div class="w-filters"><span class="w-select">Under: About ▾</span><span class="w-select">All dates ▾</span><a class="w-btn-sec">Filter</a></div>
+      <div class="w-tablewrap">
+      <table class="w-table">
+        <thead><tr><th style="width:28px"><span class="w-box"></span></th><th>Title</th><th>Hierarchy</th><th>Author</th><th>Date</th></tr></thead>
+        <tbody>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title">Team</a><div class="w-actions"><a>Edit</a> | <a>Quick Edit</a> | <a class="w-trash">Trash</a> | <a>View</a> | <a>View subpages</a></div></td><td><a>About</a> · <a>3 subpages</a></td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/09/02</span></td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title">Leadership</a></td><td><a>Team</a></td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/09/02</span></td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title">Engineering</a></td><td><a>Team</a></td><td>Priya</td><td>Published<br><span class="w-muted">2026/09/14</span></td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title">History</a></td><td><a>About</a></td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/08/21</span></td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title">Careers</a></td><td><a>About</a> · <a>5 subpages</a></td><td>Sam</td><td>Published<br><span class="w-muted">2026/10/01</span></td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title">Press</a> <span class="w-muted">— Draft</span></td><td><a>About</a></td><td>Sam</td><td>Last Modified<br><span class="w-muted">2026/10/06</span></td></tr>
+          <tr><td colspan="5" class="w-muted">and 6 more</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+  <div class="mock">
+    <div class="mock-bar">Pages › Tree view · same table, hierarchical order, children loaded on demand</div>
+    <div class="wp">
+      <div class="w-top"><span class="w-h1">Pages</span><a class="w-btn-sec">Add Page</a><span class="w-muted">347 pages · 61 top level</span></div>
+      <ul class="w-views"><li><a>All (347)</a> |</li><li><a>Published (301)</a> |</li><li><a>Drafts (40)</a> |</li><li><a>Trash (6)</a> |</li><li><span class="cur">Tree</span></li></ul>
+      <div class="w-filters"><span class="w-input">Search pages</span><a class="w-btn-sec">Search</a><span class="w-muted" style="margin-left:auto"><a>Expand all</a> · <a>Collapse all</a></span></div>
+      <div class="w-tablewrap">
+      <table class="w-table">
+        <thead><tr><th>Title</th><th>Subpages</th><th>Author</th><th>Date</th></tr></thead>
+        <tbody>
+          <tr><td><span class="w-tw">▾</span><a class="w-row-title">Company</a><div class="w-actions"><a>Edit</a> | <a>View</a> | <a>View subpages</a></div></td><td>13</td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/06/10</span></td></tr>
+          <tr><td class="w-indent1"><span class="w-tw">▾</span><a class="w-row-title">About</a></td><td>12</td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/08/21</span></td></tr>
+          <tr><td class="w-indent2"><span class="w-tw">▾</span><a class="w-row-title">Team</a></td><td>3</td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/09/02</span></td></tr>
+          <tr><td class="w-indent3"><span class="w-tw"></span><a class="w-row-title">Leadership</a></td><td>—</td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/09/02</span></td></tr>
+          <tr><td class="w-indent3"><span class="w-tw"></span><a class="w-row-title">Engineering</a></td><td>—</td><td>Priya</td><td>Published<br><span class="w-muted">2026/09/14</span></td></tr>
+          <tr><td class="w-indent3"><span class="w-tw"></span><a class="w-row-title">Design</a></td><td>—</td><td>Priya</td><td>Published<br><span class="w-muted">2026/09/14</span></td></tr>
+          <tr><td class="w-indent2"><span class="w-tw"></span><a class="w-row-title">History</a></td><td>—</td><td>Hrithik</td><td>Published<br><span class="w-muted">2026/08/21</span></td></tr>
+          <tr><td class="w-indent2"><span class="w-tw">▸</span><a class="w-row-title">Careers</a></td><td>5</td><td>Sam</td><td>Published<br><span class="w-muted">2026/10/01</span></td></tr>
+          <tr><td class="w-indent2"><span class="w-tw"></span><a class="w-row-title">Press</a> <span class="w-muted">— Draft</span></td><td>—</td><td>Sam</td><td>Last Modified<br><span class="w-muted">2026/10/06</span></td></tr>
+          <tr><td><span class="w-tw">▾</span><a class="w-row-title">Products</a></td><td>22</td><td>Priya</td><td>Published<br><span class="w-muted">2026/05/02</span></td></tr>
+          <tr><td class="w-indent1 w-muted">Loading 22 subpages…</td><td></td><td></td><td></td></tr>
+          <tr><td><span class="w-tw">▸</span><a class="w-row-title">Resources</a></td><td>9</td><td>Sam</td><td>Published<br><span class="w-muted">2026/04/18</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+  <div class="prose"><p>The Tree view renders as a tree grid for assistive technology: row levels, position in set, expanded state, and arrow-key navigation, using the components package's tree grid primitives. Without JavaScript the toggles are links that reload the view opened at that node.</p></div>
+
+  <h3>Trash dialog</h3>
+  <div class="prose"><p>Clicking Trash on a page with subpages, from a row action or a bulk action, opens a small modal instead of trashing immediately. One sentence states what will happen under the default policy. "Other options" reveals the two alternatives. URLs quoted here are expected ones; the outcome notice shows the actual URLs after slug conflicts are resolved. The chosen policy travels with the trash request. The block editor's own trash button already shows core's confirmation and cannot be extended, so there the default policy applies and the landing notice with Undo is the safety net.</p></div>
+  <div class="mock" style="max-width:520px">
+    <div class="mock-bar">Pages list · after clicking Trash on "About"</div>
+    <div class="wp w-dim">
+      <div class="w-modal small">
+        <p class="w-dialog-title">Move "About" to the trash?</p>
+        <p>"About" has 4 subpages (12 pages in total). They'll move up under "Company" and get new URLs.</p>
+        <a class="w-link">Other options</a>
+        <div class="w-radios">
+          <label><span class="w-radio on"></span><span>Move the subpages up under "Company"<span class="w-muted">Their URLs change, for example /about/team/ becomes /company/team/.</span></span></label>
+          <label><span class="w-radio"></span><span>Trash the 12 subpages too<span class="w-muted">They come back with their previous status if you restore "About".</span></span></label>
+          <label><span class="w-radio"></span><span>Leave the subpages where they are<span class="w-muted">Their URLs will contain about__trashed until you move them.</span></span></label>
+        </div>
+        <div class="w-btns"><a class="w-btn-ter">Cancel</a><a class="w-btn danger">Trash</a></div>
+      </div>
+    </div>
+  </div>
+  <div class="prose"><p>Bulk variant of the sentence: "3 of the selected pages have subpages (19 pages in total). The subpages move up one level and get new URLs." When the current user lacks permission to edit some of the subpages, the dialog says so and those subpages stay where they are. In Quick Edit, a changed slug or parent shows a one-line inline warning instead of a modal: "Changing this moves 12 subpages to new URLs."</p></div>
+
+  <h3>Outcome notice and redirects needed</h3>
+  <div class="prose"><p>After any action that changed URLs, the Pages list shows a one-paragraph notice with Undo and a "View redirects" link. In the editor the same message is a snackbar. The pairs live in a modal, computed on demand and paged, where the provider-specific actions also live. The notice is scoped to the post type's list screen and the summary expires after thirty minutes or the next URL-changing action.</p></div>
+  <div class="mock">
+    <div class="mock-bar">Pages list · right after the trash</div>
+    <div class="wp">
+      <div class="w-note ok"><p>"About" moved to the trash. 4 subpages moved under "Company" and 12 URLs changed. <a>Undo</a> · <a>View redirects (12)</a></p></div>
+      <div class="w-variants">
+        <div class="w-note ok"><p><strong>If built-in redirects are on:</strong> "About" moved to the trash. 4 subpages moved under "Company". The 12 old URLs redirect to the new ones. <a>Undo</a></p></div>
+        <div class="w-note warn"><p><strong>If nothing handles redirects:</strong> "About" moved to the trash. 4 subpages moved under "Company". 12 old URLs now show "Page not found". <a>Turn on redirects</a> · <a>View redirects</a></p></div>
+      </div>
+      <div style="margin-top:14px"><span class="w-snack">"About" moved to the trash. 4 subpages moved under "Company". <a>Undo</a></span> <span class="w-muted w-small" style="margin-left:10px">editor snackbar</span></div>
+    </div>
+  </div>
+  <div class="mock" style="max-width:700px">
+    <div class="mock-bar">"View redirects" modal</div>
+    <div class="wp w-dim">
+      <div class="w-modal medium">
+        <p class="w-dialog-title">Redirects needed</p>
+        <div class="w-tablewrap">
+        <table class="w-table" style="min-width:0">
+          <thead><tr><th>Old URL</th><th>New URL</th></tr></thead>
+          <tbody>
+            <tr><td><code>/about/</code></td><td><span class="w-muted">In the trash, no target</span></td></tr>
+            <tr><td><code>/about/team/</code></td><td><code>/company/team/</code></td></tr>
+            <tr><td><code>/about/team/leadership/</code></td><td><code>/company/team/leadership/</code></td></tr>
+            <tr><td><code>/about/careers/</code></td><td><code>/company/careers/</code></td></tr>
+            <tr><td><code>/about/careers/open-roles/</code></td><td><code>/company/careers/open-roles/</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p class="w-muted w-small">Showing 5 of 12 · <a>Next</a></p>
+        <p>Add these in Redirection.</p>
+        <div class="w-btns left"><a class="w-btn-sec">Open Redirection</a><a class="w-btn-sec">Download CSV for Redirection</a><a class="w-btn-ter">Copy as text</a></div>
+      </div>
+    </div>
+  </div>
+  <div class="prose"><p>The CSV is generated server-side in the detected provider's import layout, for example <code>source,target,regex,code</code> for Redirection and Safe Redirect Manager, so it imports without editing. Download links are the one place the plugin streams a file.</p></div>
+
+  <h3>Settings</h3>
+  <div class="prose"><p>Three fields don't earn a top-level page. They register as a "Page hierarchy" section on Settings › Writing through the Settings API, the same precedent the Classic Editor plugin uses.</p></div>
+  <div class="mock" style="max-width:680px">
+    <div class="mock-bar">Settings › Writing › Page hierarchy</div>
+    <div class="wp">
+      <span class="w-h1">Writing Settings</span>
+      <table class="w-form">
+        <tr><th>Post types</th><td><label><span class="w-box on"></span> Pages</label><label><span class="w-box on"></span> Documentation</label><div class="w-muted">Public hierarchical post types appear here automatically.</div></td></tr>
+        <tr><th>Trashing a page with subpages</th><td><label><span class="w-radio on"></span> Move subpages up one level</label><label><span class="w-radio"></span> Trash the subpages too</label><label><span class="w-radio"></span> Leave subpages where they are</label><div class="w-muted">Used when there's no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time. Not applied when the trash is disabled.</div></td></tr>
+        <tr><th>Redirects</th><td><label><span class="w-box"></span> Redirect old URLs to their new pages</label><div class="w-muted">Redirection is active and can handle these. URL changes are recorded either way.</div></td></tr>
+      </table>
+      <a class="w-btn" style="margin-top:6px">Save Changes</a>
+    </div>
+  </div>
+</section>
+
+<section id="flows">
+  <span class="eyebrow sec-eyebrow">Mechanism</span>
+  <h2>How it works</h2>
+
+  <h3>Recording URL changes</h3>
+  <div class="prose"><p>Three hooks feed one recorder, and the recorder writes one entry per post whose own slug or parent changed. When children change parent together, through a trash or a permanent delete, it writes the old parent path once on the new parent, or in a small root list when the children become top level, so a thousand moved children still cost one write. A per-child entry is added only when a moved child's slug had to change to avoid a collision. The recorder never walks the subtree. The old path is built from the slug chain of the before-object with the permalink structure's placeholders left in, so drafts with empty slugs, the front page, and private pages all resolve the same way for every user. Recording happens only when the old URL was publicly reachable. Entries equal to the current path are pruned on write and again on read.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 920 310" role="img" aria-label="Three WordPress hooks, post_updated, wp_trash_post and before_delete_post, flow into one step that identifies which post actually changed, which records one entry on that post as hashed post meta, prunes entries equal to the current path, and tells the editor which redirects are needed. A note states that no subtree walk happens.">
+      <defs><marker id="arrA" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+      <rect class="box" x="16" y="20" width="200" height="70" rx="6"/>
+      <text class="b" x="116" y="41" text-anchor="middle">Edit saved</text>
+      <text class="sub" x="116" y="58" text-anchor="middle">post_updated</text>
+      <text class="sub" x="116" y="75" text-anchor="middle">slug or parent changed</text>
+      <rect class="box" x="16" y="116" width="200" height="70" rx="6"/>
+      <text class="b" x="116" y="137" text-anchor="middle">Move to trash</text>
+      <text class="sub" x="116" y="154" text-anchor="middle">wp_trash_post → trashed_post</text>
+      <text class="sub" x="116" y="171" text-anchor="middle">direct children re-parented</text>
+      <rect class="box" x="16" y="212" width="200" height="70" rx="6"/>
+      <text class="b" x="116" y="233" text-anchor="middle">Delete permanently</text>
+      <text class="sub" x="116" y="250" text-anchor="middle">before_delete_post</text>
+      <text class="sub" x="116" y="267" text-anchor="middle">before core re-parents</text>
+      <path class="ar" d="M216 55 H272 V131 H330" marker-end="url(#arrA)"/>
+      <path class="ar" d="M216 151 H330" marker-end="url(#arrA)"/>
+      <path class="ar" d="M216 247 H272 V171 H330" marker-end="url(#arrA)"/>
+      <rect class="box" x="330" y="106" width="240" height="90" rx="6"/>
+      <text class="b" x="450" y="134" text-anchor="middle">Which post actually changed?</text>
+      <text class="sub" x="450" y="156" text-anchor="middle">the saved post, or the new parent</text>
+      <text class="sub" x="450" y="174" text-anchor="middle">of children moved together</text>
+      <rect class="note" x="330" y="222" width="240" height="66" rx="6"/>
+      <text class="b" x="450" y="244" text-anchor="middle">No subtree walk</text>
+      <text class="sub" x="450" y="262" text-anchor="middle">writes per event: 1</text>
+      <text class="sub" x="450" y="278" text-anchor="middle">plus one per renamed child</text>
+      <path class="ar" d="M570 151 H605 V72 H640" marker-end="url(#arrA)"/>
+      <rect class="dec" x="640" y="36" width="260" height="72" rx="6"/>
+      <text class="b" x="770" y="58" text-anchor="middle">Record one entry per changed post</text>
+      <text class="sub" x="770" y="76" text-anchor="middle">key: _hierarchy_guard_path_{md5}</text>
+      <text class="sub" x="770" y="92" text-anchor="middle">value: old relative path</text>
+      <path class="ar" d="M770 108 V132" marker-end="url(#arrA)"/>
+      <rect class="box" x="640" y="132" width="260" height="56" rx="6"/>
+      <text class="b" x="770" y="154" text-anchor="middle">Prune</text>
+      <text class="sub" x="770" y="172" text-anchor="middle">on write and on read</text>
+      <path class="ar" d="M770 188 V212" marker-end="url(#arrA)"/>
+      <rect class="box" x="640" y="212" width="260" height="64" rx="6"/>
+      <text class="b" x="770" y="236" text-anchor="middle">Tell the editor</text>
+      <text class="sub" x="770" y="254" text-anchor="middle">pairs computed on demand, paged</text>
+    </svg>
+    </div>
+    <figcaption>Every URL-changing event ends in the same ledger, and the ledger grows by the number of changes, not by the size of the trees they touch. The shaded step is the only persistent state the plugin writes for redirects.</figcaption>
+  </figure>
+
+  <h3>Trashing a parent</h3>
+  <div class="prose"><p>The policy is resolved and capabilities are checked before core acts. Inside the <code>wp_trash_post</code> action the plugin only snapshots current paths, because core has committed nothing yet and the trash can still fail. Mutation happens in <code>trashed_post</code>, after success. Re-parenting uses the same raw update and cache clear core uses in <code>wp_delete_post()</code>, so children's content is not re-filtered and their modified dates don't move. Up to the batch threshold everything runs inline; beyond it a background job processes batches with a progress notice, and Undo waits for it. Reversal is triggered by any transition out of trash, not only the Restore link, and restores subpages with their previous status.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 780 680" role="img" aria-label="Flow for trashing a page. If it has no subpages core trashes it. Otherwise the editor is asked in the Pages list, or the default policy applies elsewhere. Capabilities are checked per child. Current paths are snapshotted in wp_trash_post, core trashes the parent, and the policy is applied in trashed_post inline or in background batches. A notice with Undo appears. Restore or Undo reverses the move through transition_post_status.">
+      <defs><marker id="arrB" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+      <rect class="box" x="290" y="16" width="200" height="48" rx="6"/>
+      <text class="b" x="390" y="36" text-anchor="middle">Trash requested</text>
+      <text class="sub" x="390" y="53" text-anchor="middle">row · bulk · editor · REST · CLI</text>
+      <path class="ar" d="M390 64 V84" marker-end="url(#arrB)"/>
+      <polygon class="box" points="390,84 490,120 390,156 290,120"/>
+      <text x="390" y="124" text-anchor="middle">Has subpages?</text>
+      <path class="ar" d="M490 120 H530" marker-end="url(#arrB)"/>
+      <text class="lab" x="510" y="112" text-anchor="middle">no</text>
+      <rect class="box" x="530" y="96" width="200" height="48" rx="6"/>
+      <text class="b" x="630" y="116" text-anchor="middle">Core trash as usual</text>
+      <text class="sub" x="630" y="133" text-anchor="middle">nothing to protect</text>
+      <path class="ar" d="M390 156 V190" marker-end="url(#arrB)"/>
+      <text class="lab" x="400" y="178">yes</text>
+      <polygon class="box" points="390,190 500,226 390,262 280,226"/>
+      <text x="390" y="230" text-anchor="middle">Can we ask?</text>
+      <path class="ar" d="M280 226 H200" marker-end="url(#arrB)"/>
+      <text class="lab" x="240" y="217" text-anchor="middle">yes</text>
+      <rect class="box" x="20" y="196" width="180" height="60" rx="6"/>
+      <text class="b" x="110" y="218" text-anchor="middle">Dialog: editor chooses</text>
+      <text class="sub" x="110" y="236" text-anchor="middle">Pages list row and bulk</text>
+      <path class="ar" d="M500 226 H580" marker-end="url(#arrB)"/>
+      <text class="lab" x="540" y="217" text-anchor="middle">no</text>
+      <rect class="box" x="580" y="196" width="180" height="60" rx="6"/>
+      <text class="b" x="670" y="218" text-anchor="middle">Default policy applies</text>
+      <text class="sub" x="670" y="236" text-anchor="middle">editor · REST · WP-CLI</text>
+      <path class="bus" d="M110 256 V286 H670 V256"/>
+      <path class="ar" d="M390 286 V300" marker-end="url(#arrB)"/>
+      <rect class="box" x="240" y="300" width="300" height="64" rx="6"/>
+      <text class="b" x="390" y="322" text-anchor="middle">Check capabilities per child</text>
+      <text class="sub" x="390" y="340" text-anchor="middle">edit_post to move · delete_post to trash</text>
+      <text class="sub" x="390" y="356" text-anchor="middle">otherwise keep those children and say so</text>
+      <path class="ar" d="M390 364 V384" marker-end="url(#arrB)"/>
+      <rect class="dec" x="240" y="384" width="300" height="52" rx="6"/>
+      <text class="b" x="390" y="406" text-anchor="middle">Snapshot in wp_trash_post</text>
+      <text class="sub" x="390" y="424" text-anchor="middle">current paths of parent and direct children</text>
+      <path class="ar" d="M390 436 V456" marker-end="url(#arrB)"/>
+      <rect class="box" x="240" y="456" width="300" height="48" rx="6"/>
+      <text class="b" x="390" y="476" text-anchor="middle">Core trashes the parent</text>
+      <text class="sub" x="390" y="493" text-anchor="middle">slug becomes about__trashed</text>
+      <path class="ar" d="M390 504 V524" marker-end="url(#arrB)"/>
+      <rect class="dec" x="200" y="524" width="380" height="64" rx="6"/>
+      <text class="b" x="390" y="546" text-anchor="middle">Apply policy in trashed_post</text>
+      <text class="sub" x="390" y="564" text-anchor="middle">re-parent via $wpdb->update, one entry on the grandparent</text>
+      <text class="sub" x="390" y="580" text-anchor="middle">≤ 200 children inline, else background batches</text>
+      <path class="ar" d="M390 588 V608" marker-end="url(#arrB)"/>
+      <rect class="box" x="200" y="608" width="380" height="56" rx="6"/>
+      <text class="b" x="390" y="630" text-anchor="middle">Notice with Undo</text>
+      <text class="sub" x="390" y="648" text-anchor="middle">per-user transient · pairs on demand · snackbar in editor</text>
+      <rect class="box" x="600" y="608" width="170" height="56" rx="6"/>
+      <text class="b" x="685" y="630" text-anchor="middle">Restore or Undo</text>
+      <text class="sub" x="685" y="648" text-anchor="middle">transition_post_status</text>
+      <path class="ar dash" d="M685 608 V556 H580" marker-end="url(#arrB)"/>
+      <text class="lab" x="692" y="580">reverses the move,</text>
+      <text class="lab" x="692" y="594">previous status kept</text>
+    </svg>
+    </div>
+    <figcaption>Where a dialog is possible the editor decides. Everywhere else the default policy runs and Undo is one click away. Nothing is mutated until core has succeeded, and nothing in the request grows with the size of the subtree.</figcaption>
+  </figure>
+
+  <h3>Serving a redirect</h3>
+  <div class="prose"><p>Only runs when the built-in option is on, only for GET and HEAD, and at <code>template_redirect</code> priority 9 so it beats both <code>redirect_canonical()</code> and its fuzzy 404 guess. The requested path comes from the untouched query vars, <code>pagename</code> for pages or the post type's own variable for hierarchical custom types, normalized the way <code>get_page_by_path()</code> normalizes, with pagination, feed and embed suffixes set aside and re-applied to the target. The resolver tries the longest prefix first; on a hit it rebuilds a candidate from the matched post's current path plus the remainder, or from the remainder alone when the prefix is in the root list, and asks core to resolve it scoped to the post type. A candidate that still fails is fed back through the loop for chained changes, at most five rounds with a seen-set to break cycles. The final target must be publicly viewable. The URL passes <code>wp_validate_redirect()</code> after filtering, and the status code defaults to 301.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1000 340" role="img" aria-label="A GET or HEAD 404 at template_redirect priority 9. If built-in redirects are off, core handles it. Otherwise the path is normalized from query vars, looked up by longest prefix with an index seek on the hashed key. On a miss core guesses. On a hit a candidate is rebuilt from the matched post's current path plus the remainder and resolved with get_page_by_path. If it is a viewable page, redirect with 301; otherwise feed the candidate back, up to five rounds.">
+      <defs><marker id="arrC" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+      <rect class="box" x="16" y="36" width="190" height="48" rx="6"/>
+      <text class="b" x="111" y="56" text-anchor="middle">GET or HEAD 404</text>
+      <text class="sub" x="111" y="73" text-anchor="middle">template_redirect, priority 9</text>
+      <path class="ar" d="M206 60 H240" marker-end="url(#arrC)"/>
+      <polygon class="box" points="310,32 380,60 310,88 240,60"/>
+      <text x="310" y="64" text-anchor="middle">Built-in on?</text>
+      <path class="ar" d="M310 88 V120" marker-end="url(#arrC)"/>
+      <text class="lab" x="318" y="110">no</text>
+      <rect class="box" x="230" y="120" width="160" height="44" rx="6"/>
+      <text class="b" x="310" y="138" text-anchor="middle">Leave it to core</text>
+      <text class="sub" x="310" y="155" text-anchor="middle">its guess may still fire</text>
+      <path class="ar" d="M380 60 H420" marker-end="url(#arrC)"/>
+      <text class="lab" x="400" y="52" text-anchor="middle">yes</text>
+      <rect class="box" x="420" y="28" width="220" height="64" rx="6"/>
+      <text class="b" x="530" y="48" text-anchor="middle">Normalize the path</text>
+      <text class="sub" x="530" y="65" text-anchor="middle">$wp_query->query pagename / CPT var</text>
+      <text class="sub" x="530" y="82" text-anchor="middle">set aside page/N, feed, embed</text>
+      <path class="ar" d="M640 60 H680" marker-end="url(#arrC)"/>
+      <rect class="dec" x="680" y="28" width="220" height="64" rx="6"/>
+      <text class="b" x="790" y="48" text-anchor="middle">Longest-prefix lookup</text>
+      <text class="sub" x="790" y="65" text-anchor="middle">a/b/c → a/b/c, a/b, a</text>
+      <text class="sub" x="790" y="82" text-anchor="middle">index seek on hashed key, cached</text>
+      <path class="ar" d="M790 92 V124" marker-end="url(#arrC)"/>
+      <polygon class="box" points="790,124 840,152 790,180 740,152"/>
+      <text x="790" y="156" text-anchor="middle">Hit?</text>
+      <path class="ar" d="M840 152 H880" marker-end="url(#arrC)"/>
+      <text class="lab" x="860" y="144" text-anchor="middle">no</text>
+      <rect class="box" x="880" y="130" width="110" height="44" rx="6"/>
+      <text class="b" x="935" y="156" text-anchor="middle">Let core guess</text>
+      <path class="ar" d="M790 180 V212" marker-end="url(#arrC)"/>
+      <text class="lab" x="798" y="202">yes</text>
+      <rect class="box" x="680" y="212" width="220" height="64" rx="6"/>
+      <text class="b" x="790" y="234" text-anchor="middle">Rebuild candidate</text>
+      <text class="sub" x="790" y="251" text-anchor="middle">current path of hit + remainder</text>
+      <text class="sub" x="790" y="267" text-anchor="middle">resolve with get_page_by_path</text>
+      <path class="ar" d="M680 244 H620" marker-end="url(#arrC)"/>
+      <polygon class="box" points="560,216 620,244 560,272 500,244"/>
+      <text x="560" y="248" text-anchor="middle">Viewable page?</text>
+      <path class="ar" d="M560 272 V292" marker-end="url(#arrC)"/>
+      <text class="lab" x="568" y="286">yes</text>
+      <rect class="dec" x="490" y="292" width="140" height="40" rx="6"/>
+      <text class="b" x="560" y="316" text-anchor="middle">301 to it</text>
+      <path class="ar dash" d="M500 244 H410 V14 H790 V28" marker-end="url(#arrC)"/>
+      <text class="lab" x="470" y="236" text-anchor="middle">no</text>
+      <text class="lab" x="600" y="24" text-anchor="middle">feed the candidate back, up to 5 rounds</text>
+    </svg>
+    </div>
+    <figcaption>The built-in server is a fallback. On a site with a redirect plugin it stays off and the 404 is that plugin's to handle, using the pairs Hierarchy Guard showed the editor. When it is on and finds nothing, core's guess still gets its turn.</figcaption>
+  </figure>
+
+  <h3>What the editor sees, by situation</h3>
+  <div class="scroll">
+  <table class="t">
+    <thead><tr><th>Redirect plugin detected</th><th>Built-in serving</th><th>Message after a URL change</th></tr></thead>
+    <tbody>
+      <tr><td>Yes</td><td>Off (default)</td><td>Notice with "View redirects (12)". The modal says "Add these in Redirection" with Open Redirection and Download CSV for Redirection.</td></tr>
+      <tr><td>Yes</td><td>On</td><td>"The 12 old URLs redirect to the new ones." Pairs still available for reference.</td></tr>
+      <tr><td>No</td><td>Off (default)</td><td>Warning notice: "12 old URLs now show 'Page not found'" with Turn on redirects. A one-time dismissible nudge also appears on the Pages screen.</td></tr>
+      <tr><td>No</td><td>On</td><td>"The 12 old URLs redirect to the new ones."</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose"><p style="margin-top:14px">Detected providers in 1.0: Redirection, Safe Redirect Manager, Yoast SEO Premium, Rank Math with its redirections module, All in One SEO Pro, SEOPress Pro, and Simple 301 Redirects. Each is a presence check, the URL of its redirects screen, and a CSV layout. The list is filterable.</p></div>
+</section>
+
+<section id="data">
+  <span class="eyebrow sec-eyebrow">Persistence</span>
+  <h2>Data model</h2>
+  <div class="prose"><p>Everything lives in core tables. Post meta is removed by core when a post is deleted, and <code>uninstall.php</code> removes the rest in batches of a thousand rows, per site on multisite. All plugin caches live in a <code>hierarchy_guard</code> cache group with its own last-changed key, bumped only by the plugin's own writes, because the posts key changes on every post or meta write anywhere on the site.</p></div>
+  <div class="scroll">
+  <table class="t">
+    <thead><tr><th>Where</th><th>Key</th><th>Value</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Post meta</td><td><code>_hierarchy_guard_path_{md5}</code></td><td>The old page path, normalized, without the post type's rewrite prefix, such as <code>about/team</code>. The hash covers the post type and the path.</td><td>One row per URL change on this post, or an old parent path whose children now live under this post. The hash in the key makes a 404 lookup a single index seek. Pruned when it equals the current path. Protected prefix keeps it out of Custom Fields and REST.</td></tr>
+      <tr><td>Post meta</td><td><code>_hierarchy_guard_moved_from</code>, <code>_hierarchy_guard_moved_to</code></td><td>Parent ID the child left, parent ID it was moved to</td><td>Set on a child the plugin re-parented during a trash. Reversal moves it back only if it still sits under <code>moved_to</code> and <code>moved_from</code> still exists, is the same type, and is being restored. Excluded from WXR export.</td></tr>
+      <tr><td>Post meta</td><td><code>_hierarchy_guard_trashed_with</code></td><td>Parent ID</td><td>Set on subpages trashed under the subtree policy. Restored with the parent, with their previous status via core's own filter. Excluded from WXR export.</td></tr>
+      <tr><td>Option</td><td><code>hierarchy_guard_settings</code></td><td><code>post_types</code>, <code>trash_policy</code>, <code>serve_redirects</code></td><td>The three settings. Autoloaded. Absent keys fall back to defaults.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_root_paths</code></td><td>Old parent paths whose children became top level, per post type, capped at 200</td><td>Consulted by the resolver after post entries. Pruned when the children move back.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{id}</code></td><td>Root ID, action, policy, cursor, done and total counts</td><td>A background batch job for subtrees above the inline threshold. Deleted on completion.</td></tr>
+      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Root ID, action, policy, moved child IDs (up to 200) or job ID, counts, timestamp</td><td>Feeds the outcome notice and Undo for thirty minutes. Pairs are never stored; they are computed on demand.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>REST endpoint</h3>
+  <div class="prose"><p>One read-only route backs the editor panel, the classic meta box, the Tree view's lazy loading, and the redirects modal. It requires <code>edit_post</code> on the requested ID. Children are paged, counts are direct, and totals are capped. The same data is also exposed as a <code>hierarchy_guard</code> field on the REST page object so a DataViews column needs no extra request.</p></div>
+<pre><code>GET /wp-json/hierarchy-guard/v1/posts/42/hierarchy?children_page=1
+
+{
+  "ancestors":   [ { "id": 7, "title": "Company", "edit_link": "…" } ],
+  "children":    [ { "id": 51, "title": "Team", "status": "publish", "children_count": 3, "edit_link": "…", "view_link": "…" }, … ],
+  "children_total": 4,
+  "has_more":    false,
+  "descendants": { "count": 12, "capped": false },
+  "old_paths":   [ "about-us" ],
+  "redirects":   { "serving": false, "provider": { "name": "Redirection", "url": "…", "csv": "redirection" } },
+  "trash_policy": "reparent"
+}
+
+GET /wp-json/hierarchy-guard/v1/changes/{change_id}/pairs?page=1      → paged old/new pairs for the modal
+GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → streamed download</code></pre>
+</section>
+
+<section id="architecture">
+  <span class="eyebrow sec-eyebrow">Code</span>
+  <h2>Architecture</h2>
+  <div class="prose"><p>Namespaced PHP with Composer autoloading and no runtime Composer dependencies. One class per responsibility so each can be unit tested on its own. One PHP core serves two admin tracks: the classic list table that every supported version renders, and a DataViews track that registers the same field and trash action for the Site Editor's Pages list now and for the admin Pages screen when core moves it. JavaScript is built with <code>@wordpress/scripts</code>.</p></div>
+<pre><code>hierarchy-guard/
+├── hierarchy-guard.php              plugin header, constants, autoload, Plugin::boot()
+├── uninstall.php                    batched deletes of meta, options, transients; per site on multisite
+├── readme.txt · composer.json · package.json · phpcs.xml · .wp-env.json · .distignore
+├── includes/HierarchyGuard/
+│   ├── Plugin.php                   wires every hook to its handler
+│   ├── Settings.php                 option access, defaults, "Page hierarchy" section on Settings › Writing
+│   ├── Post_Types.php               supported hierarchical types, memoised, filterable
+│   ├── Subtree.php                  bounded queries: children(), child_counts(ids), total(cap), walk(level)
+│   ├── Paths.php                    old and current relative paths from the slug chain, normalized
+│   ├── Ledger.php                   record · prune · seek by hashed key · root list · own cache group
+│   ├── Change_Listener.php          post_updated, before_delete_post; zero-query early returns; suspend flag
+│   ├── Trash_Handler.php            policy, capability checks, snapshot, apply, reversal on transition_post_status
+│   ├── Batch/Job.php · Batch/Processor.php   cron-driven batches, Action Scheduler when present, WP-CLI command
+│   ├── Capabilities.php             per-child edit_post / delete_post checks, downgrade reporting
+│   ├── Redirects/Resolver.php       longest-prefix resolution, chained rounds, seen-set
+│   ├── Redirects/Server.php         template_redirect priority 9, GET/HEAD, validate, 301
+│   ├── Redirects/Providers.php      detect redirect plugins, deep links, CSV layouts
+│   ├── Export/Csv.php               streamed CSV per provider layout
+│   ├── REST/Hierarchy_Controller.php · REST/Changes_Controller.php · REST/Page_Field.php
+│   └── Admin/
+│       ├── List_Table.php           Hierarchy column (one grouped query), subtree filter, parent dropdown, row action
+│       ├── Tree_View.php            "Tree" view in the views row, hierarchical order, lazy children
+│       ├── Meta_Box.php             classic editor box and submit confirmation
+│       ├── Notices.php              outcome notice, batch progress, one-time nudge
+│       └── Assets.php               editor panel data, list-table scripts, DataViews registration
+├── src/
+│   ├── editor/                      Hierarchy panel (PluginDocumentSettingPanel from @wordpress/editor)
+│   ├── list-table/                  trash Modal, Quick Edit inline warning, redirects Modal
+│   ├── tree/                        TreeGrid behaviour, lazy load, server search
+│   └── dataviews/                   hierarchy field, replacement move-to-trash action with RenderModal
+├── build/                           compiled, shipped in release zips only
+└── tests/phpunit/                   WordPress test suite via wp-env</code></pre>
+
+  <h3>Hooks and handlers</h3>
+  <div class="scroll">
+  <table class="t">
+    <thead><tr><th>Hook</th><th>Handler</th><th>Job</th></tr></thead>
+    <tbody>
+      <tr><td><code>post_updated</code></td><td>Change_Listener</td><td>Return immediately unless the type is supported, the post is not a revision or autosave, the listener is not suspended, and slug or parent changed with neither status in trash. Then record one entry.</td></tr>
+      <tr><td><code>wp_trash_post</code> (before)</td><td>Trash_Handler</td><td>Resolve the policy from the request or the setting, check capabilities per child, snapshot current paths. No writes.</td></tr>
+      <tr><td><code>trashed_post</code></td><td>Trash_Handler</td><td>Apply the policy from the snapshot: raw re-parent plus cache clear, or subtree trash. Inline up to the threshold, else enqueue a batch job. Store the change summary.</td></tr>
+      <tr><td><code>transition_post_status</code> (trash → other)</td><td>Trash_Handler</td><td>Reverse the plugin's own moves and restore co-trashed subpages with their previous status. Covers Restore, Undo, REST status updates, and WP-CLI.</td></tr>
+      <tr><td><code>before_delete_post</code></td><td>Change_Listener</td><td>Record the deleted page's path, and any old paths it carried, on the grandparent or in the root list before core re-parents the children. Snapshot new paths for the notice in <code>after_delete_post</code>.</td></tr>
+      <tr><td><code>template_redirect</code>, priority 9</td><td>Redirects\Server</td><td>Serve a 301 from the resolver when built-in redirects are on. GET and HEAD only.</td></tr>
+      <tr><td><code>hierarchy_guard_process_batch</code> (cron)</td><td>Batch\Processor</td><td>Process one batch of a job and reschedule until done. Mirrored by a WP-CLI command for hosts without cron.</td></tr>
+      <tr><td><code>pre_get_posts</code> (admin), <code>request</code></td><td>Admin\List_Table</td><td>Translate the subtree filter into <code>post_parent__in</code> from a capped walk, and force a sort order so core paginates normally.</td></tr>
+      <tr><td><code>manage_{type}_posts_columns</code>, <code>…_custom_column</code>, <code>restrict_manage_posts</code>, <code>row_actions</code>, <code>views_edit-{type}</code></td><td>Admin\List_Table, Admin\Tree_View</td><td>Hierarchy column from one grouped query per screen, parent dropdown, "View subpages" action, "Tree" view.</td></tr>
+      <tr><td><code>enqueue_block_editor_assets</code></td><td>Admin\Assets</td><td>Panel script with post ID, policy, and provider info. DataViews field and action registration where the API exists.</td></tr>
+      <tr><td><code>rest_api_init</code></td><td>REST controllers, Page_Field</td><td>Register the hierarchy and changes routes and the <code>hierarchy_guard</code> field on page objects.</td></tr>
+      <tr><td><code>wxr_export_skip_postmeta</code></td><td>Ledger</td><td>Keep the three ID-marker keys out of exports so they can't point at wrong posts on another site.</td></tr>
+      <tr><td><code>add_meta_boxes</code>, <code>admin_init</code>, <code>admin_notices</code></td><td>Admin\Meta_Box, Settings, Admin\Notices</td><td>Classic editor box, settings section, outcome and progress notices.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Filters for developers</h3>
+  <div class="prose">
+    <ul>
+      <li><code>hierarchy_guard_post_types</code>: adjust the supported types.</li>
+      <li><code>hierarchy_guard_default_trash_policy</code>: override the setting per post or per site.</li>
+      <li><code>hierarchy_guard_batch_threshold</code> (default 200) and <code>hierarchy_guard_count_cap</code> (default 1,000).</li>
+      <li><code>hierarchy_guard_redirect_providers</code>: add or remove detected redirect plugins and their CSV layouts.</li>
+      <li><code>hierarchy_guard_redirect_url</code> and <code>hierarchy_guard_redirect_status</code>: change the target or the 301. The result still passes <code>wp_validate_redirect()</code>.</li>
+      <li><code>hierarchy_guard_should_record</code>: skip recording for a given post.</li>
+      <li>Action <code>hierarchy_guard_children_reparented( $ids, $from, $to )</code> for integrations that need to react to the raw re-parent.</li>
+    </ul>
+  </div>
+
+  <h3>Tooling</h3>
+  <div class="prose">
+    <ul>
+      <li>PHPCS with WordPress Coding Standards, WordPress VIP Go rules, and PHPCompatibilityWP for PHP 8.0 and newer.</li>
+      <li>PHPUnit against the WordPress test suite inside wp-env. GitHub Actions matrix: PHP 8.0 to 8.4, WordPress 6.6 and latest.</li>
+      <li>Release zip built in CI with <code>composer install --no-dev</code> and <code>npm run build</code>, filtered by <code>.distignore</code>.</li>
+      <li>Text domain <code>hierarchy-guard</code>, strings prepared for translate.wordpress.org. The readme documents the batch job, the WP-CLI command, and behaviour with cron disabled.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="testing">
+  <span class="eyebrow sec-eyebrow">Proof</span>
+  <h2>Testing</h2>
+  <div class="prose"><p>PHPUnit is the gate. Each scenario builds a small tree with the test factory, performs the action through the same functions wp-admin calls, and asserts on meta, on query counts where scale matters, and on the HTTP outcome.</p>
+    <ol>
+      <li>Rename a top-level page: exactly one ledger entry, on that page. A request for an old subpage URL resolves through the prefix match to the right subpage.</li>
+      <li>Move a page under another parent: one entry on the moved page; old URLs of its subtree resolve.</li>
+      <li>Chained changes: rename the parent, then move a child; old URLs from before both changes resolve within the round cap.</li>
+      <li>Rename, then rename back: the entry is pruned; a stale entry equal to the current path is pruned on read.</li>
+      <li>Serving on: 301 to the current permalink with pagination preserved; serving off: core's behaviour untouched; POST request: untouched; unknown path: core's guess runs.</li>
+      <li>Trash with re-parent below the threshold: children's parent is the grandparent, modified dates unchanged, markers set, one entry on the grandparent plus one per child whose slug changed, summary stored.</li>
+      <li>Trash with re-parent above the threshold: the first batch runs inline, a job is queued, the processor finishes it, Undo is disabled until done.</li>
+      <li>Trash with the subtree policy: descendants trashed with the marker; untrash via Restore restores them with their previous status, not draft.</li>
+      <li>Reversal fires on a REST status update out of trash, not only on <code>wp_untrash_post()</code>.</li>
+      <li>A trash that fails after <code>wp_trash_post</code> leaves children untouched and writes nothing.</li>
+      <li>Capabilities: a user who can trash the parent but not edit a child gets "keep" for that child and a message saying so.</li>
+      <li>Permanent delete: the deleted page's path is recorded on the grandparent, or in the root list for a top-level page, before core re-parents the children; old subpage URLs resolve.</li>
+      <li>Draft ancestor with an empty slug, front page as parent, private page: paths computed from the slug chain match what core resolves.</li>
+      <li>Hierarchical custom post type with a rewrite slug: entries include the prefix and resolve correctly.</li>
+      <li>Plain permalinks: nothing is recorded and the server is inert.</li>
+      <li>List table: the Hierarchy column adds at most two queries per screen regardless of row count; the subtree filter returns exactly the descendants and caps at 1,000.</li>
+      <li>REST routes require <code>edit_post</code>; response shapes are stable; children page correctly.</li>
+      <li>Markers are absent from a WXR export; old-path entries are present.</li>
+    </ol>
+    <p>Manual checks on the Local site: with Redirection installed and without, confirm detection, deep links, CSV import into Redirection, and the three notice variants. Browser end-to-end tests for the trash dialog are a follow-up.</p>
+  </div>
+</section>
+
+<section id="build">
+  <span class="eyebrow sec-eyebrow">Sequence</span>
+  <h2>Build order</h2>
+  <div class="prose"><p>Each step leaves the plugin activatable and tested. The riskiest logic comes first so the UI is built on something already proven.</p>
+    <ol>
+      <li>Scaffold the repo, wp-env, PHPCS, PHPUnit, and CI. Symlink into a Local site.</li>
+      <li>Paths, Ledger, Resolver, and Change_Listener with their tests, including the query-count assertions. This alone makes every URL change observable and resolvable.</li>
+      <li>Subtree queries with caps, and the cache group.</li>
+      <li>Trash_Handler with capabilities, snapshot and apply, all three policies, reversal, and the Batch job and processor, with tests.</li>
+      <li>Redirects: Providers detection, Server, CSV export, and the Settings › Writing section.</li>
+      <li>REST routes, the page REST field, the editor panel, and the classic meta box.</li>
+      <li>List table: Hierarchy column, subtree filter, parent dropdown, row action, trash Modal, Quick Edit inline warning, outcome notice and redirects Modal.</li>
+      <li>Tree view with tree grid semantics, lazy loading, and server search.</li>
+      <li>DataViews track: the hierarchy field and the replacement trash action, registered wherever the API is available.</li>
+      <li>Notices, readme.txt, uninstall, translation pass, release zip.</li>
+    </ol>
+  </div>
+  <div class="callout">Next step is a written implementation plan from this spec, then step 1. Open items: which Local site to symlink into, and whether the DataViews field and action registration APIs are public in the WordPress version current when step 9 begins.</div>
+</section>
+
+
+<section id="scope">
+  <span class="eyebrow sec-eyebrow">Later or never</span>
+  <h2>Out of scope for 1.0</h2>
+  <div class="prose">
+    <ul>
+      <li>One-click "Add to Redirection" and "Add to Safe Redirect Manager" adapters. Natural 1.1 candidates since both have stable PHP APIs; the CSV export in their layouts covers 1.0.</li>
+      <li>Incrementally maintained descendant counts stored on ancestors. Every such write would bump the posts cache key; the capped walk is enough.</li>
+      <li>A zero-query first-segment gate for the 404 handler. Cached misses with a TTL cover bot traffic; revisit if real sites show otherwise.</li>
+      <li>A redirect log screen. Declined; the outcome notice, the redirects modal, and the per-page panel cover auditing.</li>
+      <li>Attachment URLs under pages. Attachments have hierarchical URLs too, but they are not in the supported types and core's own attachment-page handling is changing.</li>
+      <li>Scanning post content for internal links that point at changed URLs. A different and much larger problem.</li>
+      <li>Non-hierarchical post types. Core already handles their old slugs.</li>
+      <li>Redirects after a permalink structure change. Affects every URL on the site, not the hierarchy.</li>
+      <li>Playwright end-to-end tests. Planned once the dialog settles.</li>
+    </ul>
+  </div>
+</section>
+</div>
