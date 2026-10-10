@@ -41,13 +41,22 @@ final class MoverTest extends WP_UnitTestCase {
 	}
 
 	public function test_moves_a_post_without_touching_its_modified_date(): void {
-		$modified = get_post( $this->ids['team'] )->post_modified;
+		global $wpdb;
+		$wpdb->update(
+			$wpdb->posts,
+			[
+				'post_modified'     => '2001-01-01 00:00:00',
+				'post_modified_gmt' => '2001-01-01 00:00:00',
+			],
+			[ 'ID' => $this->ids['team'] ]
+		);
+		clean_post_cache( $this->ids['team'] );
 
 		$result = $this->mover->move( $this->ids['team'], $this->ids['company'] );
 
 		$this->assertTrue( $result['moved'] );
 		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['team'] )->post_parent );
-		$this->assertSame( $modified, get_post( $this->ids['team'] )->post_modified );
+		$this->assertSame( '2001-01-01 00:00:00', get_post( $this->ids['team'] )->post_modified );
 		$this->assertSame( 'company/about/team', $result['old_path'] );
 		$this->assertSame( 'team', $result['slug'] );
 		$this->assertFalse( $result['renamed'] );
