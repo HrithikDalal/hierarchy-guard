@@ -80,6 +80,19 @@ final class PostTypesTest extends WP_UnitTestCase {
 		$this->assertSame( [ 'hg_docs' ], Post_Types::supported(), 'Saving the option must reset the cache and restrict the list.' );
 	}
 
+	public function test_switching_sites_resets_the_memoised_list(): void {
+		$this->assertContains( 'page', Post_Types::supported() );
+
+		$filter = static fn(): array => [ 'hg_switched' ];
+		add_filter( 'hierarchy_guard_post_types', $filter );
+		$this->assertContains( 'page', Post_Types::supported(), 'Precondition: the memo still holds the earlier list.' );
+
+		// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Fires core's own hook to simulate switch_to_blog().
+		do_action( 'switch_blog', get_current_blog_id(), get_current_blog_id(), 'switch' );
+		$this->assertSame( [ 'hg_switched' ], Post_Types::supported() );
+		remove_filter( 'hierarchy_guard_post_types', $filter );
+	}
+
 	public function test_filter_has_the_final_say(): void {
 		$filter = static fn(): array => [ 'page', 'hg_docs' ];
 		add_filter( 'hierarchy_guard_post_types', $filter );
