@@ -4,7 +4,7 @@ Shows the parent and child structure of pages inside wp-admin, warns before a sl
 
 ## Development
 
-Requires Docker, Node 20+, Composer and PHP 8.0+ on the host.
+Requires Docker, Node 22+, Composer and PHP 8.0+ on the host.
 
 ```bash
 composer install
