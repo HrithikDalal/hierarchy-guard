@@ -36,6 +36,8 @@ final class ResolverTest extends WP_UnitTestCase {
 		delete_option( Ledger::ROOT_OPTION );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
+		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
 
 		$this->ledger   = new Ledger();
 		$this->resolver = new Resolver( $this->ledger );

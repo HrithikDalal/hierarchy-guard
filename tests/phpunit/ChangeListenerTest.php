@@ -37,6 +37,8 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		Post_Types::reset();
 		Change_Listener::suspend( false );
 		$this->set_permalink_structure( '/%postname%/' );
+		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
 
 		$this->ledger  = new Ledger();
 		$this->company = self::factory()->post->create(
