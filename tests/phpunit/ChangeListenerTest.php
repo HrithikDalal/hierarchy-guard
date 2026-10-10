@@ -223,4 +223,14 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			$this->assertStringNotContainsString( '__trashed', $path );
 		}
 	}
+
+	public function test_deleting_a_parent_whose_only_child_is_trashed_records_its_path(): void {
+		wp_trash_post( $this->team );
+		$this->assertSame( 'trash', get_post_status( $this->team ), 'Precondition: the only child is in the trash.' );
+
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->company, (int) get_post( $this->team )->post_parent, 'Precondition: core re-parents trashed children too.' );
+		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->company ) );
+	}
 }

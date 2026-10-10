@@ -131,7 +131,8 @@ final class Change_Listener {
 	}
 
 	/**
-	 * Whether a post has at least one child of the same type. One indexed query.
+	 * Whether a post has at least one child of the same type, in any status:
+	 * core re-parents trashed and auto-draft children too. One indexed query.
 	 *
 	 * @param int    $post_id   Post ID.
 	 * @param string $post_type Post type name.
@@ -141,7 +142,7 @@ final class Change_Listener {
 			[
 				'post_parent'            => $post_id,
 				'post_type'              => $post_type,
-				'post_status'            => 'any',
+				'post_status'            => array_keys( get_post_stati() ),
 				'posts_per_page'         => 1,
 				'fields'                 => 'ids',
 				'no_found_rows'          => true,
