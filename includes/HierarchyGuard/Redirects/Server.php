@@ -264,7 +264,7 @@ final class Server {
 			return user_trailingslashit( trailingslashit( $url ) . 'embed', 'embed' );
 		}
 		if ( '' !== $request['feed'] ) {
-			$feed = get_post_comments_feed_link( $target->ID, $request['feed'] );
+			$feed = (string) get_post_comments_feed_link( $target->ID, $request['feed'] );
 			return '' !== $feed ? $feed : $url;
 		}
 		if ( $request['paged'] > 1 ) {
