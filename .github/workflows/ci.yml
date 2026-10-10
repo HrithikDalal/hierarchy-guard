@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: PHPCS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer lint
+
+  test:
+    name: PHPUnit (PHP ${{ matrix.php }}, WP ${{ matrix.wp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # PHP 8.0 can't run here: wordpress:php8.0 is Debian 11, whose security
+        # repository is gone, so the container never builds. The lint job's
+        # PHPCompatibilityWP (testVersion 8.0-) keeps 8.0 syntax covered.
+        php: [ '8.1', '8.3' ]
+        wp: [ 'latest' ]
+        include:
+          - php: '8.2'
+            wp: 'WordPress/WordPress#6.6-branch'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - run: npm ci
+      # With core null, wp-env uses whatever WordPress the wordpress:phpX.Y image
+      # ships, so name the core explicitly for every cell.
+      - run: npm run env:start
+        env:
+          WP_ENV_PHP_VERSION: ${{ matrix.php }}
+          WP_ENV_CORE: ${{ matrix.wp == 'latest' && 'https://wordpress.org/latest.zip' || matrix.wp }}
+      - run: npm run test:php

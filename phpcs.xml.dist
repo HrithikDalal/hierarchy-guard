@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<ruleset name="Hierarchy Guard">
+	<description>WordPress-Extra, VIP Go and PHP 8.0+ compatibility.</description>
+
+	<file>hierarchy-guard.php</file>
+	<file>includes</file>
+	<file>tests</file>
+
+	<exclude-pattern>/vendor/*</exclude-pattern>
+	<exclude-pattern>/node_modules/*</exclude-pattern>
+	<exclude-pattern>/build/*</exclude-pattern>
+
+	<arg name="extensions" value="php"/>
+	<arg value="sp"/>
+	<arg name="parallel" value="8"/>
+
+	<config name="minimum_wp_version" value="6.6"/>
+	<config name="testVersion" value="8.0-"/>
+
+	<rule ref="WordPress-Extra">
+		<!-- PSR-4 class files. -->
+		<exclude name="WordPress.Files.FileName"/>
+		<!-- Short array syntax is used throughout. -->
+		<exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+	</rule>
+	<rule ref="WordPress-VIP-Go"/>
+	<rule ref="PHPCompatibilityWP"/>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="hierarchy-guard"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="hierarchy_guard"/>
+				<element value="HierarchyGuard"/>
+				<element value="HIERARCHY_GUARD"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Tests may touch globals and the database directly. -->
+	<rule ref="WordPress.DB.DirectDatabaseQuery">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.WP.GlobalVariablesOverride">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPressVIPMinimum">
+		<exclude-pattern>/tests/*</exclude-pattern>
+	</rule>
+
+	<!--
+	WordPressVIPMinimum excludes these two codes, and PHPCS excludes are global, so
+	WordPress-Extra lost them too. A plain rule ref does not undo an exclude (it leaves
+	severity 0); an explicit severity does.
+	-->
+	<rule ref="Squiz.WhiteSpace.SuperfluousWhitespace.EndLine">
+		<severity>5</severity>
+	</rule>
+	<rule ref="Squiz.WhiteSpace.SuperfluousWhitespace.EmptyLines">
+		<severity>5</severity>
+	</rule>
+</ruleset>
