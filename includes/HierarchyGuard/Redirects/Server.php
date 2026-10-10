@@ -119,6 +119,7 @@ final class Server {
 			return null;
 		}
 		$url = $this->reapply_suffixes( $url, $target, $request );
+		$url = $this->append_query_string( $url );
 
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
@@ -135,7 +136,7 @@ final class Server {
 		/**
 		 * Filters the URL a hierarchy redirect sends visitors to.
 		 *
-		 * @param string  $url    Target URL.
+		 * @param string  $url    Target URL, with the request's query string appended.
 		 * @param WP_Post $target The post being redirected to.
 		 * @param string  $path   The requested path, normalized, suffixes removed.
 		 */
@@ -145,9 +146,10 @@ final class Server {
 			return null;
 		}
 
-		// Never redirect to the URL being requested; that would loop.
+		// Never redirect to the URL being requested; that would loop. The query
+		// string is carried over unchanged, so compare without it.
 		$current = home_url( '/' . ltrim( (string) $wp->request, '/' ) );
-		if ( untrailingslashit( $url ) === untrailingslashit( $current ) ) {
+		if ( untrailingslashit( explode( '?', $url, 2 )[0] ) === untrailingslashit( $current ) ) {
 			return null;
 		}
 
@@ -272,6 +274,20 @@ final class Server {
 			return user_trailingslashit( trailingslashit( $url ) . $request['page'], 'single_paged' );
 		}
 		return $url;
+	}
+
+	/**
+	 * Carries the current request's query string over to the target URL.
+	 *
+	 * @param string $url Target URL.
+	 */
+	private function append_query_string( string $url ): string {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding); wp_validate_redirect() runs wp_sanitize_redirect() on the whole URL.
+		$query = isset( $_SERVER['QUERY_STRING'] ) ? (string) wp_unslash( $_SERVER['QUERY_STRING'] ) : '';
+		if ( '' === $query ) {
+			return $url;
+		}
+		return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . $query;
 	}
 
 	/**

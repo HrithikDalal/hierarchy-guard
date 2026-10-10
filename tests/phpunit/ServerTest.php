@@ -67,7 +67,7 @@ final class ServerTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		unset( $_SERVER['REQUEST_METHOD'] );
+		unset( $_SERVER['REQUEST_METHOD'], $_SERVER['QUERY_STRING'] );
 		unregister_post_type( 'hg_docs' );
 		$this->set_permalink_structure( '' );
 		parent::tear_down();
@@ -167,6 +167,21 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertTrue( is_404() );
 		$target = $this->server->target_for_current_request();
 		$this->assertSame( user_trailingslashit( trailingslashit( get_permalink( $this->team ) ) . '2', 'single_paged' ), $target['url'] );
+	}
+
+	public function test_preserves_the_query_string(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		// go_to() leaves QUERY_STRING unset; the web server sets it on a real request.
+		$this->go_to( '/company/about/team/?utm_source=x' );
+		$_SERVER['QUERY_STRING'] = 'utm_source=x';
+
+		$this->assertTrue( is_404() );
+		$this->assertSame( get_permalink( $this->team ) . '?utm_source=x', $this->server->target_for_current_request()['url'] );
 	}
 
 	public function test_preserves_feed_and_embed_suffixes(): void {
@@ -398,6 +413,9 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->go_to( '/x/about/3/' );
 		$this->assertTrue( is_404() );
 		$this->assertNull( $this->server->target_for_current_request() );
+
+		$_SERVER['QUERY_STRING'] = 'utm_source=x';
+		$this->assertNull( $this->server->target_for_current_request(), 'The carried-over query string must not defeat the guard.' );
 	}
 
 	/**
