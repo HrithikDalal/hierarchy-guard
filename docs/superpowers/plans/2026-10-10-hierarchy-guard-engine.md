@@ -23,7 +23,6 @@
 - Recording happens only when the old URL was publicly reachable: pretty permalinks on, supported type, status `publish`, non-empty slug, no `__trashed` segment, neither status in `trash`.
 - Copy rules for any admin string: sentence case, the word "subpages", no product name inside UI text, no exclamation marks.
 - Coding standard: WordPress-Extra (short array syntax allowed, PSR-4 file names allowed), WordPress-VIP-Go, PHPCompatibilityWP with `testVersion 8.0-`. Every file declares `strict_types=1`.
-- Every commit message ends with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - `composer lint` must exit 0, warnings included. Run `composer lint:fix` (phpcbf) first; formatting-only changes phpcbf makes (array line breaks, `=`/`=>` alignment) are expected and are not deviations from this plan. Resolve any remaining warning with a behavior-neutral change, or with a targeted `// phpcs:ignore Sniff.Name.Code -- reason` on the line before. If PHPCS misbehaves under the host's PHP 8.5, run it in the container instead: `npx wp-env run cli --env-cwd=wp-content/plugins/hierarchy-guard vendor/bin/phpcs`.
 - Tests that check a hook is registered must find the plugin's own object in `$GLOBALS['wp_filter'][ $hook ]->callbacks[ $priority ]`; `has_action( $hook )` alone is always true because core registers callbacks on the same hooks.
 
@@ -500,9 +499,7 @@ Expected: no errors. (If PHPCS reports `WordPress.Files.FileName` anywhere, the 
 
 ```bash
 git add -A
-git commit -m "chore: scaffold plugin, wp-env test harness and coding standards
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "chore: scaffold plugin, wp-env test harness and coding standards"
 ```
 
 ---
@@ -919,9 +916,7 @@ Expected: no errors.
 
 ```bash
 git add includes tests
-git commit -m "feat: settings option and supported post types
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: settings option and supported post types"
 ```
 
 ---
@@ -1154,9 +1149,7 @@ Expected: no errors.
 
 ```bash
 git add includes tests
-git commit -m "feat: path normalization and slug-chain URIs
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: path normalization and slug-chain URIs"
 ```
 
 ---
@@ -1557,9 +1550,7 @@ Expected: no errors.
 
 ```bash
 git add includes tests
-git commit -m "feat: old-path ledger with hashed keys, root list and cached lookups
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: old-path ledger with hashed keys, root list and cached lookups"
 ```
 
 ---
@@ -1934,9 +1925,7 @@ Expected: no errors.
 
 ```bash
 git add includes tests
-git commit -m "feat: record URL changes from post_updated and before_delete_post
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: record URL changes from post_updated and before_delete_post"
 ```
 
 ---
@@ -2217,9 +2206,7 @@ Expected: no errors.
 
 ```bash
 git add includes tests
-git commit -m "feat: longest-prefix resolver for old hierarchical paths
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: longest-prefix resolver for old hierarchical paths"
 ```
 
 ---
@@ -2752,9 +2739,7 @@ Expected: no errors.
 
 ```bash
 git add includes tests
-git commit -m "feat: serve 301s for old hierarchical URLs at template_redirect priority 9
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: serve 301s for old hierarchical URLs at template_redirect priority 9"
 ```
 
 ---
@@ -3233,9 +3218,7 @@ Open http://localhost:8888/wp-admin/options-writing.php (admin / password). Expe
 
 ```bash
 git add includes tests
-git commit -m "feat: redirect plugin detection and Page hierarchy section on Settings > Writing
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat: redirect plugin detection and Page hierarchy section on Settings > Writing"
 ```
 
 ---
@@ -3317,9 +3300,7 @@ Expected: prints the line count and `jobs:  lint:  test:` style output with no e
 
 ```bash
 git add .github
-git commit -m "ci: run PHPCS and PHPUnit across PHP and WordPress versions
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "ci: run PHPCS and PHPUnit across PHP and WordPress versions"
 ```
 
 If a GitHub remote exists, push and confirm both jobs are green on the Actions tab. If not, creating the remote is the user's call; leave the branch local.
