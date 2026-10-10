@@ -278,5 +278,24 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->assertSame( 'publish', get_post_status( $this->ids['history'] ) );
 		$this->assertSame( 2, $job['counts']['restored'] );
 		$this->assertSame( 1, $job['counts']['left'] );
+		$this->assertSame( [ $blocked ], $this->marked_ids( Markers::trashed_key( $this->ids['about'] ) ), 'Its row stays for when it does leave the trash.' );
+	}
+
+	public function test_reports_the_subpages_it_moves_back(): void {
+		$this->move_out();
+		$this->untrash_raw( $this->ids['about'] );
+		$seen = [];
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function ( array $ids, int $from, int $to ) use ( &$seen ): void {
+				$seen[] = [ $ids, $from, $to ];
+			},
+			10,
+			3
+		);
+
+		$this->restore();
+
+		$this->assertSame( [ [ [ $this->ids['team'], $this->ids['history'] ], $this->ids['company'], $this->ids['about'] ] ], $seen );
 	}
 }

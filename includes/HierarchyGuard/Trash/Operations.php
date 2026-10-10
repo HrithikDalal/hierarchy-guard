@@ -251,13 +251,14 @@ final class Operations {
 			}
 
 			/**
-			 * Fires after subpages were moved to a new parent with a direct update.
-			 * No save_post runs for them, so search indexes and SEO plugins that
-			 * cache permalinks can re-sync these IDs here.
+			 * Fires after subpages were moved to a new parent with a direct update,
+			 * when their parent is trashed and again when it is restored. No
+			 * save_post runs for them, so search indexes and SEO plugins that cache
+			 * permalinks can re-sync these IDs here.
 			 *
 			 * @param int[] $ids  Moved post IDs.
-			 * @param int   $from The trashed parent.
-			 * @param int   $to   The new parent, 0 for top level.
+			 * @param int   $from The parent they left: the trashed page, or on restore the page they had moved up to.
+			 * @param int   $to   Their new parent, 0 for top level.
 			 */
 			do_action( 'hierarchy_guard_children_reparented', $moved, $root, $to );
 		}
@@ -392,6 +393,7 @@ final class Operations {
 		$root     = (int) $job['root'];
 		$rows     = Markers::rows( Markers::moved_key( $root ), $moves, (int) $job['cursor'] );
 		$restored = [];
+		$by_from  = [];
 		$now      = time();
 		_prime_post_caches( array_column( $rows, 'post_id' ), false, false );
 
@@ -438,10 +440,15 @@ final class Operations {
 				++$job['counts']['renamed'];
 			}
 			++$job['counts']['moved'];
-			$restored[] = $id;
+			$restored[]                = $id;
+			$by_from[ $moved['to'] ][] = $id;
 		}
 
 		Markers::remove( $rows );
+		foreach ( $by_from as $from => $ids ) {
+			/** This action is documented in includes/HierarchyGuard/Trash/Operations.php */
+			do_action( 'hierarchy_guard_children_reparented', $ids, (int) $from, $root );
+		}
 		$job['work']['moves'] = count( $rows );
 		if ( count( $rows ) < $moves ) {
 			$job['phase']  = 'trashed';
@@ -479,17 +486,22 @@ final class Operations {
 				// Core restores it next in its bulk loop; the row gives it its previous status.
 				continue;
 			}
-			$done[] = $row;
 			if ( 'trash' !== get_post_status( $id ) ) {
+				$done[] = $row;
 				continue;
 			}
 
 			++$used;
 			Guard::run( [ $id ], static fn() => wp_untrash_post( $id ) );
 			// A pre_untrash_post filter can answer true without restoring, so the status decides.
-			if ( in_array( Subtree::status( $id ), [ '', 'trash' ], true ) ) {
+			$status = Subtree::status( $id );
+			if ( 'trash' === $status ) {
+				// Its row stays, so it still gets its previous status whenever it does leave the trash.
 				++$job['counts']['left'];
-			} else {
+				continue;
+			}
+			$done[] = $row;
+			if ( '' !== $status ) {
 				++$job['counts']['restored'];
 				$restored[] = $id;
 			}
