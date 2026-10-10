@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html` is a snapshot of the live spec at https://claude.ai/artifact/6V5RMR2w49uPiEp96ycyzq. Read "Trashing a parent" under How it works, the Data model table, Hooks and handlers, Filters for developers and Testing. The Pages-list trash dialog, the outcome notice with its Undo link and the redirects modal are admin UI and belong to plan 3. This plan builds what they call: the `hierarchy_guard_trash_policy` filter, `Trash\Change_Log`, `Trash_Handler::undo()`, and an interim sentence on core's own trash notice.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (239 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (241 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -3165,7 +3165,7 @@ git commit -m "feat: reparent step moves a trashed page's subpages to the neares
 
 **Interfaces:**
 - Consumes: `Guard::run()`, `Markers::add()`, `remove_key()`, `trashed_key()` (Task 1); `Subtree::live_children()`, `with_live_children()`, `status()` (Task 2).
-- Produces: `Operations::step()` handles `TYPE_TRASH`: depth first over `stack` (pairs of `[ parent_id, cursor ]`, starting `[ [ root, 0 ] ]`), only subpages with live children are pushed, each `wp_trash_post()` runs inside `Guard::run( [ $id ] )` with the `_hierarchy_guard_trashed_{root}` row written first. `$calls` bounds the core calls and `$moves` bounds the subpages looked at.
+- Produces: `Operations::step()` handles `TYPE_TRASH`: depth first over `stack` (pairs of `[ parent_id, cursor ]`, starting `[ [ root, 0 ] ]`), only subpages with live children are pushed, each `wp_trash_post()` runs inside `Guard::run( [ $id ] )` with the `_hierarchy_guard_trashed_{root}` row written first. `$calls` bounds the core calls and `$moves` bounds the subpages looked at. Success is decided by the subpage's status read past the cache, because a `pre_trash_post` filter can answer `true` without trashing.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3332,6 +3332,20 @@ final class OperationsTrashTest extends WP_UnitTestCase {
 		$this->assertSame( 1, $job['counts']['kept'] );
 		$this->assertSame( 3, $job['counts']['trashed'] );
 	}
+
+	public function test_a_trash_another_plugin_answers_true_for_changes_nothing_under_it(): void {
+		$blocked = $this->ids['team'];
+		add_filter( 'pre_trash_post', static fn( $check, $post ) => $post->ID === $blocked ? true : $check, 10, 2 );
+
+		$job = $this->operations->run( $this->job() );
+
+		$this->assertSame( 'publish', get_post_status( $blocked ) );
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'Not expanded past a page that stayed live.' );
+		$this->assertSame( 'draft', get_post_status( $this->ids['plans'] ) );
+		$this->assertSame( '', get_post_meta( $blocked, Markers::trashed_key( $this->ids['about'] ), true ) );
+		$this->assertSame( 1, $job['counts']['kept'] );
+		$this->assertSame( 1, $job['counts']['trashed'] );
+	}
 }
 ```
 
@@ -3403,16 +3417,16 @@ and add this method after `step_reparent()`:
 				++$used;
 				// Marked first, so the row exists even if this request dies right after the trash.
 				Markers::add( $kid, Markers::trashed_key( $root ), '1' );
-				if ( Guard::run( [ $kid ], static fn() => wp_trash_post( $kid ) ) ) {
+				Guard::run( [ $kid ], static fn() => wp_trash_post( $kid ) );
+				// A pre_trash_post filter can answer true without trashing, so the status decides.
+				if ( 'trash' === Subtree::status( $kid ) ) {
 					++$job['counts']['trashed'];
 					$now_trashed[] = $kid;
 					continue;
 				}
 
 				Markers::remove_key( $kid, Markers::trashed_key( $root ) );
-				if ( 'trash' !== Subtree::status( $kid ) ) {
-					$job = $this->keep( $job, $kid, false );
-				}
+				$job = $this->keep( $job, $kid, false );
 			}
 
 			foreach ( array_reverse( Subtree::with_live_children( $now_trashed, $type ) ) as $parent_id ) {
@@ -3435,7 +3449,7 @@ and add this method after `step_reparent()`:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter 'OperationsReparentTest|OperationsTrashTest'`
-Expected: `OK (21 tests, 94 assertions)`.
+Expected: `OK (22 tests, 100 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -3457,7 +3471,7 @@ git commit -m "feat: trash-subtree step trashes descendants depth first under th
 
 **Interfaces:**
 - Consumes: `Markers::rows()`, `remove()`, `decode_moved()`, `previous_status()` filter (Task 1); `Mover::move()` with a preferred slug, `Mover::reparent()`, `Subtree::status()` (Task 2); `Ledger::record()`, `prune()`, `forget_alias()` (Task 3).
-- Produces: `Operations::step()` handles `TYPE_RESTORE` in two phases. Phase `moved` reads `_hierarchy_guard_moved_{root}` rows: a subpage still under the recorded parent moves back (its original slug only if the editor hasn't renamed it since; a subpage that is itself in the trash gets only its parent and desired slug back), its interim path is recorded when the move is at least `INTERIM_AGE` old, and every row is deleted. Phase `trashed` untrashes `_hierarchy_guard_trashed_{root}` subpages under the guard (rows of IDs core is about to restore are kept for core). When both are done, the root's aliases are removed. It also handles `TYPE_CLEANUP`, which deletes the rows of a deleted root. Counts: `moved`, `restored`, `left`, `renamed`.
+- Produces: `Operations::step()` handles `TYPE_RESTORE` in two phases. Phase `moved` reads `_hierarchy_guard_moved_{root}` rows: a subpage still under the recorded parent moves back (its original slug only if the editor hasn't renamed it since; a subpage that is itself in the trash gets only its parent and desired slug back), its interim path is recorded when the move is at least `INTERIM_AGE` old, and every row is deleted. Phase `trashed` untrashes `_hierarchy_guard_trashed_{root}` subpages under the guard (rows of IDs core is about to restore are kept for core); success is decided by the status read past the cache, because a `pre_untrash_post` filter can answer `true` without restoring. When both are done, the root's aliases are removed. It also handles `TYPE_CLEANUP`, which deletes the rows of a deleted root. Counts: `moved`, `restored`, `left`, `renamed`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3730,6 +3744,20 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->assertTrue( $job['finished'] );
 		$this->assertSame( 0, Markers::count( $this->ids['about'], 10 ) );
 	}
+
+	public function test_an_untrash_another_plugin_answers_true_for_is_not_counted(): void {
+		$this->trash_out();
+		$this->untrash_raw( $this->ids['about'] );
+		$blocked = $this->ids['team'];
+		add_filter( 'pre_untrash_post', static fn( $check, $post ) => $post->ID === $blocked ? true : $check, 10, 2 );
+
+		$job = $this->restore();
+
+		$this->assertSame( 'trash', get_post_status( $blocked ) );
+		$this->assertSame( 'publish', get_post_status( $this->ids['history'] ) );
+		$this->assertSame( 2, $job['counts']['restored'] );
+		$this->assertSame( 1, $job['counts']['left'] );
+	}
 }
 ```
 
@@ -3890,11 +3918,13 @@ and add these methods after `step_trash_children()`:
 			}
 
 			++$used;
-			if ( Guard::run( [ $id ], static fn() => wp_untrash_post( $id ) ) ) {
+			Guard::run( [ $id ], static fn() => wp_untrash_post( $id ) );
+			// A pre_untrash_post filter can answer true without restoring, so the status decides.
+			if ( in_array( Subtree::status( $id ), [ '', 'trash' ], true ) ) {
+				++$job['counts']['left'];
+			} else {
 				++$job['counts']['restored'];
 				$restored[] = $id;
-			} else {
-				++$job['counts']['left'];
 			}
 		}
 
@@ -3950,7 +3980,7 @@ and add these methods after `step_trash_children()`:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter Operations`
-Expected: `OK (34 tests, 134 assertions)`.
+Expected: `OK (36 tests, 144 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -5534,6 +5564,12 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$result = $this->handler()->undo( $this->ids['about'] );
 		$this->assertSame( 'hierarchy_guard_forbidden', $result->get_error_code() );
 		$this->assertSame( 'trash', get_post_status( $this->ids['about'] ) );
+
+		wp_set_current_user( $this->admin );
+		add_filter( 'pre_untrash_post', '__return_true' );
+		$result = $this->handler()->undo( $this->ids['about'] );
+		$this->assertSame( 'hierarchy_guard_restore_failed', $result->get_error_code(), 'A filter that answers true without restoring is no success.' );
+		$this->assertSame( '“About” could not be restored from the trash.', $result->get_error_message() );
 	}
 
 	public function test_large_subtrees_move_in_background_batches(): void {
@@ -6122,12 +6158,13 @@ final class Trash_Handler {
 
 		$this->undo_ids[ $root_id ] = true;
 		try {
-			$restored = wp_untrash_post( $root_id );
+			wp_untrash_post( $root_id );
 		} finally {
 			unset( $this->undo_ids[ $root_id ] );
 		}
 
-		if ( ! $restored ) {
+		// A pre_untrash_post filter can answer true without restoring, so the status decides.
+		if ( 'trash' === Subtree::status( $root_id ) ) {
 			/* translators: %s: page title. */
 			return new WP_Error( 'hierarchy_guard_restore_failed', sprintf( __( '“%s” could not be restored from the trash.', 'hierarchy-guard' ), self::title( $post ) ) );
 		}
@@ -6340,7 +6377,7 @@ In `includes/HierarchyGuard/Plugin.php`, add after `$processor->register();`:
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter TrashHandlerTest`
-Expected: `OK (26 tests, 143 assertions)`.
+Expected: `OK (26 tests, 145 assertions)`.
 
 Run: `npm run test:php`
 Expected: all green, including `ChangeListenerTest` and `ResolverTest` under the keep policy. If any other engine test now fails because a subpage moved, it is exercising core's trash behavior: pin it with the same keep filter and say so in the report; do not change its assertions.
@@ -7108,7 +7145,7 @@ Subpages move with a direct database update, the way core moves them when it del
 - [ ] **Step 6: Run the full suite and lint**
 
 Run: `npm run test:php` and `composer lint`
-Expected: `OK (239 tests, 811 assertions)`; lint exit 0.
+Expected: `OK (241 tests, 823 assertions)`; lint exit 0.
 
 - [ ] **Step 7: Verify on the dev site**
 
