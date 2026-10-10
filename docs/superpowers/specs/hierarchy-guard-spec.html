@@ -462,7 +462,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   </figure>
 
   <h3>Trashing a parent</h3>
-  <div class="prose"><p>The policy is resolved and capabilities are checked before core acts. Inside the <code>wp_trash_post</code> action the plugin only snapshots current paths, because core has committed nothing yet and the trash can still fail. Mutation happens in <code>trashed_post</code>, after success. Re-parenting uses the same raw update and cache clear core uses in <code>wp_delete_post()</code>, so children's content is not re-filtered and their modified dates don't move. Up to the batch threshold everything runs inline; beyond it a background job processes batches with a progress notice, and Undo waits for it. Reversal is triggered by any transition out of trash, not only the Restore link, and restores subpages with their previous status.</p></div>
+  <div class="prose"><p>The policy is resolved and capabilities are checked before core acts. Inside the <code>wp_trash_post</code> action the plugin only snapshots current paths, because core has committed nothing yet and the trash can still fail. Mutation happens in <code>trashed_post</code>, after success. Re-parenting uses the same raw update and cache clear core uses in <code>wp_delete_post()</code>, so children's content is not re-filtered and their modified dates don't move. Up to the batch threshold everything runs inline; beyond it a background job processes batches with a progress notice, and Undo waits for it. Reversal is triggered by any transition out of trash, not only the Restore link, and restores subpages with their previous status. Capability checks use the user who trashed the parent. When there is no user, as in cron or WP-CLI without <code>--user</code>, the call is trusted the way core trusts its own API. Each page's policy is filterable, which is how the Pages list dialog passes the editor's choice. If a subpage's slug is already taken under its new parent, it gets a numbered slug and its old URL is recorded on it directly. Restoring gives it back its original slug when that is free again. A batch still running when its parent is restored stops, and the restore takes back what it had done. Restoring also records each moved-back subpage's interim URL, so links made while the parent was in the trash keep working.</p></div>
   <figure>
     <div class="scroll">
     <svg class="dg" viewBox="0 0 780 680" role="img" aria-label="Flow for trashing a page. If it has no subpages core trashes it. Otherwise the editor is asked in the Pages list, or the default policy applies elsewhere. Capabilities are checked per child. Current paths are snapshotted in wp_trash_post, core trashes the parent, and the policy is applied in trashed_post inline or in background batches. A notice with Undo appears. Restore or Undo reverses the move through transition_post_status.">
@@ -610,8 +610,9 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
       <tr><td>Post meta</td><td><code>_hierarchy_guard_trashed_with</code></td><td>Parent ID</td><td>Set on subpages trashed under the subtree policy. Restored with the parent, with their previous status via core's own filter. Excluded from WXR export.</td></tr>
       <tr><td>Option</td><td><code>hierarchy_guard_settings</code></td><td><code>post_types</code>, <code>trash_policy</code>, <code>serve_redirects</code></td><td>The three settings. Autoloaded. Absent keys fall back to defaults.</td></tr>
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_root_paths</code></td><td>Old parent paths whose children became top level, per post type, capped at 200</td><td>Consulted by the resolver after post entries. Pruned when the children move back.</td></tr>
-      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{id}</code></td><td>Root ID, action, policy, cursor, done and total counts</td><td>A background batch job for subtrees above the inline threshold. Deleted on completion.</td></tr>
-      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Root ID, action, policy, moved child IDs (up to 200) or job ID, counts, timestamp</td><td>Feeds the outcome notice and Undo for thirty minutes. Pairs are never stored; they are computed on demand.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{id}</code></td><td>Type, root ID, target parent, post type, triggering user, cursor and frontier, counts, up to 200 affected IDs</td><td>A background batch job for subtrees above the inline threshold. Deleted on completion.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_jobs</code></td><td>IDs of queued jobs</td><td>Lets WP-CLI and Undo find running jobs.</td></tr>
+      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Action, root ID, policy, counts, up to 200 affected IDs, the job ID while a batch runs, timestamp</td><td>Feeds the outcome notice and Undo for thirty minutes. Pairs are never stored; they are computed on demand.</td></tr>
     </tbody>
   </table>
   </div>
@@ -651,9 +652,10 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
 │   ├── Paths.php                    old and current relative paths from the slug chain, normalized
 │   ├── Ledger.php                   record · prune · seek by hashed key · root list · own cache group
 │   ├── Change_Listener.php          post_updated, before_delete_post; zero-query early returns; suspend flag
-│   ├── Trash_Handler.php            policy, capability checks, snapshot, apply, reversal on transition_post_status
-│   ├── Batch/Job.php · Batch/Processor.php   cron-driven batches, Action Scheduler when present, WP-CLI command
-│   ├── Capabilities.php             per-child edit_post / delete_post checks, downgrade reporting
+│   ├── Trash/Trash_Handler.php      policy, snapshot in wp_trash_post, apply in trashed_post, reversal on transition_post_status, undo
+│   ├── Trash/Operations.php         reparent, trash-subtree and restore steps with per-child capability checks
+│   ├── Trash/Mover.php · Markers.php · Guard.php · Change_Log.php   raw re-parent, ID markers, re-entrancy guard, change summary
+│   ├── Batch/Queue.php · Processor.php · CLI_Command.php   cron or Action Scheduler batches, wp hierarchy-guard process-jobs
 │   ├── Redirects/Resolver.php       longest-prefix resolution, chained rounds, seen-set
 │   ├── Redirects/Server.php         template_redirect priority 9, GET/HEAD, validate, 301
 │   ├── Redirects/Providers.php      detect redirect plugins, deep links, CSV layouts
@@ -699,12 +701,14 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
   <div class="prose">
     <ul>
       <li><code>hierarchy_guard_post_types</code>: adjust the supported types.</li>
-      <li><code>hierarchy_guard_default_trash_policy</code>: override the setting per post or per site.</li>
+      <li><code>hierarchy_guard_default_trash_policy</code>: override the setting site-wide.</li>
+      <li><code>hierarchy_guard_trash_policy( $policy, $post )</code>: choose the policy for one page; the Pages list dialog uses it.</li>
       <li><code>hierarchy_guard_batch_threshold</code> (default 200) and <code>hierarchy_guard_count_cap</code> (default 1,000).</li>
       <li><code>hierarchy_guard_redirect_providers</code>: add or remove detected redirect plugins and their CSV layouts.</li>
       <li><code>hierarchy_guard_redirect_url</code> and <code>hierarchy_guard_redirect_status</code>: change the target or the 301. The result still passes <code>wp_validate_redirect()</code>.</li>
       <li><code>hierarchy_guard_should_record</code>: skip recording for a given post.</li>
       <li>Action <code>hierarchy_guard_children_reparented( $ids, $from, $to )</code> for integrations that need to react to the raw re-parent.</li>
+      <li>Action <code>hierarchy_guard_job_finished( $job )</code> when a background batch job completes.</li>
     </ul>
   </div>
 
