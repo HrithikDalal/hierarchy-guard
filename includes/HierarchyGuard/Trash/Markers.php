@@ -246,7 +246,17 @@ final class Markers {
 	 * @return bool
 	 */
 	public static function has_trashed_row( int $post_id ): bool {
-		return [] !== self::trashed_keys( $post_id );
+		return [] !== self::keys_with_prefix( $post_id, self::TRASHED_PREFIX );
+	}
+
+	/**
+	 * Whether a post sits where the trash flow moved it, so a restore may still move it back.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return bool
+	 */
+	public static function has_moved_row( int $post_id ): bool {
+		return [] !== self::keys_with_prefix( $post_id, self::MOVED_PREFIX );
 	}
 
 	/**
@@ -256,7 +266,7 @@ final class Markers {
 	 * @return int Rows deleted.
 	 */
 	public static function clear_trashed_rows( int $post_id ): int {
-		$keys = self::trashed_keys( $post_id );
+		$keys = self::keys_with_prefix( $post_id, self::TRASHED_PREFIX );
 		foreach ( $keys as $key ) {
 			self::remove_key( $post_id, $key );
 		}
@@ -264,15 +274,16 @@ final class Markers {
 	}
 
 	/**
-	 * A post's trashed-with marker keys.
+	 * A post's marker keys with a prefix.
 	 *
-	 * @param int $post_id Post ID.
+	 * @param int    $post_id Post ID.
+	 * @param string $prefix  Key prefix.
 	 * @return string[]
 	 */
-	private static function trashed_keys( int $post_id ): array {
+	private static function keys_with_prefix( int $post_id, string $prefix ): array {
 		$keys = [];
 		foreach ( array_keys( (array) get_post_meta( $post_id ) ) as $key ) {
-			if ( str_starts_with( (string) $key, self::TRASHED_PREFIX ) ) {
+			if ( str_starts_with( (string) $key, $prefix ) ) {
 				$keys[] = (string) $key;
 			}
 		}

@@ -13,6 +13,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
+use HierarchyGuard\Trash\Markers;
 use WP_UnitTestCase;
 
 /**
@@ -397,5 +398,36 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->assertSame( $this->about, $this->resolver->resolve( 'page', 'company/about' )->ID );
 		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID );
 		$this->assertNull( $this->resolver->resolve( 'page', 'company' ) );
+	}
+
+	public function test_a_redirect_a_restore_can_undo_is_temporary(): void {
+		global $wpdb;
+
+		wp_trash_post( $this->about );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
+		clean_post_cache( $this->team );
+		Markers::add( $this->team, Markers::moved_key( $this->about ), Markers::encode_moved( $this->company, 'team', 'team', time() ) );
+		$this->ledger->record_alias( 'page', $this->company, 'company/about' );
+		$this->ledger->record( $this->about, 'company/about' );
+
+		$temporary = false;
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team', $temporary )->ID );
+		$this->assertTrue( $temporary, 'The page the old URL belonged to is only in the trash.' );
+
+		// Emptying the trash makes the move permanent: about's own entry goes with it, and so does the marker.
+		Markers::remove_key( $this->team, Markers::moved_key( $this->about ) );
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team', $temporary )->ID );
+		$this->assertFalse( $temporary );
+	}
+
+	public function test_a_redirect_to_a_subpage_a_restore_will_move_back_is_temporary(): void {
+		$this->ledger->record( $this->team, 'company/about/team-old' );
+		Markers::add( $this->team, Markers::moved_key( $this->about ), Markers::encode_moved( $this->about, 'team', 'team', time() ) );
+
+		$temporary = false;
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team-old', $temporary )->ID );
+		$this->assertTrue( $temporary );
 	}
 }

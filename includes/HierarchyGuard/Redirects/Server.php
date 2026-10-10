@@ -103,9 +103,10 @@ final class Server {
 			return null;
 		}
 
-		$target = null;
+		$target    = null;
+		$temporary = false;
 		foreach ( $this->candidates( $request['path'] ) as [ $post_type, $path ] ) {
-			$target = $this->resolver->resolve( $post_type, $path );
+			$target = $this->resolver->resolve( $post_type, $path, $temporary );
 			if ( null !== $target ) {
 				break;
 			}
@@ -124,11 +125,11 @@ final class Server {
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
 		 *
-		 * @param int     $status Status code, 301 by default.
+		 * @param int     $status Status code: 301, or 302 while a restore from the trash could still undo the move the redirect follows.
 		 * @param WP_Post $target The post being redirected to.
 		 * @param string  $path   The requested path, normalized, suffixes removed.
 		 */
-		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', 301, $target, $request['path'] );
+		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', $temporary ? 302 : 301, $target, $request['path'] );
 		if ( ! in_array( $status, [ 301, 302, 307, 308 ], true ) ) {
 			$status = 301;
 		}

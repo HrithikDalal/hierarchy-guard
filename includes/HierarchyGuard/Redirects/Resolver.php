@@ -11,6 +11,7 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
@@ -39,13 +40,15 @@ final class Resolver {
 	/**
 	 * The publicly viewable post an old path now leads to, or null.
 	 *
-	 * @param string $post_type Post type the request was for.
-	 * @param string $path      Requested path, any form.
+	 * @param string    $post_type Post type the request was for.
+	 * @param string    $path      Requested path, any form.
+	 * @param bool|null $temporary Set to true when a restore from the trash could still undo the move the answer follows.
 	 * @return WP_Post|null
 	 */
-	public function resolve( string $post_type, string $path ): ?WP_Post {
-		$path = Paths::normalize( $path );
-		$seen = [];
+	public function resolve( string $post_type, string $path, ?bool &$temporary = null ): ?WP_Post {
+		$temporary = false;
+		$path      = Paths::normalize( $path );
+		$seen      = [];
 
 		for ( $round = 0; $round < self::MAX_ROUNDS; $round++ ) {
 			if ( '' === $path || isset( $seen[ $path ] ) ) {
@@ -53,7 +56,7 @@ final class Resolver {
 			}
 			$seen[ $path ] = true;
 
-			$candidate = $this->rewrite_once( $post_type, $path );
+			$candidate = $this->rewrite_once( $post_type, $path, $temporary );
 			if ( null === $candidate ) {
 				return null;
 			}
@@ -83,9 +86,10 @@ final class Resolver {
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
+	 * @param bool   $temporary Set to true when the prefix used belongs to a move a restore could undo.
 	 * @return string|null The rewritten path, or null when no prefix matched.
 	 */
-	private function rewrite_once( string $post_type, string $path ): ?string {
+	private function rewrite_once( string $post_type, string $path, bool &$temporary ): ?string {
 		$segments = explode( '/', $path );
 
 		for ( $length = count( $segments ); $length >= 1; $length-- ) {
@@ -111,6 +115,10 @@ final class Resolver {
 			}
 
 			$remainder = implode( '/', array_slice( $segments, $length ) );
+
+			if ( $this->ledger->held_in_trash( $post_type, $prefix ) || ( $hit > 0 && Markers::has_moved_row( $hit ) ) ) {
+				$temporary = true;
+			}
 
 			return trim( $base . '/' . $remainder, '/' );
 		}
