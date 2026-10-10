@@ -267,7 +267,7 @@ final class Operations {
 			 * permalinks can re-sync these IDs here.
 			 *
 			 * @param int[] $ids  Moved post IDs.
-			 * @param int   $from The parent they left: the trashed page, or on restore the page they had moved up to.
+			 * @param int   $from The parent they left: the trashed page, or on restore the page they had moved up to, 0 for top level.
 			 * @param int   $to   Their new parent, 0 for top level.
 			 */
 			do_action( 'hierarchy_guard_children_reparented', $moved, $root, $to );

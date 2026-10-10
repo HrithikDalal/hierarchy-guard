@@ -116,8 +116,9 @@ final class QueueTest extends WP_UnitTestCase {
 		$renewed = $this->queue->extend( 10, $token );
 		$this->assertGreaterThan( $token, $renewed );
 
-		$wpdb->update( $wpdb->options, [ 'option_value' => (string) ( time() - 1 ) ], [ 'option_name' => Queue::lock_option( 10 ) ] );
-		$other = $this->queue->lock( 10 );
+		// Another process took the lock over: its token differs from this run's.
+		$other = $renewed + 1000;
+		$wpdb->update( $wpdb->options, [ 'option_value' => (string) $other ], [ 'option_name' => Queue::lock_option( 10 ) ] );
 
 		$this->assertSame( 0, $this->queue->extend( 10, $renewed ), 'A run whose lock was taken over learns it.' );
 		$this->assertGreaterThan( $other, $this->queue->extend( 10, $other ) );

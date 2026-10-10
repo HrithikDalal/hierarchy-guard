@@ -55,6 +55,7 @@ final class GuardTest extends WP_UnitTestCase {
 					throw new RuntimeException( 'boom' );
 				}
 			);
+			$this->fail( 'The exception must reach the caller.' );
 		} catch ( RuntimeException $e ) {
 			$this->assertSame( 'boom', $e->getMessage() );
 		}

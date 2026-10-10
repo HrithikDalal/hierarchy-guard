@@ -377,7 +377,10 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->more_subpages( [ 'a', 'b', 'c' ] );
 		wp_trash_post( $this->ids['about'] );
 
+		// A real Undo is a new request with a fresh budget.
+		$this->handler()->reset_request_budget();
 		$this->assertTrue( $this->handler()->undo( $this->ids['about'] ) );
+		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'The inline restore already brought back the two that moved.' );
 		$this->processor()->run( $this->ids['about'] );
 
 		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );

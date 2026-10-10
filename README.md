@@ -4,7 +4,7 @@ Records every page URL change and redirects old subpage URLs to their new locati
 
 ## Trashing a page with subpages
 
-By default, trashing a page moves its subpages up one level, so they don't end up under a `__trashed` URL, and records their old URLs. Turn on Redirects in Settings › Writing › Page hierarchy, or add the recorded URLs to a redirect plugin, and visitors on an old URL reach the new one. The same section can trash the subpages too, or leave them where they are. A subpage the user who trashed the page can't edit stays under it. Restoring the page, whether by Undo, Restore, or a status change over the REST API or WP-CLI, moves the subpages back, and those trashed with it come back with the status they had.
+By default, trashing a page moves its subpages up one level, so they don't end up under a `__trashed` URL, and records their old URLs. Turn on Redirects in Settings › Writing › Page hierarchy and visitors on an old URL reach the new one. While the page is in the trash those redirects are temporary, so browsers don't keep them after a restore. The same section can trash the subpages too, or leave them where they are. A subpage the user who trashed the page can't move or trash stays under it. Restoring the page, whether by Undo, Restore, or a status change over the REST API or WP-CLI, moves the subpages back, and those trashed with it come back with the status they had.
 
 ## Background jobs
 
