@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Trash;
 
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Paths;
 use HierarchyGuard\Subtree;
 use WP_Post;
 
@@ -157,6 +158,10 @@ final class Operations {
 				return $this->step_reparent( $job, $moves );
 			case self::TYPE_TRASH:
 				return $this->step_trash_children( $job, $moves, $calls );
+			case self::TYPE_RESTORE:
+				return $this->step_restore( $job, $moves, $calls );
+			case self::TYPE_CLEANUP:
+				return $this->step_cleanup( $job, $moves );
 		}
 
 		$job['finished'] = true;
@@ -341,6 +346,201 @@ final class Operations {
 		$job['finished'] = [] === $stack;
 
 		return $this->remember( $job, $trashed );
+	}
+
+	/**
+	 * Takes back the moves and trashes for a restored root: moved subpages
+	 * first, then subpages trashed with it.
+	 *
+	 * @param array<string,mixed> $job   Job.
+	 * @param int                 $moves Most moved subpages to handle.
+	 * @param int                 $calls Most core untrash calls.
+	 * @return array<string,mixed>
+	 */
+	private function step_restore( array $job, int $moves, int $calls ): array {
+		if ( in_array( Subtree::status( (int) $job['root'] ), [ '', 'trash' ], true ) ) {
+			$job['finished'] = true;
+			return $job;
+		}
+
+		if ( 'moved' === $job['phase'] ) {
+			$job = $this->restore_moved( $job, $moves );
+			if ( 'moved' === $job['phase'] ) {
+				return $job;
+			}
+		}
+
+		$job = $this->restore_trashed( $job, $calls );
+		if ( ! empty( $job['finished'] ) ) {
+			$this->finish_restore( $job );
+		}
+		return $job;
+	}
+
+	/**
+	 * Moves subpages back under the restored root.
+	 *
+	 * @param array<string,mixed> $job   Job.
+	 * @param int                 $moves Most rows to handle.
+	 * @return array<string,mixed>
+	 */
+	private function restore_moved( array $job, int $moves ): array {
+		if ( $moves < 1 ) {
+			return $job;
+		}
+
+		$root     = (int) $job['root'];
+		$rows     = Markers::rows( Markers::moved_key( $root ), $moves, (int) $job['cursor'] );
+		$restored = [];
+		$now      = time();
+		_prime_post_caches( array_column( $rows, 'post_id' ), false, false );
+
+		foreach ( $rows as $row ) {
+			$job['cursor'] = $row['meta_id'];
+			$id            = $row['post_id'];
+			$moved         = Markers::decode_moved( $row['value'] );
+			$post          = get_post( $id );
+			if ( ! $post instanceof WP_Post ) {
+				continue;
+			}
+			if ( (int) $post->post_parent !== $moved['to'] ) {
+				// An editor moved it somewhere else since: leave it there.
+				++$job['counts']['left'];
+				continue;
+			}
+
+			if ( 'trash' === $post->post_status ) {
+				// Moved up, then trashed on its own: put it back under the root, still in the trash.
+				$this->mover->reparent( $id, $root );
+				if ( $moved['original'] !== $moved['assigned'] && get_post_meta( $id, '_wp_desired_post_slug', true ) === $moved['assigned'] ) {
+					update_post_meta( $id, '_wp_desired_post_slug', $moved['original'] );
+				}
+				++$job['counts']['moved'];
+				$restored[] = $id;
+				continue;
+			}
+
+			// The original slug comes back only if the editor hasn't renamed the subpage since.
+			$preferred = ( '' !== $moved['original'] && (string) $post->post_name === $moved['assigned'] ) ? $moved['original'] : '';
+			$interim   = Paths::uri( $post );
+			$result    = $this->mover->move( $id, $root, $preferred );
+			if ( ! $result['moved'] ) {
+				++$job['counts']['left'];
+				continue;
+			}
+
+			if ( $result['recordable'] && $this->recording() && $now - $moved['time'] >= self::INTERIM_AGE ) {
+				// Links made while the parent was in the trash keep working.
+				$this->ledger->record( $id, $interim );
+			}
+			$this->ledger->prune( $id );
+			if ( ( '' !== $preferred && $result['slug'] !== $preferred ) || ( '' === $preferred && $result['renamed'] ) ) {
+				++$job['counts']['renamed'];
+			}
+			++$job['counts']['moved'];
+			$restored[] = $id;
+		}
+
+		Markers::remove( $rows );
+		$job['work']['moves'] = count( $rows );
+		if ( count( $rows ) < $moves ) {
+			$job['phase']  = 'trashed';
+			$job['cursor'] = 0;
+		}
+
+		return $this->remember( $job, $restored );
+	}
+
+	/**
+	 * Restores subpages trashed together with the root. Their marker row makes
+	 * core give them their previous status.
+	 *
+	 * @param array<string,mixed> $job   Job.
+	 * @param int                 $calls Most rows to handle.
+	 * @return array<string,mixed>
+	 */
+	private function restore_trashed( array $job, int $calls ): array {
+		if ( $calls < 1 ) {
+			return $job;
+		}
+
+		$root     = (int) $job['root'];
+		$core     = Request::core_ids();
+		$rows     = Markers::rows( Markers::trashed_key( $root ), $calls, (int) $job['cursor'] );
+		$done     = [];
+		$restored = [];
+		$used     = 0;
+		_prime_post_caches( array_column( $rows, 'post_id' ), false, false );
+
+		foreach ( $rows as $row ) {
+			$job['cursor'] = $row['meta_id'];
+			$id            = $row['post_id'];
+			if ( in_array( $id, $core, true ) ) {
+				// Core restores it next in its bulk loop; the row gives it its previous status.
+				continue;
+			}
+			$done[] = $row;
+			if ( 'trash' !== get_post_status( $id ) ) {
+				continue;
+			}
+
+			++$used;
+			Guard::run( [ $id ], static fn() => wp_untrash_post( $id ) );
+			// A pre_untrash_post filter can answer true without restoring, so the status decides.
+			if ( in_array( Subtree::status( $id ), [ '', 'trash' ], true ) ) {
+				++$job['counts']['left'];
+			} else {
+				++$job['counts']['restored'];
+				$restored[] = $id;
+			}
+		}
+
+		Markers::remove( $done );
+		$job['work']['calls'] += $used;
+		$job['finished']       = count( $rows ) < $calls;
+
+		return $this->remember( $job, $restored );
+	}
+
+	/**
+	 * Removes the aliases the trash recorded, now that the subpages are back.
+	 * The page's own entry for the path it is back at goes too; an entry for a
+	 * path it no longer has stays and leads to it.
+	 *
+	 * @param array<string,mixed> $job Finished restore job.
+	 */
+	private function finish_restore( array $job ): void {
+		$root    = (int) $job['root'];
+		$aliases = get_post_meta( $root, Markers::ALIASES, true );
+		foreach ( is_array( $aliases ) ? $aliases : [] as $alias ) {
+			$this->ledger->forget_alias( (string) $job['post_type'], (int) ( $alias['to'] ?? 0 ), (string) ( $alias['path'] ?? '' ) );
+		}
+		delete_post_meta( $root, Markers::ALIASES );
+		$this->ledger->prune( $root );
+	}
+
+	/**
+	 * Deletes marker rows that point at a permanently deleted root.
+	 *
+	 * @param array<string,mixed> $job   Job.
+	 * @param int                 $moves Most rows to delete.
+	 * @return array<string,mixed>
+	 */
+	private function step_cleanup( array $job, int $moves ): array {
+		if ( $moves < 1 ) {
+			return $job;
+		}
+
+		$root = (int) $job['root'];
+		$rows = Markers::rows( Markers::moved_key( $root ), $moves );
+		if ( count( $rows ) < $moves ) {
+			$rows = array_merge( $rows, Markers::rows( Markers::trashed_key( $root ), $moves - count( $rows ) ) );
+		}
+		Markers::remove( $rows );
+
+		$job['work']['moves'] = count( $rows );
+		$job['finished']      = count( $rows ) < $moves;
+		return $job;
 	}
 
 	/**
