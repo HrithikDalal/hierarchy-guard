@@ -31,26 +31,48 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 	}
 
 	public function test_section_and_fields_register_on_the_writing_page(): void {
-		global $wp_settings_sections, $wp_settings_fields, $wp_registered_settings;
+		global $wp_settings_sections, $wp_settings_fields;
 
 		$this->section->add();
 
 		$this->assertArrayHasKey( 'hierarchy_guard', $wp_settings_sections['writing'] );
 		$this->assertCount( 3, $wp_settings_fields['writing']['hierarchy_guard'] );
-		$this->assertArrayHasKey( Settings::OPTION, $wp_registered_settings );
-		$this->assertSame( [ Settings::class, 'sanitize' ], $wp_registered_settings[ Settings::OPTION ]['sanitize_callback'] );
 	}
 
-	public function test_registration_is_hooked_to_admin_init_by_the_plugin(): void {
-		global $wp_filter;
+	public function test_option_registers_with_the_sanitize_callback(): void {
+		global $wp_registered_settings;
 
-		$found = false;
-		foreach ( $wp_filter['admin_init']->callbacks[10] ?? [] as $callback ) {
-			if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Settings_Section && 'add' === $callback['function'][1] ) {
-				$found = true;
+		unregister_setting( Settings_Section::PAGE, Settings::OPTION );
+		$this->assertArrayNotHasKey( Settings::OPTION, $wp_registered_settings, 'Precondition: the bootstrap init registration is undone.' );
+
+		$this->section->register_option();
+
+		$this->assertArrayHasKey( Settings::OPTION, $wp_registered_settings );
+		$this->assertSame( [ Settings::class, 'sanitize' ], $wp_registered_settings[ Settings::OPTION ]['sanitize_callback'] );
+		$this->assertSame( Settings_Section::PAGE, $wp_registered_settings[ Settings::OPTION ]['group'] );
+	}
+
+	public function test_option_is_registered_on_init_by_the_plugin(): void {
+		$this->assertTrue( $this->plugin_section_on( 'init', 'register_option' ), 'Registering on init lets the sanitize callback cover WP-CLI and REST writes.' );
+		$this->assertFalse( $this->plugin_section_on( 'admin_init', 'register_option' ) );
+	}
+
+	public function test_section_is_added_on_admin_init_by_the_plugin(): void {
+		$this->assertTrue( $this->plugin_section_on( 'admin_init', 'add' ) );
+	}
+
+	/**
+	 * Whether a Settings_Section method is hooked at priority 10. has_action( $hook )
+	 * alone proves nothing: core hooks init and admin_init too.
+	 */
+	private function plugin_section_on( string $hook, string $method ): bool {
+		global $wp_filter;
+		foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
+			if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Settings_Section && $method === $callback['function'][1] ) {
+				return true;
 			}
 		}
-		$this->assertTrue( $found, 'has_action( "admin_init" ) alone proves nothing: core hooks admin_init too.' );
+		return false;
 	}
 
 	public function test_post_types_field_lists_hierarchical_types_with_current_state(): void {

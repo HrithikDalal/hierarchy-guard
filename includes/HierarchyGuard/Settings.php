@@ -63,10 +63,10 @@ final class Settings {
 	}
 
 	/**
-	 * Whether the built-in redirect server is on.
+	 * Whether the built-in redirect server is on. Reads the strings "false" and "0" as off.
 	 */
 	public static function serve_redirects(): bool {
-		return (bool) self::get( 'serve_redirects' );
+		return rest_sanitize_boolean( self::get( 'serve_redirects' ) );
 	}
 
 	/**
@@ -114,7 +114,7 @@ final class Settings {
 		return [
 			'post_types'      => $types,
 			'trash_policy'    => $policy,
-			'serve_redirects' => ! empty( $input['serve_redirects'] ),
+			'serve_redirects' => rest_sanitize_boolean( $input['serve_redirects'] ?? false ),
 		];
 	}
 }

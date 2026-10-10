@@ -38,16 +38,18 @@ final class Settings_Section {
 	}
 
 	/**
-	 * Hooks into core.
+	 * Hooks into core. The option is registered on init so its sanitize callback
+	 * also covers WP-CLI and REST writes; the section and fields are admin only.
 	 */
 	public function register(): void {
+		add_action( 'init', [ $this, 'register_option' ] );
 		add_action( 'admin_init', [ $this, 'add' ] );
 	}
 
 	/**
-	 * Registers the setting, section and fields.
+	 * Registers the option with its sanitize callback and defaults.
 	 */
-	public function add(): void {
+	public function register_option(): void {
 		register_setting(
 			self::PAGE,
 			Settings::OPTION,
@@ -57,7 +59,12 @@ final class Settings_Section {
 				'default'           => Settings::defaults(),
 			]
 		);
+	}
 
+	/**
+	 * Adds the section and fields to the Writing settings page.
+	 */
+	public function add(): void {
 		add_settings_section( self::SECTION, __( 'Page hierarchy', 'hierarchy-guard' ), '__return_null', self::PAGE );
 
 		add_settings_field( 'hierarchy_guard_post_types', __( 'Post types', 'hierarchy-guard' ), [ $this, 'render_post_types' ], self::PAGE, self::SECTION );
