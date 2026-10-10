@@ -61,5 +61,15 @@ final class Plugin {
 		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
 		( new Admin\Settings_Section( new Redirects\Providers() ) )->register();
 		( new Trash\Markers() )->register();
+
+		$log        = new Trash\Change_Log();
+		$queue      = new Batch\Queue();
+		$operations = new Trash\Operations( $ledger, new Trash\Mover() );
+		$processor  = new Batch\Processor( $queue, $operations, $log );
+		$processor->register();
+
+		if ( defined( 'WP_CLI' ) && WP_CLI ) {
+			\WP_CLI::add_command( 'hierarchy-guard', new Batch\CLI_Command( $queue, $processor ) );
+		}
 	}
 }

@@ -44,4 +44,7 @@ spl_autoload_register(
 	}
 );
 
+register_activation_hook( __FILE__, [ Batch\Processor::class, 'activate' ] );
+register_deactivation_hook( __FILE__, [ Batch\Processor::class, 'deactivate' ] );
+
 Plugin::instance()->register();
