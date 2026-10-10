@@ -43,12 +43,10 @@ jobs:
           tools: composer:v2
       - run: composer install --no-interaction --prefer-dist
       - run: npm ci
-      - name: Configure wp-env for this matrix cell
-        run: |
-          if [ "${{ matrix.wp }}" != "latest" ]; then
-            echo '{ "core": "${{ matrix.wp }}" }' > .wp-env.override.json
-          fi
+      # With core null, wp-env uses whatever WordPress the wordpress:phpX.Y image
+      # ships, so name the core explicitly for every cell.
       - run: npm run env:start
         env:
           WP_ENV_PHP_VERSION: ${{ matrix.php }}
+          WP_ENV_CORE: ${{ matrix.wp == 'latest' && 'https://wordpress.org/latest.zip' || matrix.wp }}
       - run: npm run test:php
