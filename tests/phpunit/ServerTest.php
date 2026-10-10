@@ -60,7 +60,7 @@ final class ServerTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		unset( $_SERVER['REQUEST_METHOD'], $_SERVER['QUERY_STRING'] );
+		unset( $_SERVER['REQUEST_METHOD'], $_SERVER['QUERY_STRING'], $_SERVER['PATH_INFO'] );
 		unregister_post_type( 'hg_docs' );
 		$this->set_permalink_structure( '' );
 		parent::tear_down();
@@ -363,6 +363,43 @@ final class ServerTest extends WP_UnitTestCase {
 	}
 
 	public function test_never_redirects_to_the_requested_url(): void {
+		$about = $this->page_whose_old_path_is_its_current_path();
+		$this->assertSame( home_url( '/x/about/' ), get_permalink( $about ), 'Precondition: about now lives at x/about.' );
+
+		$this->go_to( '/x/about/3/' );
+		$this->assertTrue( is_404() );
+		$this->assertNull( $this->server->target_for_current_request() );
+
+		$this->go_to( '/x/about/3/?utm_source=x' );
+		$this->assertTrue( is_404() );
+		$this->assertNull( $this->server->target_for_current_request(), 'The carried-over query string must not defeat the guard.' );
+	}
+
+	public function test_never_redirects_to_the_requested_url_on_path_info_permalinks(): void {
+		$this->set_permalink_structure( '/index.php/%postname%/' );
+		$about = $this->page_whose_old_path_is_its_current_path();
+		$this->assertSame( home_url( '/index.php/x/about/' ), get_permalink( $about ), 'Precondition: about now lives at index.php/x/about.' );
+
+		$this->go_to( '/index.php/x/about/3/' );
+		$this->assertTrue( is_404() );
+
+		// A server that passes PATH_INFO: core then fills $wp->request without index.php.
+		$_SERVER['REQUEST_URI'] = '/index.php/x/about/3/';
+		$_SERVER['PATH_INFO']   = '/x/about/3/';
+		$GLOBALS['wp']->parse_request();
+		$this->assertSame( 'x/about/3', $GLOBALS['wp']->request, 'Precondition: the request path omits index.php.' );
+
+		$this->assertNull( $this->server->target_for_current_request() );
+	}
+
+	/**
+	 * Builds the case where a ledger entry equals a page's current path: about
+	 * moves from x to y, x is renamed, then y takes x's old slug. A 404 under
+	 * about (an excess page number) then resolves to about's own URL.
+	 *
+	 * @return int The about page ID.
+	 */
+	private function page_whose_old_path_is_its_current_path(): int {
 		$x     = self::factory()->post->create(
 			[
 				'post_type' => 'page',
@@ -401,15 +438,7 @@ final class ServerTest extends WP_UnitTestCase {
 				'post_name' => 'x',
 			]
 		);
-		$this->assertSame( home_url( '/x/about/' ), get_permalink( $about ), 'Precondition: about now lives at x/about.' );
-
-		$this->go_to( '/x/about/3/' );
-		$this->assertTrue( is_404() );
-		$this->assertNull( $this->server->target_for_current_request() );
-
-		$this->go_to( '/x/about/3/?utm_source=x' );
-		$this->assertTrue( is_404() );
-		$this->assertNull( $this->server->target_for_current_request(), 'The carried-over query string must not defeat the guard.' );
+		return $about;
 	}
 
 	/**

@@ -146,10 +146,12 @@ final class Server {
 			return null;
 		}
 
-		// Never redirect to the URL being requested; that would loop. The query
-		// string is carried over unchanged, so compare without it.
-		$current = home_url( '/' . ltrim( (string) $wp->request, '/' ) );
-		if ( untrailingslashit( explode( '?', $url, 2 )[0] ) === untrailingslashit( $current ) ) {
+		// Never redirect to the URL being requested; that would loop. Compare the
+		// raw request path: on PATH_INFO permalinks $wp->request omits index.php
+		// while the target keeps it. The query string is carried over, so it is
+		// left out of the comparison.
+		$requested = untrailingslashit( (string) wp_parse_url( $this->request_uri(), PHP_URL_PATH ) );
+		if ( untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === $requested ) {
 			return null;
 		}
 
@@ -285,13 +287,21 @@ final class Server {
 	 * @return string
 	 */
 	private function append_query_string( string $url ): string {
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding); wp_validate_redirect() runs wp_sanitize_redirect() on the whole URL.
-		$uri   = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
-		$query = (string) wp_parse_url( $uri, PHP_URL_QUERY );
+		$query = (string) wp_parse_url( $this->request_uri(), PHP_URL_QUERY );
 		if ( '' === $query ) {
 			return $url;
 		}
 		return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . $query;
+	}
+
+	/**
+	 * The raw request URI, empty when there is none (WP-CLI, cron).
+	 *
+	 * @return string
+	 */
+	private function request_uri(): string {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect().
+		return isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
 	}
 
 	/**
