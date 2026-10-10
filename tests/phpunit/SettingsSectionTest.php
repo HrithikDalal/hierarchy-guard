@@ -36,7 +36,8 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$this->section->add();
 
 		$this->assertArrayHasKey( 'hierarchy_guard', $wp_settings_sections['writing'] );
-		$this->assertCount( 3, $wp_settings_fields['writing']['hierarchy_guard'] );
+		$this->assertCount( 2, $wp_settings_fields['writing']['hierarchy_guard'] );
+		$this->assertArrayNotHasKey( 'hierarchy_guard_trash_policy', $wp_settings_fields['writing']['hierarchy_guard'], 'The trash policy field ships with the handler that reads it.' );
 	}
 
 	public function test_option_registers_with_the_sanitize_callback(): void {
@@ -97,15 +98,26 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$this->assertLessThan( strpos( $html, 'type="checkbox"' ), strpos( $html, $hidden ), 'The hidden input comes before the checkboxes.' );
 	}
 
-	public function test_trash_policy_field_renders_three_radios_with_the_default_selected(): void {
-		ob_start();
-		$this->section->render_trash_policy();
-		$html = (string) ob_get_clean();
+	public function test_post_types_field_shows_the_stored_choice_not_the_filtered_list(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		$filter = static fn( array $types ): array => array_values( array_diff( $types, [ 'hg_docs' ] ) );
+		add_filter( 'hierarchy_guard_post_types', $filter );
+		Post_Types::reset();
+		$this->assertNotContains( 'hg_docs', Post_Types::supported(), 'Precondition: the filter removes the type.' );
 
-		$this->assertSame( 3, substr_count( $html, 'type="radio"' ) );
-		$this->assertMatchesRegularExpression( '/value="reparent"[^>]*checked/', $html );
-		$this->assertStringContainsString( 'Move subpages up one level', $html );
-		$this->assertStringContainsString( 'Not applied when the trash is disabled.', $html );
+		ob_start();
+		$this->section->render_post_types();
+		$html = (string) ob_get_clean();
+		remove_filter( 'hierarchy_guard_post_types', $filter );
+		unregister_post_type( 'hg_docs' );
+
+		$this->assertMatchesRegularExpression( '/value="hg_docs"[^>]*checked/', $html, 'With the all-types default stored, a filtered-out type still renders checked.' );
 	}
 
 	public function test_serve_redirects_field_names_the_detected_provider_or_says_none_found(): void {
