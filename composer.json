@@ -19,6 +19,11 @@
 			"HierarchyGuard\\": "includes/HierarchyGuard/"
 		}
 	},
+	"autoload-dev": {
+		"psr-4": {
+			"HierarchyGuard\\Tests\\": "tests/phpunit/"
+		}
+	},
 	"config": {
 		"allow-plugins": {
 			"dealerdirect/phpcodesniffer-composer-installer": true

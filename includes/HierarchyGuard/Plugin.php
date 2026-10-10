@@ -60,5 +60,6 @@ final class Plugin {
 		( new Change_Listener( $ledger ) )->register();
 		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
 		( new Admin\Settings_Section( new Redirects\Providers() ) )->register();
+		( new Trash\Markers() )->register();
 	}
 }
