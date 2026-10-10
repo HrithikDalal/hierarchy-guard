@@ -7253,7 +7253,7 @@ In `README.md`, insert before `## Development`:
 ````markdown
 ## Trashing a page with subpages
 
-By default, trashing a page moves its subpages up one level, so none of them is left with a `__trashed` URL, and their old URLs keep working. Settings › Writing › Page hierarchy can trash them too or leave them where they are. Restoring the page, whether by Undo, Restore, or a status change over the REST API or WP-CLI, moves them back. Subpages trashed with it come back with the status they had.
+By default, trashing a page moves its subpages up one level, so they don't end up under a `__trashed` URL, and records their old URLs. Turn on Redirects in Settings › Writing › Page hierarchy, or add the recorded URLs to a redirect plugin, and visitors on an old URL reach the new one. The same section can trash the subpages too, or leave them where they are. A subpage the user who trashed the page can't edit stays under it. Restoring the page, whether by Undo, Restore, or a status change over the REST API or WP-CLI, moves the subpages back, and those trashed with it come back with the status they had.
 
 ## Background jobs
 
