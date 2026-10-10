@@ -36,8 +36,7 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$this->section->add();
 
 		$this->assertArrayHasKey( 'hierarchy_guard', $wp_settings_sections['writing'] );
-		$this->assertCount( 2, $wp_settings_fields['writing']['hierarchy_guard'] );
-		$this->assertArrayNotHasKey( 'hierarchy_guard_trash_policy', $wp_settings_fields['writing']['hierarchy_guard'], 'The trash policy field ships with the handler that reads it.' );
+		$this->assertSame( [ 'hierarchy_guard_post_types', 'hierarchy_guard_trash_policy', 'hierarchy_guard_serve_redirects' ], array_keys( $wp_settings_fields['writing']['hierarchy_guard'] ) );
 	}
 
 	public function test_option_registers_with_the_sanitize_callback(): void {
@@ -144,5 +143,22 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
 		$this->assertStringContainsString( 'Custom Redirects is active and can handle these.', $html );
+	}
+
+	public function test_trash_policy_field_renders_three_radios_with_the_stored_choice(): void {
+		update_option( Settings::OPTION, [ 'trash_policy' => Settings::POLICY_KEEP ] );
+
+		ob_start();
+		$this->section->render_trash_policy();
+		$html = (string) ob_get_clean();
+
+		$this->assertSame( 3, substr_count( $html, 'type="radio"' ) );
+		$this->assertMatchesRegularExpression( '/value="keep"\s+checked/', $html );
+		$this->assertStringContainsString( 'Move subpages up one level', $html );
+		$this->assertStringContainsString( 'Trash the subpages too', $html );
+		$this->assertStringContainsString( 'Leave subpages where they are', $html );
+		$this->assertStringContainsString( 'Applies whenever a page with subpages is moved to the trash, including from the editor, the REST API, and WP-CLI.', $html );
+		$this->assertStringNotContainsString( 'The trash is turned off', $html, 'This test site keeps its trash.' );
+		$this->assertStringNotContainsString( 'Pages list', $html, 'No claims about UI that does not exist yet.' );
 	}
 }
