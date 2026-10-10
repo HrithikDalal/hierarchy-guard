@@ -252,14 +252,14 @@ final class Operations {
 			}
 			++$job['counts']['moved'];
 			$moved[] = $child_id;
+			if ( empty( $job['aliased'] ) ) {
+				// Right after the first move, so a step that dies later still leaves the old URLs a route.
+				$job = $this->record_aliases( $job );
+			}
 		}
 
 		$job['work']['moves'] = count( $children );
 		if ( [] !== $moved ) {
-			if ( empty( $job['aliased'] ) ) {
-				$job = $this->record_aliases( $job );
-			}
-
 			/**
 			 * Fires after subpages were moved to a new parent with a direct update,
 			 * when their parent is trashed and again when it is restored. No
@@ -563,7 +563,9 @@ final class Operations {
 	}
 
 	/**
-	 * Deletes marker rows that point at a permanently deleted root.
+	 * Deletes the moved rows that point at a permanently deleted root. Rows of
+	 * subpages trashed with it stay, so those still come back with their
+	 * previous status; they go when the subpage is restored or deleted.
 	 *
 	 * @param array<string,mixed> $job   Job.
 	 * @param int                 $moves Most rows to delete.
@@ -576,9 +578,6 @@ final class Operations {
 
 		$root = (int) $job['root'];
 		$rows = Markers::rows( Markers::moved_key( $root ), $moves );
-		if ( count( $rows ) < $moves ) {
-			$rows = array_merge( $rows, Markers::rows( Markers::trashed_key( $root ), $moves - count( $rows ) ) );
-		}
 		Markers::remove( $rows );
 
 		$job['work']['moves'] = count( $rows );

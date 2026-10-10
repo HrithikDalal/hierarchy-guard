@@ -253,7 +253,7 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['team'] )->post_parent );
 	}
 
-	public function test_cleanup_deletes_the_rows_of_a_deleted_root(): void {
+	public function test_cleanup_deletes_the_moved_rows_of_a_deleted_root(): void {
 		$this->move_out();
 		Markers::add( $this->ids['leadership'], Markers::trashed_key( $this->ids['about'] ), '1' );
 
@@ -264,7 +264,8 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$job = $this->operations->run( $job );
 
 		$this->assertTrue( $job['finished'] );
-		$this->assertSame( 0, Markers::count( $this->ids['about'], 10 ) );
+		$this->assertSame( [], Markers::rows( Markers::moved_key( $this->ids['about'] ), 10 ) );
+		$this->assertSame( [ $this->ids['leadership'] ], $this->marked_ids( Markers::trashed_key( $this->ids['about'] ) ), 'A subpage still in the trash keeps its previous status.' );
 	}
 
 	public function test_an_untrash_another_plugin_answers_true_for_is_not_counted(): void {

@@ -309,7 +309,7 @@ final class Trash_Handler {
 		if ( ! $post instanceof WP_Post || ! Post_Types::is_supported( (string) $post->post_type ) ) {
 			return;
 		}
-		if ( Markers::count( $id, 1 ) > 0 ) {
+		if ( [] !== Markers::rows( Markers::moved_key( $id ), 1 ) ) {
 			$this->dispatch( 'cleanup', Operations::new_job( Operations::TYPE_CLEANUP, $id, (string) $post->post_type, 0 ) );
 			return;
 		}
@@ -475,7 +475,8 @@ final class Trash_Handler {
 			$this->queue->unlock( $root, $token );
 		}
 
-		if ( $running ) {
+		// Scheduled after the unlock; an offer that arrived during the inline step needs a run too.
+		if ( $running || null !== $this->queue->offered( $root ) ) {
 			$this->queue->schedule( $root );
 		}
 		$this->cli( 'cleanup' === $action ? [] : self::cli_lines( $action, $job, $running ) );

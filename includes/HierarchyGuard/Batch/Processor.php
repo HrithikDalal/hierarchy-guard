@@ -134,10 +134,10 @@ final class Processor {
 
 				$this->queue->save( $job );
 				++$steps;
+				$this->flush_runtime();
 				if ( ( $max_steps > 0 && $steps >= $max_steps ) || $this->out_of_time( $start, $time_limit ) ) {
 					break;
 				}
-				$this->flush_runtime();
 				if ( $pause_ms > 0 ) {
 					usleep( $pause_ms * 1000 );
 				}
