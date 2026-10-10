@@ -46,5 +46,11 @@ final class Plugin {
 			return;
 		}
 		$this->registered = true;
+
+		add_action( 'registered_post_type', [ Post_Types::class, 'reset' ] );
+		add_action( 'unregistered_post_type', [ Post_Types::class, 'reset' ] );
+		add_action( 'update_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
+		add_action( 'add_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
+		add_action( 'delete_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 	}
 }
