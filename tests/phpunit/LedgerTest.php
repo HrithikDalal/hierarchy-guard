@@ -34,7 +34,7 @@ final class LedgerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'about',
-			] 
+			]
 		);
 	}
 
@@ -107,7 +107,7 @@ final class LedgerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'other',
-			] 
+			]
 		);
 		$this->ledger->record( $this->about, 'shared' );
 		$this->ledger->record( $other, 'shared' );

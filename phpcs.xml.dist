@@ -54,4 +54,16 @@
 	<rule ref="WordPressVIPMinimum">
 		<exclude-pattern>/tests/*</exclude-pattern>
 	</rule>
+
+	<!--
+	WordPressVIPMinimum excludes these two codes, and PHPCS excludes are global, so
+	WordPress-Extra lost them too. A plain rule ref does not undo an exclude (it leaves
+	severity 0); an explicit severity does.
+	-->
+	<rule ref="Squiz.WhiteSpace.SuperfluousWhitespace.EndLine">
+		<severity>5</severity>
+	</rule>
+	<rule ref="Squiz.WhiteSpace.SuperfluousWhitespace.EmptyLines">
+		<severity>5</severity>
+	</rule>
 </ruleset>

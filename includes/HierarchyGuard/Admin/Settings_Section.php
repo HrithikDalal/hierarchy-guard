@@ -81,7 +81,7 @@ final class Settings_Section {
 				'public'       => true,
 				'hierarchical' => true,
 			],
-			'objects' 
+			'objects'
 		);
 		$selected = Post_Types::supported();
 

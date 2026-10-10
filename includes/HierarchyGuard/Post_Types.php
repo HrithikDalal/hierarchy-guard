@@ -37,8 +37,8 @@ final class Post_Types {
 					'public'       => true,
 					'hierarchical' => true,
 				],
-				'names' 
-			) 
+				'names'
+			)
 		);
 		$configured = Settings::get( 'post_types' );
 		$types      = null === $configured ? $public : array_values( array_intersect( (array) $configured, $public ) );

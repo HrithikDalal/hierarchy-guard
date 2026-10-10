@@ -50,21 +50,21 @@ final class PathsTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'company',
-			] 
+			]
 		);
 		$about   = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $company,
-			] 
+			]
 		);
 		$team    = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'team',
 				'post_parent' => $about,
-			] 
+			]
 		);
 
 		$this->assertSame( 'company/about/team', Paths::uri( get_post( $team ) ) );
@@ -76,21 +76,21 @@ final class PathsTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'company',
-			] 
+			]
 		);
 		$about   = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $company,
-			] 
+			]
 		);
 		$team    = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'team',
 				'post_parent' => $about,
-			] 
+			]
 		);
 
 		$before = clone get_post( $team );
@@ -98,7 +98,7 @@ final class PathsTest extends WP_UnitTestCase {
 			[
 				'ID'          => $team,
 				'post_parent' => $company,
-			] 
+			]
 		);
 
 		$this->assertSame( 'company/about/team', Paths::uri( $before ), 'A before-object still describes the old chain.' );
@@ -111,14 +111,14 @@ final class PathsTest extends WP_UnitTestCase {
 				'post_type'   => 'page',
 				'post_status' => 'draft',
 				'post_name'   => '',
-			] 
+			]
 		);
 		$child = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'child',
 				'post_parent' => $draft,
-			] 
+			]
 		);
 
 		$this->assertSame( '', get_post( $draft )->post_name, 'Precondition: drafts may have an empty slug.' );
@@ -131,8 +131,8 @@ final class PathsTest extends WP_UnitTestCase {
 				[
 					'post_type' => 'page',
 					'post_name' => 'about',
-				] 
-			) 
+				]
+			)
 		);
 		$this->assertTrue( Paths::is_recordable( $page ) );
 
@@ -147,24 +147,24 @@ final class PathsTest extends WP_UnitTestCase {
 					'post_type'   => 'page',
 					'post_status' => 'draft',
 					'post_name'   => 'draft',
-				] 
-			) 
+				]
+			)
 		);
 		$post  = get_post(
 			self::factory()->post->create(
 				[
 					'post_type' => 'post',
 					'post_name' => 'hello',
-				] 
-			) 
+				]
+			)
 		);
 		$page  = get_post(
 			self::factory()->post->create(
 				[
 					'post_type' => 'page',
 					'post_name' => 'about',
-				] 
-			) 
+				]
+			)
 		);
 
 		$this->assertFalse( Paths::is_recordable( $draft ) );

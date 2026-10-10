@@ -42,21 +42,21 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'company',
-			] 
+			]
 		);
 		$this->about   = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 		$this->team    = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'team',
 				'post_parent' => $this->about,
-			] 
+			]
 		);
 	}
 
@@ -90,7 +90,7 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->about ) );
@@ -103,7 +103,7 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			[
 				'ID'          => $this->team,
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 
 		$this->assertSame( [ 'company/about/team' ], $this->ledger->paths_for( $this->team ) );
@@ -114,13 +114,13 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'        => $this->about,
 				'post_name' => 'about',
-			] 
+			]
 		);
 
 		$this->assertSame( [ 'company/company-info' ], $this->ledger->paths_for( $this->about ), 'Only the intermediate path remains; the current path is pruned.' );
@@ -143,27 +143,27 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'post',
 				'post_name' => 'hello',
-			] 
+			]
 		);
 		$draft = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_status' => 'draft',
 				'post_name'   => 'draft',
-			] 
+			]
 		);
 
 		wp_update_post(
 			[
 				'ID'        => $post,
 				'post_name' => 'hello-world',
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'        => $draft,
 				'post_name' => 'draft-two',
-			] 
+			]
 		);
 
 		$this->assertSame( [], $this->ledger->paths_for( $post ) );
@@ -186,7 +186,7 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$this->assertTrue( Change_Listener::is_suspended() );

@@ -43,21 +43,21 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'company',
-			] 
+			]
 		);
 		$this->about    = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 		$this->team     = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'team',
 				'post_parent' => $this->about,
-			] 
+			]
 		);
 	}
 
@@ -71,7 +71,7 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$target = $this->resolver->resolve( 'page', 'company/about/team' );
@@ -84,7 +84,7 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$this->assertSame( $this->about, $this->resolver->resolve( 'page', '/Company/About/' )->ID );
@@ -95,13 +95,13 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'          => $this->team,
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 
 		// Round 1 rewrites company/about/team to company/company-info/team, which no longer exists.
@@ -126,13 +126,13 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'          => $this->team,
 				'post_status' => 'draft',
-			] 
+			]
 		);
 
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
@@ -143,7 +143,7 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$this->assertNull( $this->resolver->resolve( 'post', 'company/about/team' ) );
@@ -154,13 +154,13 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'a',
-			] 
+			]
 		);
 		$b = self::factory()->post->create(
 			[
 				'post_type' => 'page',
 				'post_name' => 'b',
-			] 
+			]
 		);
 		$this->ledger->record( $a, 'b' );
 		$this->ledger->record( $b, 'a' );
@@ -189,7 +189,7 @@ final class ResolverTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$target = $this->resolver->resolve( 'page', 'company/about/team' );

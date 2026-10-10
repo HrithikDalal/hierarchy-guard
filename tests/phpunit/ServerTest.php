@@ -48,21 +48,21 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'company',
-			] 
+			]
 		);
 		$this->about   = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 		$this->team    = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'team',
 				'post_parent' => $this->about,
-			] 
+			]
 		);
 	}
 
@@ -82,7 +82,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/company/about/team/' );
 
@@ -105,7 +105,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/company/about/team/' );
 
@@ -117,7 +117,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/company/about/team/' );
 
@@ -140,14 +140,14 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 		$this->go_to( '/company/about/' );
 
@@ -160,7 +160,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/company/about/team/2/' );
 
@@ -189,7 +189,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 
 		$this->go_to( '/company/about/team/feed/' );
@@ -208,20 +208,20 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'services',
-			] 
+			]
 		);
 		$design   = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'design',
 				'post_parent' => $services,
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'        => $services,
 				'post_name' => 'solutions',
-			] 
+			]
 		);
 
 		$this->go_to( '/services/design/' );
@@ -234,7 +234,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/company/about/team/' );
 
@@ -255,14 +255,14 @@ final class ServerTest extends WP_UnitTestCase {
 				'post_type'   => 'page',
 				'post_title'  => 'О нас',
 				'post_parent' => $this->company,
-			] 
+			]
 		);
 		$child    = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'team',
 				'post_parent' => $cyrillic,
-			] 
+			]
 		);
 		$old_slug = get_post( $cyrillic )->post_name;
 		$this->assertStringContainsString( '%', $old_slug, 'Precondition: core stores non-ASCII slugs percent-encoded.' );
@@ -271,7 +271,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $cyrillic,
 				'post_name' => 'about-us',
-			] 
+			]
 		);
 
 		$this->go_to( '/company/' . $old_slug . '/team/' );
@@ -289,7 +289,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/index.php/company/about/team/' );
 
@@ -324,14 +324,14 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'hg_docs',
 				'post_name' => 'guide',
-			] 
+			]
 		);
 		$install = self::factory()->post->create(
 			[
 				'post_type'   => 'hg_docs',
 				'post_name'   => 'install',
 				'post_parent' => $guide,
-			] 
+			]
 		);
 		$this->assertSame( home_url( '/docs/guide/install/' ), get_permalink( $install ), 'Precondition: the rewrite prefix is in the permalink.' );
 
@@ -339,7 +339,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $guide,
 				'post_name' => 'handbook',
-			] 
+			]
 		);
 		$this->go_to( '/docs/guide/install/' );
 
@@ -352,7 +352,7 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'ID'        => $this->about,
 				'post_name' => 'company-info',
-			] 
+			]
 		);
 		$this->go_to( '/company/about/team' . str_repeat( '/x', 18 ) . '/' );
 
@@ -374,39 +374,39 @@ final class ServerTest extends WP_UnitTestCase {
 			[
 				'post_type' => 'page',
 				'post_name' => 'x',
-			] 
+			]
 		);
 		$y     = self::factory()->post->create(
 			[
 				'post_type' => 'page',
 				'post_name' => 'y',
-			] 
+			]
 		);
 		$about = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
 				'post_name'   => 'about',
 				'post_parent' => $x,
-			] 
+			]
 		);
 
 		wp_update_post(
 			[
 				'ID'          => $about,
 				'post_parent' => $y,
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'        => $x,
 				'post_name' => 'x-old',
-			] 
+			]
 		);
 		wp_update_post(
 			[
 				'ID'        => $y,
 				'post_name' => 'x',
-			] 
+			]
 		);
 		$this->assertSame( home_url( '/x/about/' ), get_permalink( $about ), 'Precondition: about now lives at x/about.' );
 

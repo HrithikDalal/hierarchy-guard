@@ -99,8 +99,8 @@ final class Settings {
 					'public'       => true,
 					'hierarchical' => true,
 				],
-				'names' 
-			) 
+				'names'
+			)
 		);
 
 		$types = isset( $input['post_types'] ) ? array_map( 'sanitize_key', (array) $input['post_types'] ) : [];
