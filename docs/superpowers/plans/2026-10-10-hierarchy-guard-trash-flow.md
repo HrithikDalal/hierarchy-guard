@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html` is a snapshot of the live spec at https://claude.ai/artifact/6V5RMR2w49uPiEp96ycyzq. Read "Trashing a parent" under How it works, the Data model table, Hooks and handlers, Filters for developers and Testing. The Pages-list trash dialog, the outcome notice with its Undo link and the redirects modal are admin UI and belong to plan 3. This plan builds what they call: the `hierarchy_guard_trash_policy` filter, `Trash\Change_Log`, `Trash_Handler::undo()`, and an interim sentence on core's own trash notice.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (241 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (242 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -3471,7 +3471,7 @@ git commit -m "feat: trash-subtree step trashes descendants depth first under th
 
 **Interfaces:**
 - Consumes: `Markers::rows()`, `remove()`, `decode_moved()`, `previous_status()` filter (Task 1); `Mover::move()` with a preferred slug, `Mover::reparent()`, `Subtree::status()` (Task 2); `Ledger::record()`, `prune()`, `forget_alias()` (Task 3).
-- Produces: `Operations::step()` handles `TYPE_RESTORE` in two phases. Phase `moved` reads `_hierarchy_guard_moved_{root}` rows: a subpage still under the recorded parent moves back (its original slug only if the editor hasn't renamed it since; a subpage that is itself in the trash gets only its parent and desired slug back), its interim path is recorded when the move is at least `INTERIM_AGE` old, and every row is deleted. Phase `trashed` untrashes `_hierarchy_guard_trashed_{root}` subpages under the guard (rows of IDs core is about to restore are kept for core); success is decided by the status read past the cache, because a `pre_untrash_post` filter can answer `true` without restoring. When both are done, the root's aliases are removed. It also handles `TYPE_CLEANUP`, which deletes the rows of a deleted root. Counts: `moved`, `restored`, `left`, `renamed`.
+- Produces: `Operations::step()` handles `TYPE_RESTORE` in two phases. Phase `moved` reads `_hierarchy_guard_moved_{root}` rows: a subpage still under the recorded parent moves back (its original slug only if the editor hasn't renamed it since; a subpage that is itself in the trash gets only its parent and desired slug back), its interim path is recorded when the move is at least `INTERIM_AGE` old, and every row is deleted. Phase `trashed` untrashes `_hierarchy_guard_trashed_{root}` subpages under the guard (rows of IDs core is about to restore are kept for core); success is decided by the status read past the cache, because a `pre_untrash_post` filter can answer `true` without restoring. When both are done, the root's aliases are removed. It also handles `TYPE_CLEANUP`, which deletes the rows of a deleted root. A subpage another plugin keeps in the trash counts as `left` and keeps its row. The restore fires `hierarchy_guard_children_reparented` for the live subpages it moves back, grouped by the parent they leave. Counts: `moved`, `restored`, `left`, `renamed`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3757,6 +3757,25 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->assertSame( 'publish', get_post_status( $this->ids['history'] ) );
 		$this->assertSame( 2, $job['counts']['restored'] );
 		$this->assertSame( 1, $job['counts']['left'] );
+		$this->assertSame( [ $blocked ], $this->marked_ids( Markers::trashed_key( $this->ids['about'] ) ), 'Its row stays for when it does leave the trash.' );
+	}
+
+	public function test_reports_the_subpages_it_moves_back(): void {
+		$this->move_out();
+		$this->untrash_raw( $this->ids['about'] );
+		$seen = [];
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function ( array $ids, int $from, int $to ) use ( &$seen ): void {
+				$seen[] = [ $ids, $from, $to ];
+			},
+			10,
+			3
+		);
+
+		$this->restore();
+
+		$this->assertSame( [ [ [ $this->ids['team'], $this->ids['history'] ], $this->ids['company'], $this->ids['about'] ] ], $seen );
 	}
 }
 ```
@@ -3825,6 +3844,7 @@ and add these methods after `step_trash_children()`:
 		$root     = (int) $job['root'];
 		$rows     = Markers::rows( Markers::moved_key( $root ), $moves, (int) $job['cursor'] );
 		$restored = [];
+		$by_from  = [];
 		$now      = time();
 		_prime_post_caches( array_column( $rows, 'post_id' ), false, false );
 
@@ -3871,10 +3891,15 @@ and add these methods after `step_trash_children()`:
 				++$job['counts']['renamed'];
 			}
 			++$job['counts']['moved'];
-			$restored[] = $id;
+			$restored[]                = $id;
+			$by_from[ $moved['to'] ][] = $id;
 		}
 
 		Markers::remove( $rows );
+		foreach ( $by_from as $from => $ids ) {
+			/** This action is documented in includes/HierarchyGuard/Trash/Operations.php */
+			do_action( 'hierarchy_guard_children_reparented', $ids, (int) $from, $root );
+		}
 		$job['work']['moves'] = count( $rows );
 		if ( count( $rows ) < $moves ) {
 			$job['phase']  = 'trashed';
@@ -3912,17 +3937,22 @@ and add these methods after `step_trash_children()`:
 				// Core restores it next in its bulk loop; the row gives it its previous status.
 				continue;
 			}
-			$done[] = $row;
 			if ( 'trash' !== get_post_status( $id ) ) {
+				$done[] = $row;
 				continue;
 			}
 
 			++$used;
 			Guard::run( [ $id ], static fn() => wp_untrash_post( $id ) );
 			// A pre_untrash_post filter can answer true without restoring, so the status decides.
-			if ( in_array( Subtree::status( $id ), [ '', 'trash' ], true ) ) {
+			$status = Subtree::status( $id );
+			if ( 'trash' === $status ) {
+				// Its row stays, so it still gets its previous status whenever it does leave the trash.
 				++$job['counts']['left'];
-			} else {
+				continue;
+			}
+			$done[] = $row;
+			if ( '' !== $status ) {
 				++$job['counts']['restored'];
 				$restored[] = $id;
 			}
@@ -3980,7 +4010,7 @@ and add these methods after `step_trash_children()`:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter Operations`
-Expected: `OK (36 tests, 144 assertions)`.
+Expected: `OK (37 tests, 146 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -7139,13 +7169,13 @@ wp hierarchy-guard process-jobs
 
 ## For developers
 
-Subpages move with a direct database update, the way core moves them when it deletes their parent, so `save_post` does not run for them. Search indexes and SEO plugins that cache permalinks can re-sync the moved posts from the `hierarchy_guard_children_reparented` action, which receives the moved IDs, the trashed page and the new parent.
+Subpages move with a direct database update, the way core moves them when it deletes their parent, so `save_post` does not run for them. Search indexes and SEO plugins that cache permalinks can re-sync the moved posts from the `hierarchy_guard_children_reparented` action. It fires when a page's subpages move up and again when they move back, with the moved IDs, the parent they left and their new parent.
 ````
 
 - [ ] **Step 6: Run the full suite and lint**
 
 Run: `npm run test:php` and `composer lint`
-Expected: `OK (241 tests, 823 assertions)`; lint exit 0.
+Expected: `OK (242 tests, 825 assertions)`; lint exit 0.
 
 - [ ] **Step 7: Verify on the dev site**
 
