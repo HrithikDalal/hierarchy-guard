@@ -312,6 +312,74 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( get_permalink( $install ), $this->server->target_for_current_request()['url'] );
 	}
 
+	public function test_overlong_paths_are_ignored(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			] 
+		);
+		$this->go_to( '/company/about/team' . str_repeat( '/x', 18 ) . '/' );
+
+		$this->assertTrue( is_404() );
+		$before = get_num_queries();
+		$this->assertNull( $this->server->target_for_current_request() );
+		$this->assertSame( 0, get_num_queries() - $before, 'The cap must stop the lookup before any query.' );
+
+		$raise  = static fn(): int => 25;
+		add_filter( 'hierarchy_guard_max_segments', $raise );
+		$before = get_num_queries();
+		$this->assertNull( $this->server->target_for_current_request() );
+		$this->assertGreaterThan( 0, get_num_queries() - $before, 'With the cap raised the resolver runs and finds nothing.' );
+		remove_filter( 'hierarchy_guard_max_segments', $raise );
+	}
+
+	public function test_never_redirects_to_the_requested_url(): void {
+		$x     = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'x',
+			] 
+		);
+		$y     = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'y',
+			] 
+		);
+		$about = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $x,
+			] 
+		);
+
+		wp_update_post(
+			[
+				'ID'          => $about,
+				'post_parent' => $y,
+			] 
+		);
+		wp_update_post(
+			[
+				'ID'        => $x,
+				'post_name' => 'x-old',
+			] 
+		);
+		wp_update_post(
+			[
+				'ID'        => $y,
+				'post_name' => 'x',
+			] 
+		);
+		$this->assertSame( home_url( '/x/about/' ), get_permalink( $about ), 'Precondition: about now lives at x/about.' );
+
+		$this->go_to( '/x/about/3/' );
+		$this->assertTrue( is_404() );
+		$this->assertNull( $this->server->target_for_current_request() );
+	}
+
 	/**
 	 * The Server instance the plugin registered, found through the hook table.
 	 */

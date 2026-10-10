@@ -25,6 +25,11 @@ final class Server {
 	public const PRIORITY = 9;
 
 	/**
+	 * Default cap on request path segments.
+	 */
+	public const MAX_SEGMENTS = 20;
+
+	/**
 	 * Resolver.
 	 *
 	 * @var Resolver
@@ -57,8 +62,9 @@ final class Server {
 		}
 
 		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- URL passed through wp_validate_redirect() in target_for_current_request().
-		wp_redirect( $target['url'], $target['status'], 'Hierarchy Guard' );
-		exit;
+		if ( wp_redirect( $target['url'], $target['status'], 'Hierarchy Guard' ) ) {
+			exit;
+		}
 	}
 
 	/**
@@ -84,6 +90,16 @@ final class Server {
 
 		$request = $this->parse_request( (string) $wp->request );
 		if ( '' === $request['path'] ) {
+			return null;
+		}
+
+		/**
+		 * Filters the maximum number of path segments a request may have to be resolved.
+		 *
+		 * @param int $max Segment cap.
+		 */
+		$max_segments = (int) apply_filters( 'hierarchy_guard_max_segments', self::MAX_SEGMENTS );
+		if ( substr_count( $request['path'], '/' ) + 1 > $max_segments ) {
 			return null;
 		}
 
@@ -126,6 +142,12 @@ final class Server {
 		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $target, $request['path'] );
 		$url = wp_validate_redirect( $url, '' );
 		if ( '' === $url ) {
+			return null;
+		}
+
+		// Never redirect to the URL being requested; that would loop.
+		$current = home_url( '/' . ltrim( (string) $wp->request, '/' ) );
+		if ( untrailingslashit( $url ) === untrailingslashit( $current ) ) {
 			return null;
 		}
 
