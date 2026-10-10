@@ -33,6 +33,7 @@ final class Ledger {
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
+	 * @return string
 	 */
 	public static function key( string $post_type, string $path ): string {
 		return self::KEY_PREFIX . md5( $post_type . ':' . $path );

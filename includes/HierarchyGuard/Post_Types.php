@@ -59,6 +59,7 @@ final class Post_Types {
 	 * Whether a post type is supported.
 	 *
 	 * @param string $type Post type name.
+	 * @return bool
 	 */
 	public static function is_supported( string $type ): bool {
 		return in_array( $type, self::supported(), true );
