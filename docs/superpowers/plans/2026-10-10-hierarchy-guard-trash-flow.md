@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html` is a snapshot of the live spec at https://claude.ai/artifact/6V5RMR2w49uPiEp96ycyzq. Read "Trashing a parent" under How it works, the Data model table, Hooks and handlers, Filters for developers and Testing. The Pages-list trash dialog, the outcome notice with its Undo link and the redirects modal are admin UI and belong to plan 3. This plan builds what they call: the `hierarchy_guard_trash_policy` filter, `Trash\Change_Log`, `Trash_Handler::undo()`, and an interim sentence on core's own trash notice.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (244 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: the full suite passes after every task (245 tests at the end) and `composer lint` exits 0. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -6827,6 +6827,24 @@ final class TrashNoticeTest extends WP_UnitTestCase {
 		);
 		$this->assertSame( [ '1 subpage moved back under its parent.', '2 subpages were restored too.' ], Trash_Notice::sentences( $change ) );
 	}
+
+	public function test_the_fallback_sentence_agrees_with_the_cap(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
+
+		$change = $this->change(
+			'trash',
+			[
+				$this->about(
+					[
+						'fallback' => true,
+						'counts'   => [ 'moved' => 2 ],
+					]
+				),
+			]
+		);
+
+		$this->assertContains( 'There was more than 1 subpage, so they moved up instead of going to the Trash.', Trash_Notice::sentences( $change ) );
+	}
 }
 ```
 
@@ -7002,8 +7020,9 @@ final class Trash_Notice {
 
 		foreach ( $roots as $root ) {
 			if ( ! empty( $root['fallback'] ) ) {
+				$cap = Subtree::count_cap();
 				/* translators: %s: the most subpages the plugin trashes together with a page, such as 1,000. */
-				$out[] = sprintf( __( 'There were more than %s subpages, so they moved up instead of going to the Trash.', 'hierarchy-guard' ), number_format_i18n( Subtree::count_cap() ) );
+				$out[] = sprintf( _n( 'There was more than %s subpage, so they moved up instead of going to the Trash.', 'There were more than %s subpages, so they moved up instead of going to the Trash.', $cap, 'hierarchy-guard' ), number_format_i18n( $cap ) );
 				break;
 			}
 		}
@@ -7124,7 +7143,7 @@ The complete `register()` body now reads:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter TrashNoticeTest`
-Expected: `OK (8 tests, 17 assertions)`.
+Expected: `OK (9 tests, 18 assertions)`.
 
 Run: `npm run test:php` and `composer lint`
 Expected: all green; lint exit 0.
@@ -7252,7 +7271,7 @@ Subpages move with a direct database update, the way core moves them when it del
 - [ ] **Step 6: Run the full suite and lint**
 
 Run: `npm run test:php` and `composer lint`
-Expected: `OK (244 tests, 831 assertions)`; lint exit 0.
+Expected: `OK (245 tests, 832 assertions)`; lint exit 0.
 
 - [ ] **Step 7: Verify on the dev site**
 
