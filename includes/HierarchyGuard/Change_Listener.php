@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
@@ -17,7 +18,7 @@ use WP_Post;
 final class Change_Listener {
 
 	/**
-	 * When true, nothing is recorded. The trash handler sets this around its own writes.
+	 * When true, nothing is recorded: for code that changes many posts and records their paths itself.
 	 *
 	 * @var bool
 	 */
@@ -114,7 +115,13 @@ final class Change_Listener {
 			return;
 		}
 
-		$paths = array_merge( [ Paths::uri( $post ), $this->pre_trash_uri( $post ) ], $this->ledger->paths_for( $post_id ) );
+		// Subpages trashed together with a parent are deleted with it, so their own
+		// paths would be carried onto pages about to be deleted too.
+		if ( Markers::has_trashed_row( $post_id ) ) {
+			return;
+		}
+
+		$paths = array_merge( [ Paths::uri( $post ), Paths::untrashed_uri( $post ) ], $this->ledger->paths_for( $post_id ) );
 		$paths = array_unique(
 			array_filter(
 				$paths,
@@ -122,42 +129,9 @@ final class Change_Listener {
 			)
 		);
 
-		$parent_id = (int) $post->post_parent;
 		foreach ( $paths as $path ) {
-			if ( $parent_id > 0 ) {
-				$this->ledger->record( $parent_id, $path );
-			} else {
-				$this->ledger->record_root( (string) $post->post_type, $path );
-			}
+			$this->ledger->record_alias( (string) $post->post_type, (int) $post->post_parent, $path );
 		}
-	}
-
-	/**
-	 * The path a trashed post had before core suffixed its slug with __trashed
-	 * (or __trashed-N), built from the slug core kept in _wp_desired_post_slug.
-	 * Empty when the slug carries no suffix.
-	 *
-	 * @param WP_Post $post Post being deleted.
-	 * @return string
-	 */
-	private function pre_trash_uri( WP_Post $post ): string {
-		$name = (string) $post->post_name;
-		if ( ! Paths::is_trashed_slug( $name ) ) {
-			return '';
-		}
-
-		$slug = (string) get_post_meta( $post->ID, '_wp_desired_post_slug', true );
-		if ( '' === $slug ) {
-			$slug = Paths::strip_trashed_suffix( $name );
-		}
-		if ( '' === $slug ) {
-			return '';
-		}
-
-		$before            = clone $post;
-		$before->post_name = $slug;
-
-		return Paths::uri( $before );
 	}
 
 	/**

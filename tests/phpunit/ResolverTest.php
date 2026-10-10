@@ -300,4 +300,46 @@ final class ResolverTest extends WP_UnitTestCase {
 
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about/team' ) );
 	}
+
+	public function test_a_hit_under_a_trashed_ancestor_gives_way_to_a_shorter_prefix(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->team,
+				'post_name' => 'crew',
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( 'company/about__trashed/crew', get_page_uri( $this->team ), 'Precondition: the ledger hit lives under the trash.' );
+
+		// Another route still leads somewhere live: company/about now maps to company.
+		$replacement = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'team',
+				'post_parent' => $this->company,
+			]
+		);
+		$this->ledger->record_alias( 'page', $this->company, 'company/about' );
+
+		$target = $this->resolver->resolve( 'page', 'company/about/team' );
+		$this->assertNotNull( $target );
+		$this->assertSame( $replacement, $target->ID );
+	}
+
+	public function test_an_old_parent_path_whose_page_is_only_in_the_trash_does_not_redirect(): void {
+		global $wpdb;
+
+		// What the trash flow leaves behind: about in the trash, team moved up, one alias on company.
+		wp_trash_post( $this->about );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
+		clean_post_cache( $this->team );
+		$this->ledger->record_alias( 'page', $this->company, 'company/about' );
+
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID, 'Subpage URLs still resolve.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'A browser would keep a 301 to the grandparent after a restore.' );
+
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->company, $this->resolver->resolve( 'page', 'company/about' )->ID, 'Once the page is gone for good, its old URL leads to its parent.' );
+	}
 }

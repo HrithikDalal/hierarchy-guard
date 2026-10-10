@@ -11,6 +11,7 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use HierarchyGuard\Subtree;
 use WP_Post;
 
 /**
@@ -76,7 +77,10 @@ final class Resolver {
 
 	/**
 	 * Replaces the longest prefix the ledger knows with the location it now maps to.
-	 * Ledger hits on trashed posts are skipped so a shorter prefix can match.
+	 * Ledger hits on trashed posts, or on posts under a trashed ancestor, are
+	 * skipped so a shorter prefix can match. An exact old parent path whose page
+	 * is only in the trash resolves to nothing: a 301 to the grandparent would
+	 * stay in browsers after the page is restored.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -99,6 +103,12 @@ final class Resolver {
 					continue;
 				}
 				$base = Paths::uri( $post );
+				if ( Paths::has_trashed_segment( $base ) ) {
+					continue;
+				}
+				if ( count( $segments ) === $length && Subtree::has_trashed_child( $hit, (string) end( $segments ), $post_type ) ) {
+					return null;
+				}
 			}
 
 			$remainder = implode( '/', array_slice( $segments, $length ) );

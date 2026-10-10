@@ -147,4 +147,46 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about-us' ) );
 	}
+
+	public function test_record_alias_writes_on_the_new_parent_or_the_root_list(): void {
+		$this->assertTrue( $this->ledger->record_alias( 'page', $this->about, 'about/team-old' ) );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about/team-old' ) );
+
+		$this->assertTrue( $this->ledger->record_alias( 'page', 0, 'gone' ) );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'gone' ) );
+		$this->assertFalse( $this->ledger->record_alias( 'page', 0, 'gone' ), 'Already recorded.' );
+	}
+
+	public function test_forget_alias_removes_what_record_alias_wrote(): void {
+		$this->ledger->record_alias( 'page', $this->about, 'about/old' );
+		$this->ledger->record_alias( 'page', 0, 'gone' );
+		$this->ledger->record_root( 'page', 'kept' );
+
+		$this->assertTrue( $this->ledger->forget_alias( 'page', $this->about, '/About/Old/' ) );
+		$this->assertTrue( $this->ledger->forget_alias( 'page', 0, 'gone' ) );
+
+		$this->assertNull( $this->ledger->find( 'page', 'about/old' ) );
+		$this->assertNull( $this->ledger->find( 'page', 'gone' ) );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'kept' ), 'Other root entries stay.' );
+		$this->assertFalse( $this->ledger->forget_alias( 'page', 0, 'gone' ) );
+		$this->assertFalse( $this->ledger->forget( 999999, 'about/old' ) );
+	}
+
+	public function test_deferred_invalidates_cached_lookups_once_at_the_end(): void {
+		$this->assertNull( $this->ledger->find( 'page', 'one' ), 'Precondition: a cached miss.' );
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+		$inside = null;
+
+		Ledger::deferred(
+			function () use ( &$inside ): void {
+				$this->ledger->record( $this->about, 'one' );
+				$this->ledger->record( $this->about, 'two' );
+				$inside = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+			}
+		);
+
+		$this->assertSame( $before, $inside, 'No invalidation while deferred.' );
+		$this->assertNotSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'one' ), 'The cached miss is gone.' );
+	}
 }
