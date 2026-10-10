@@ -52,5 +52,8 @@ final class Plugin {
 		add_action( 'update_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 		add_action( 'add_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 		add_action( 'delete_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
+
+		$ledger = new Ledger();
+		( new Change_Listener( $ledger ) )->register();
 	}
 }
