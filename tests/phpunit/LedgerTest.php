@@ -190,7 +190,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'one' ), 'The cached miss is gone.' );
 	}
 
-	public function test_a_live_holder_wins_and_a_trashed_holder_is_found(): void {
+	public function test_a_live_holder_answers_and_a_trashed_one_does_not(): void {
 		$other = self::factory()->post->create(
 			[
 				'post_type' => 'page',
@@ -208,5 +208,15 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertTrue( $this->ledger->held_in_trash( 'page', '/Shared/' ) );
 		$this->assertFalse( $this->ledger->held_in_trash( 'page', 'elsewhere' ) );
 		$this->assertFalse( $this->ledger->held_in_trash( 'page', '' ) );
+	}
+
+	public function test_an_old_path_answers_again_once_its_page_leaves_the_trash(): void {
+		$this->ledger->record( $this->about, 'about-old' );
+		wp_trash_post( $this->about );
+		$this->assertNull( $this->ledger->find( 'page', 'about-old' ), 'Nothing answers while the page is in the trash.' );
+
+		wp_untrash_post( $this->about );
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about-old' ), 'No ledger write happened, so the cached answer must still be right.' );
 	}
 }

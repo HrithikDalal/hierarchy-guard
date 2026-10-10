@@ -276,19 +276,26 @@ final class Ledger {
 		$cache_key = 'find:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
 		$cached    = wp_cache_get( $cache_key, self::CACHE_GROUP );
 		if ( false !== $cached ) {
-			return self::CACHE_MISS === (int) $cached ? null : (int) $cached;
-		}
-
-		$found = $this->seek( $post_type, $path );
-		if ( null === $found ) {
-			$roots = $this->roots();
-			if ( in_array( $path, $roots[ $post_type ] ?? [], true ) ) {
-				$found = 0;
+			$found = self::CACHE_MISS === (int) $cached ? null : (int) $cached;
+		} else {
+			$found = $this->seek( $post_type, $path );
+			if ( null === $found ) {
+				$roots = $this->roots();
+				if ( in_array( $path, $roots[ $post_type ] ?? [], true ) ) {
+					$found = 0;
+				}
 			}
+
+			// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
+			wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
 		}
 
-		// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
-		wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
+		// The cache keeps the holder; its status is read on every call, because a
+		// trash or restore of the holder does not touch the ledger.
+		if ( null !== $found && $found > 0 && 'trash' === get_post_status( $found ) ) {
+			$roots = $this->roots();
+			return in_array( $path, $roots[ $post_type ] ?? [], true ) ? 0 : null;
+		}
 
 		return $found;
 	}
@@ -323,8 +330,9 @@ final class Ledger {
 	}
 
 	/**
-	 * Single index seek on the hashed key, newest entry first. Posts in the trash do not
-	 * count: their entries mean the page is only in the trash, which held_in_trash() answers.
+	 * Single index seek on the hashed key: a live holder first, newest entry first.
+	 * A post in the trash comes back only when no live post holds the key; find()
+	 * then answers as if it held nothing.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -335,7 +343,7 @@ final class Ledger {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; cached by the caller.
 		$id = $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status <> 'trash' ORDER BY pm.meta_id DESC LIMIT 1",
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC LIMIT 1",
 				self::key( $post_type, $path ),
 				$post_type
 			)

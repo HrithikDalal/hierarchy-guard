@@ -208,6 +208,16 @@ final class Operations {
 			$job['aliased'] = false;
 		}
 
+		// A subpage must not take the slug the trashed page reclaims when it comes back under the same parent.
+		$root_post = get_post( $root );
+		$reserved  = '';
+		if ( $root_post instanceof WP_Post && (int) $root_post->post_parent === $to ) {
+			$reserved = (string) get_post_meta( $root, '_wp_desired_post_slug', true );
+			if ( '' === $reserved ) {
+				$reserved = Paths::strip_trashed_suffix( (string) $root_post->post_name );
+			}
+		}
+
 		$type     = (string) $job['post_type'];
 		$children = Subtree::live_children( $root, $type, $moves, (int) $job['cursor'] );
 		_prime_post_caches( $children, false, false );
@@ -226,7 +236,7 @@ final class Operations {
 				continue;
 			}
 
-			$result = $this->mover->move( $child_id, $to );
+			$result = $this->mover->move( $child_id, $to, '', $reserved );
 			if ( ! $result['moved'] ) {
 				$job = $this->keep( $job, $child_id, false );
 				continue;
@@ -408,6 +418,7 @@ final class Operations {
 			if ( (int) $post->post_parent !== $moved['to'] ) {
 				// An editor moved it somewhere else since: leave it there.
 				++$job['counts']['left'];
+				$this->keep_original_url( $id, $root, $moved['original'] );
 				continue;
 			}
 
@@ -436,6 +447,9 @@ final class Operations {
 				$this->ledger->record( $id, $interim );
 			}
 			$this->ledger->prune( $id );
+			if ( $result['slug'] !== $moved['original'] ) {
+				$this->keep_original_url( $id, $root, $moved['original'] );
+			}
 			if ( ( '' !== $preferred && $result['slug'] !== $preferred ) || ( '' === $preferred && $result['renamed'] ) ) {
 				++$job['counts']['renamed'];
 			}
@@ -529,6 +543,23 @@ final class Operations {
 		}
 		delete_post_meta( $root, Markers::ALIASES );
 		$this->ledger->prune( $root );
+	}
+
+	/**
+	 * Records a subpage's URL from before the trash on it, when the restore
+	 * could not give that URL back. The aliases that served it are about to go.
+	 *
+	 * @param int    $post_id  Subpage.
+	 * @param int    $root_id  Restored root.
+	 * @param string $original Slug the subpage had before the trash.
+	 */
+	private function keep_original_url( int $post_id, int $root_id, string $original ): void {
+		$post = get_post( $post_id );
+		$root = get_post( $root_id );
+		if ( '' === $original || ! $this->recording() || ! $post instanceof WP_Post || ! $root instanceof WP_Post || ! Paths::is_recordable( $post ) ) {
+			return;
+		}
+		$this->ledger->record( $post_id, Paths::uri( $root ) . '/' . $original );
 	}
 
 	/**

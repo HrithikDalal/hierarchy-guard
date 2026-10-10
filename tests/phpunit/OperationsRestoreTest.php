@@ -11,6 +11,7 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Guard;
 use HierarchyGuard\Trash\Markers;
@@ -297,5 +298,28 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->restore();
 
 		$this->assertSame( [ [ [ $this->ids['team'], $this->ids['history'] ], $this->ids['company'], $this->ids['about'] ] ], $seen );
+	}
+
+	public function test_subpages_that_did_not_come_back_to_their_url_keep_it(): void {
+		$this->move_out();
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $this->ids['history'],
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['history'],
+				'post_name' => 'past',
+			]
+		);
+		$this->untrash_raw( $this->ids['about'] );
+
+		$this->restore();
+
+		$resolver = new Resolver( $this->ledger );
+		$this->assertSame( $this->ids['team'], $resolver->resolve( 'page', 'company/about/team' )->ID, 'Moved elsewhere while the parent was in the trash.' );
+		$this->assertSame( $this->ids['history'], $resolver->resolve( 'page', 'company/about/history' )->ID, 'Renamed while the parent was in the trash.' );
 	}
 }

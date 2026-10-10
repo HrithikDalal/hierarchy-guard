@@ -112,4 +112,12 @@ final class MoverTest extends WP_UnitTestCase {
 	public function test_a_missing_post_is_reported_unmoved(): void {
 		$this->assertFalse( $this->mover->move( 999999, 0 )['moved'] );
 	}
+
+	public function test_a_reserved_slug_is_not_taken_under_the_new_parent(): void {
+		$result = $this->mover->move( $this->ids['team'], $this->ids['company'], '', 'team' );
+
+		$this->assertSame( 'team-2', $result['slug'] );
+		$this->assertTrue( $result['renamed'] );
+		$this->assertSame( 'history', $this->mover->move( $this->ids['history'], $this->ids['company'], '', 'team' )['slug'], 'Other slugs are unaffected.' );
+	}
 }

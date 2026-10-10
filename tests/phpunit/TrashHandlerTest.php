@@ -568,4 +568,19 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$restore['counts']['restored'] = 3;
 		$this->assertSame( [ 'Moved 1 subpage back under page 12.', 'Restored 3 subpages of page 12 from the trash.' ], Trash_Handler::cli_lines( 'restore', $restore, false ) );
 	}
+
+	public function test_a_subpage_with_its_parent_s_slug_leaves_the_parent_its_url(): void {
+		$twin = $this->page( 'about', $this->ids['about'] );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 'about-2', get_post( $twin )->post_name, 'The slug stays free for the parent.' );
+		$this->assertSame( $twin, $this->resolver->resolve( 'page', 'company/about/about' )->ID );
+
+		$this->assertTrue( $this->handler()->undo( $this->ids['about'] ) );
+
+		$this->assertSame( 'about', get_post( $this->ids['about'] )->post_name );
+		$this->assertSame( $this->ids['about'], (int) get_post( $twin )->post_parent );
+		$this->assertSame( 'about', get_post( $twin )->post_name );
+	}
 }

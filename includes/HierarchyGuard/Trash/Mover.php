@@ -25,9 +25,10 @@ final class Mover {
 	 * @param int    $post_id        Post to move.
 	 * @param int    $new_parent_id  New parent, 0 for top level.
 	 * @param string $preferred_slug Slug to try instead of the current one, such as the one it had before an earlier move.
+	 * @param string $reserved_slug  A slug the move must not take under the new parent, such as the one a trashed parent will reclaim.
 	 * @return array{moved:bool,old_path:string,old_slug:string,slug:string,renamed:bool,recordable:bool}
 	 */
-	public function move( int $post_id, int $new_parent_id, string $preferred_slug = '' ): array {
+	public function move( int $post_id, int $new_parent_id, string $preferred_slug = '', string $reserved_slug = '' ): array {
 		global $wpdb;
 
 		$post = get_post( $post_id );
@@ -49,8 +50,16 @@ final class Mover {
 		if ( '' !== $slug ) {
 			// Core skips the uniqueness check for drafts and pending posts. A duplicate
 			// path would let an older draft hide a published page from visitors.
-			$status = in_array( $post->post_status, [ 'draft', 'pending' ], true ) ? 'publish' : (string) $post->post_status;
-			$slug   = wp_unique_post_slug( $slug, $post_id, $status, (string) $post->post_type, $new_parent_id );
+			$status  = in_array( $post->post_status, [ 'draft', 'pending' ], true ) ? 'publish' : (string) $post->post_status;
+			$reserve = static function ( $is_bad, $candidate, $post_type, $post_parent ) use ( $reserved_slug, $new_parent_id ) {
+				return (bool) $is_bad || ( '' !== $reserved_slug && (int) $post_parent === $new_parent_id && $candidate === $reserved_slug );
+			};
+			add_filter( 'wp_unique_post_slug_is_bad_hierarchical_slug', $reserve, 10, 4 );
+			try {
+				$slug = wp_unique_post_slug( $slug, $post_id, $status, (string) $post->post_type, $new_parent_id );
+			} finally {
+				remove_filter( 'wp_unique_post_slug_is_bad_hierarchical_slug', $reserve, 10 );
+			}
 		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Mirrors wp_delete_post()'s re-parent; the post cache is cleared next.
