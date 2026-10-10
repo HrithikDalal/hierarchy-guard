@@ -7346,3 +7346,13 @@ git commit -m "feat: restore the trash-policy setting and document the trash flo
 - Swap the trash-policy help text for the spec's ("Used when there's no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.") and flip the `assertStringNotContainsString( 'Pages list' )` assertion in `SettingsSectionTest`.
 - Widen the plugin Description once the admin UI lands.
 - From plan 1: guard `$provider['name']` in `Settings_Section::render_serve_redirects()`, and stop the `SettingsSectionTest` globals from leaking.
+
+## After the final review
+
+The whole-branch review's fixes landed after this plan was executed, so the branch differs from the code blocks above in these places:
+
+- `Ledger::seek()` returns a live holder first and a trashed one otherwise; `Ledger::find()` checks the holder's status on every call, cached or not, and answers from the root list while the holder is in the trash.
+- `Mover::move()` takes a reserved slug, and the reparent step reserves the trashed page's slug when its subpages move under its own parent.
+- The restore records the original URL on a subpage that was moved elsewhere or came back under another slug.
+- Redirects are 302 while a restore could still undo the move (the matched path is held by a page in the trash, or the page carries a moved marker), 301 otherwise. `Resolver::resolve()` reports this through a by-reference `$temporary`.
+- Aliases are recorded right after the first move; an offer that arrives during an inline step is scheduled; cleanup after a deleted root keeps the trashed-with rows; the CLI drain frees memory before it measures it.
