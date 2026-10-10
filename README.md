@@ -1,6 +1,6 @@
 # Hierarchy Guard
 
-Shows the parent and child structure of pages inside wp-admin, warns before a slug change, re-parenting, or trash breaks a subtree, and makes sure every old URL has somewhere to go.
+Records every page URL change and redirects old subpage URLs to their new location. The admin views and warnings described in the design spec arrive in later releases.
 
 ## Development
 

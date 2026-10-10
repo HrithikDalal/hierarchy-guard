@@ -1,6 +1,6 @@
 {
 	"name": "hrithikdalal/hierarchy-guard",
-	"description": "Shows page hierarchy in wp-admin, warns before changes break subpage URLs, and tracks the redirects needed.",
+	"description": "Records page URL changes and redirects old subpage URLs to their new location.",
 	"type": "wordpress-plugin",
 	"license": "GPL-2.0-or-later",
 	"require": {
