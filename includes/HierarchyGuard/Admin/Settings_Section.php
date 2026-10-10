@@ -15,7 +15,7 @@ use HierarchyGuard\Settings;
 /**
  * Registers the plugin's settings as a section on the Writing settings page.
  *
- * The trash-policy field is added with the trash handler that reads it (plan 2).
+ * The trash-policy field is added together with the trash handler that reads it.
  */
 final class Settings_Section {
 

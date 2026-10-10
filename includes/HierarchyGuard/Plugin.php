@@ -10,7 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard;
 
 /**
- * Wires every hook to its handler. Each later task adds one line to register().
+ * Wires every hook to its handler.
  */
 final class Plugin {
 
