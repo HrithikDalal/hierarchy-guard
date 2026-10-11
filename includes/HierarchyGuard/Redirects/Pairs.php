@@ -62,39 +62,38 @@ final class Pairs {
 	}
 
 	/**
-	 * The block for an old path recorded on a post. When the page that held
-	 * the old path is only in the trash, the path has no new URL: the head is
-	 * none and the reason is `trash`, while its subpages still redirect. Its
-	 * first-level pages are then the subpages the trash moved off that page,
-	 * at their slugs from before the move, not the post's own children.
+	 * The block for an old path recorded on a post. When a page in the trash
+	 * holds the old path, the path has no new URL: the head is none and the
+	 * reason is `trash`, while its subpages still redirect. When pages in the
+	 * trash moved subpages up to this post, its first-level pages are those
+	 * subpages, at their slugs from before the move, not the post's own
+	 * children. Otherwise they are the post's own children.
 	 *
 	 * @param WP_Post $post     Post the old path is recorded on.
 	 * @param string  $old_path The old path, any form.
 	 * @return array<string,mixed> Block.
 	 */
 	public static function post_block( WP_Post $post, string $old_path ): array {
-		$old    = Paths::normalize( $old_path );
-		$type   = (string) $post->post_type;
-		$holder = Ledger::trash_holder( $type, $old );
-		if ( $holder > 0 ) {
-			return [
-				'old'         => $old,
-				'head'        => 0,
-				'reason'      => 'trash',
-				'base'        => Paths::uri( $post ),
-				'from'        => 0,
-				'children'    => self::moved_children( [ $holder ], $type )[ $holder ] ?? [],
-				'incomplete'  => false,
-				'recorded_on' => (int) $post->ID,
-			];
+		$old     = Paths::normalize( $old_path );
+		$type    = (string) $post->post_type;
+		$holders = Ledger::trash_holders( $type, $old );
+		// Only a page whose trash moved subpages up to this post left it the alias.
+		$moved    = [] !== $holders ? self::moved_children( $holders, $type, (int) $post->ID ) : [];
+		$children = [];
+		foreach ( $holders as $holder ) {
+			foreach ( $moved[ $holder ] ?? [] as $node ) {
+				$children[] = $node;
+			}
 		}
+		$in_trash = [] !== $holders;
+
 		return [
 			'old'         => $old,
-			'head'        => (int) $post->ID,
-			'reason'      => '',
+			'head'        => $in_trash ? 0 : (int) $post->ID,
+			'reason'      => $in_trash ? 'trash' : '',
 			'base'        => Paths::uri( $post ),
-			'from'        => (int) $post->ID,
-			'children'    => [],
+			'from'        => [] !== $children ? 0 : (int) $post->ID,
+			'children'    => $children,
 			'incomplete'  => false,
 			'recorded_on' => (int) $post->ID,
 		];
@@ -107,10 +106,12 @@ final class Pairs {
 	 * original slugs. Once it is deleted for good its old path leads to the
 	 * page its subpages moved under, and its first-level pages are the IDs its
 	 * change entry kept that still live there, at their slugs from before the move.
-	 * When a later root of the same bulk action took that page to the trash and
-	 * moved the subpages up again, they sit under its nearest ancestor not in
-	 * the trash: that is where their new URLs start. The old path itself still
-	 * leads to the page in the trash, as the resolver sees it.
+	 * When a later root of the same bulk action took that page to the trash, or
+	 * it was deleted since, and the subpages moved up again, they sit under the
+	 * nearest page above it that is neither: that is where their new URLs
+	 * start. The old path itself still leads to the page it was recorded on, as
+	 * the resolver sees it, so a deleted root's old path leads anywhere only
+	 * while a live page holds it.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
 	 * @return array<int,array<string,mixed>> Blocks.
@@ -121,8 +122,10 @@ final class Pairs {
 		}
 
 		$type  = (string) $change['post_type'];
+		$all   = [];
 		$roots = [];
 		foreach ( (array) $change['roots'] as $root ) {
+			$all[ (int) $root['root'] ] = $root;
 			if ( Settings::POLICY_REPARENT === ( $root['policy'] ?? '' ) && '' !== (string) ( $root['path'] ?? '' ) ) {
 				$roots[ (int) $root['root'] ] = $root;
 			}
@@ -143,17 +146,13 @@ final class Pairs {
 				unset( $roots[ $root_id ] );
 				continue;
 			}
-			$to     = (int) $root['to'];
-			$parent = $to > 0 ? get_post( $to ) : null;
-			if ( $parent instanceof WP_Post && 'trash' === $parent->post_status ) {
-				// A root trashed later in the same bulk action moved these subpages up again.
-				$to     = Subtree::nearest_live_ancestor( $parent );
-				$parent = $to > 0 ? get_post( $to ) : null;
-			}
+			// A root trashed later in the same bulk action may have moved these subpages up again, and either may be deleted since.
+			$to                  = self::live_target( (int) $root['to'], $all );
+			$parent              = $to > 0 ? get_post( $to ) : null;
 			$under[ $root_id ]   = array_merge( $root, [ 'to' => $to ] );
 			$parents[ $root_id ] = $parent instanceof WP_Post ? $parent : null;
 		}
-		$kept = self::kept_children( array_diff_key( $under, $statuses ), $type );
+		$kept = self::kept_children( array_diff_key( $under, $statuses ), $all, $type );
 
 		$blocks = [];
 		foreach ( $roots as $root_id => $root ) {
@@ -169,6 +168,8 @@ final class Pairs {
 				'incomplete'  => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
 				// Each subpage keeps the slug it had before the move: nothing is rebased.
 				'recorded_on' => 0,
+				// A deleted root's old path leads to its target only through a live page that holds it.
+				'held'        => '' === $status,
 			];
 		}
 
@@ -191,7 +192,9 @@ final class Pairs {
 	 * after the post's entry for the path. A trash change lists each subpage at
 	 * its slug from before the move. An old path the ledger gives to another
 	 * live post leads to that post, so it is dropped here with the pages walked
-	 * below it: that post's own list has them.
+	 * below it: that post's own list has them. A deleted root's old path leads
+	 * to its target only while that target holds it, so with no live holder it
+	 * is unresolved, while its subpages are still listed.
 	 *
 	 * @param array<int,array<string,mixed>> $blocks    Blocks.
 	 * @param string                         $post_type Post type name.
@@ -240,6 +243,7 @@ final class Pairs {
 		$pairs    = [];
 		$lineage  = [];
 		$block_of = [];
+		$held     = [];
 		foreach ( $live as $index => $block ) {
 			$old  = (string) $block['old'];
 			$head = (int) $block['head'];
@@ -250,7 +254,10 @@ final class Pairs {
 			if ( $post instanceof WP_Post && is_post_publicly_viewable( $post ) ) {
 				$top                         = [ count( $pairs ) ];
 				$block_of[ count( $pairs ) ] = $index;
-				$pairs[]                     = [
+				if ( ! empty( $block['held'] ) ) {
+					$held[ count( $pairs ) ] = true;
+				}
+				$pairs[] = [
 					'old' => $old,
 					'id'  => $head,
 				];
@@ -300,23 +307,35 @@ final class Pairs {
 		// panel lists what sits under it: drop it here, with the pages walked below it.
 		$holders = self::holders( array_column( $pairs, 'old' ), $post_type );
 		$dropped = [];
+		$unheld  = [];
 		foreach ( $pairs as $i => $pair ) {
 			$holder = $holders[ $pair['old'] ] ?? 0;
 			if ( ( $holder > 0 && $holder !== $pair['id'] ) || [] !== array_intersect_key( array_flip( $lineage[ $i ] ?? [] ), $dropped ) ) {
 				$dropped[ $i ] = true;
+			} elseif ( isset( $held[ $i ] ) && 0 === $holder ) {
+				// No live page holds a deleted root's old path, so it leads nowhere; its subpages may still redirect.
+				$unheld[ $i ] = true;
+				$unresolved[] = [
+					'old'    => $pair['old'],
+					'reason' => 'none',
+				];
 			}
 		}
 		// Under a page that is there but hidden, a published subpage of it can use an old subpage path.
+		$under = [];
 		foreach ( $pairs as $i => $pair ) {
-			if ( isset( $dropped[ $i ] ) || ! isset( $hidden[ $block_of[ $i ] ?? -1 ] ) ) {
-				continue;
+			if ( ! isset( $dropped[ $i ] ) && isset( $hidden[ $block_of[ $i ] ?? -1 ] ) ) {
+				$under[ $i ] = $pair['old'];
 			}
-			$there = get_page_by_path( $pair['old'], OBJECT, $post_type );
-			if ( $there instanceof WP_Post && (int) $there->ID !== $pair['id'] && is_post_publicly_viewable( $there ) ) {
+		}
+		$there = [] !== $under ? self::owners( array_values( $under ), $post_type ) : [];
+		foreach ( $under as $i => $path ) {
+			$owner = $there[ $path ] ?? 0;
+			if ( $owner > 0 && $owner !== $pairs[ $i ]['id'] && is_post_publicly_viewable( $owner ) ) {
 				$dropped[ $i ] = true;
 			}
 		}
-		$pairs = array_values( array_diff_key( $pairs, $dropped ) );
+		$pairs = array_values( array_diff_key( $pairs, $dropped, $unheld ) );
 
 		return [
 			'post_type'  => $post_type,
@@ -517,11 +536,12 @@ final class Pairs {
 	/**
 	 * Subpages the trash moved up, by root, with the slug each had under it.
 	 *
-	 * @param int[]  $root_ids Roots in the trash.
-	 * @param string $type     Post type name.
+	 * @param int[]    $root_ids Roots in the trash.
+	 * @param string   $type     Post type name.
+	 * @param int|null $to       Only moves up to this page, or null for every move.
 	 * @return array<int,array<int,array{id:int,parent:int,segment:string,slug:string,status:string}>>
 	 */
-	private static function moved_children( array $root_ids, string $type ): array {
+	private static function moved_children( array $root_ids, string $type, ?int $to = null ): array {
 		global $wpdb;
 
 		if ( [] === $root_ids ) {
@@ -537,7 +557,10 @@ final class Pairs {
 
 		$found = [];
 		foreach ( (array) $markers as $marker ) {
-			$found[ (int) $marker['post_id'] ][ $keys[ (string) $marker['meta_key'] ] ] = Markers::decode_moved( (string) $marker['meta_value'] );
+			$moved = Markers::decode_moved( (string) $marker['meta_value'] );
+			if ( null === $to || $to === $moved['to'] ) {
+				$found[ (int) $marker['post_id'] ][ $keys[ (string) $marker['meta_key'] ] ] = $moved;
+			}
 		}
 		if ( [] === $found ) {
 			return [];
@@ -575,19 +598,39 @@ final class Pairs {
 	/**
 	 * The subpages each deleted root's entry kept, by root, where they still live under its target.
 	 *
-	 * @param array<int,array<string,mixed>> $roots Root entries of deleted roots, by root ID.
+	 * In a chained bulk trash every root a subpage moved up from keeps it. It
+	 * belongs to the root it left first: the one whose move took it up to
+	 * another root of the change and that no other of those moves led to.
+	 *
+	 * @param array<int,array<string,mixed>> $roots Root entries of deleted roots, by root ID, each `to` the page its subpages live under now.
+	 * @param array<int,array<string,mixed>> $all   Every root entry of the change as recorded, by root ID.
 	 * @param string                         $type  Post type name.
 	 * @return array<int,array<int,array{id:int,parent:int,segment:string,slug:string,status:string}>>
 	 */
-	private static function kept_children( array $roots, string $type ): array {
-		$owner = [];
+	private static function kept_children( array $roots, array $all, string $type ): array {
+		$listed = [];
 		foreach ( $roots as $root_id => $root ) {
 			foreach ( (array) ( $root['ids'] ?? [] ) as $id ) {
-				$owner[ (int) $id ] = (int) $root_id;
+				$listed[ (int) $id ][] = (int) $root_id;
 			}
 		}
-		if ( [] === $owner ) {
+		if ( [] === $listed ) {
 			return [];
+		}
+
+		$owner = [];
+		foreach ( $listed as $id => $candidates ) {
+			$owner[ $id ] = (int) end( $candidates );
+			if ( count( $candidates ) < 2 ) {
+				continue;
+			}
+			$tos = array_map( static fn( int $candidate ): int => (int) ( $all[ $candidate ]['to'] ?? 0 ), $candidates );
+			foreach ( $candidates as $candidate ) {
+				if ( isset( $all[ (int) ( $all[ $candidate ]['to'] ?? 0 ) ] ) && ! in_array( $candidate, $tos, true ) ) {
+					$owner[ $id ] = $candidate;
+					break;
+				}
+			}
 		}
 		// The walk reads no more than the cap, whatever an older change stored.
 		$owner = array_slice( $owner, 0, Subtree::count_cap() + 1, true );
@@ -601,6 +644,33 @@ final class Pairs {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * The page a root's subpages live under now: the one they moved up to or,
+	 * when that page went to the trash since, its nearest ancestor that did
+	 * not. When it was deleted and was itself a root of the change, its own
+	 * target is followed, since core moves a deleted page's children up to
+	 * its parent.
+	 *
+	 * @param int                            $to  The root's recorded target, 0 for top level.
+	 * @param array<int,array<string,mixed>> $all Every root entry of the change as recorded, by root ID.
+	 * @return int Page ID, 0 for top level; a deleted page the change knows nothing more of stays as it is.
+	 */
+	private static function live_target( int $to, array $all ): int {
+		$seen = [];
+		while ( $to > 0 && ! isset( $seen[ $to ] ) ) {
+			$seen[ $to ] = true;
+			$page        = get_post( $to );
+			if ( $page instanceof WP_Post ) {
+				return 'trash' === $page->post_status ? Subtree::nearest_live_ancestor( $page ) : $to;
+			}
+			if ( ! isset( $all[ $to ] ) ) {
+				break;
+			}
+			$to = (int) $all[ $to ]['to'];
+		}
+		return $to;
 	}
 
 	/**
@@ -787,11 +857,13 @@ final class Pairs {
 
 	/**
 	 * The live post each old path leads to in the ledger, the one the resolver
-	 * picks: the newest entry among posts not in the trash.
+	 * picks: the newest entry among posts not in the trash. The resolver passes
+	 * over a holder that sits under a page in the trash, so such a path counts
+	 * as held by nothing.
 	 *
 	 * @param string[] $paths     Normalized old paths, at most the count cap.
 	 * @param string   $post_type Post type name.
-	 * @return array<string,int> Holder by path; a path no live post holds is absent.
+	 * @return array<string,int> Holder by path; a path no live post holds, or whose holder sits under the trash, is absent.
 	 */
 	private static function holders( array $paths, string $post_type ): array {
 		global $wpdb;
@@ -814,6 +886,17 @@ final class Pairs {
 				$out[ $path ] = (int) $row['post_id'];
 			}
 		}
-		return $out;
+		if ( [] === $out ) {
+			return [];
+		}
+
+		_prime_post_caches( array_values( array_unique( $out ) ), false, false );
+		return array_filter(
+			$out,
+			static function ( int $holder_id ): bool {
+				$holder = get_post( $holder_id );
+				return $holder instanceof WP_Post && ! Paths::has_trashed_segment( Paths::uri( $holder ) );
+			}
+		);
 	}
 }
