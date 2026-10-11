@@ -11,7 +11,6 @@ namespace HierarchyGuard;
 
 use HierarchyGuard\Admin\List_Table;
 use HierarchyGuard\Export\Csv;
-use HierarchyGuard\Redirects\Batch_Resolver;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
@@ -23,14 +22,6 @@ use WP_Post;
 final class Overview {
 
 	public const CHILDREN_PER_PAGE = 10;
-	public const MAX_OLD_PATHS     = 20;
-
-	/**
-	 * Ledger.
-	 *
-	 * @var Ledger
-	 */
-	private Ledger $ledger;
 
 	/**
 	 * Providers.
@@ -42,11 +33,9 @@ final class Overview {
 	/**
 	 * Constructor.
 	 *
-	 * @param Ledger    $ledger    Ledger.
 	 * @param Providers $providers Redirect plugin detection.
 	 */
-	public function __construct( Ledger $ledger, Providers $providers ) {
-		$this->ledger    = $ledger;
+	public function __construct( Providers $providers ) {
 		$this->providers = $providers;
 	}
 
@@ -82,7 +71,6 @@ final class Overview {
 				'count'  => min( $descendants, $cap ),
 				'capped' => $descendants > $cap,
 			],
-			'old_paths'       => $this->old_paths( $post ),
 			'redirects'       => [
 				// The server redirects only to a page anyone can view, outside the trash.
 				'serving'      => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
@@ -186,59 +174,6 @@ final class Overview {
 				'children_count'  => min( $counts[ $child_id ] ?? 0, $cap ),
 				'children_capped' => ( $counts[ $child_id ] ?? 0 ) > $cap,
 				'view_link'       => is_post_publicly_viewable( $child_id ) ? (string) get_permalink( $child_id ) : null,
-			];
-		}
-		return $out;
-	}
-
-	/**
-	 * Old paths recorded on the post, newest first, as URLs relative to the
-	 * home URL. A path the post is at again, as after a trash moved it back,
-	 * is its URL, not an old one.
-	 *
-	 * Each has a state, from what the server does with a request for it as
-	 * Batch_Resolver::served() models it, all of them worked out at once: `ok`
-	 * when it redirects here; `in_use` when it redirects to another post, or
-	 * WordPress shows something there, as a page, a blog post, an attachment
-	 * or an archive, or by a rewrite rule the model does not look into;
-	 * `trash` when it redirects nowhere and a page in the trash holds it;
-	 * `none` when it redirects nowhere, or the model cannot tell.
-	 *
-	 * @param WP_Post $post Post.
-	 * @return array<int,array{path:string,url:string,state:string}>
-	 */
-	private function old_paths( WP_Post $post ): array {
-		$post_id = (int) $post->ID;
-		$type    = (string) $post->post_type;
-		$current = Paths::uri( $post );
-		$paths   = array_values( array_diff( array_reverse( $this->ledger->paths_for( $post_id ) ), [ $current ] ) );
-
-		$urls = [];
-		foreach ( array_slice( $paths, 0, self::MAX_OLD_PATHS ) as $path ) {
-			$url = Paths::url( $type, $path );
-			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
-			if ( '' !== $url ) {
-				$urls[ $path ] = $url;
-			}
-		}
-		$facts  = [];
-		$served = Batch_Resolver::served( array_map( 'strval', array_keys( $urls ) ), $type, $facts, true );
-
-		$out = [];
-		foreach ( $urls as $path => $url ) {
-			$path   = (string) $path;
-			$target = $served[ $path ] ?? 0;
-			if ( $target === $post_id ) {
-				$state = 'ok';
-			} elseif ( 0 !== $target ) {
-				$state = 'in_use';
-			} else {
-				$state = ! empty( $facts[ $path ]['held'] ) ? 'trash' : 'none';
-			}
-			$out[] = [
-				'path'  => $path,
-				'url'   => Paths::relative( $url ),
-				'state' => $state,
 			];
 		}
 		return $out;

@@ -10,7 +10,6 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\Meta_Box;
-use HierarchyGuard\Ledger;
 use HierarchyGuard\Overview;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Providers;
@@ -41,7 +40,7 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->set_permalink_structure( '/%postname%/' );
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 		$this->ids = $this->make_tree();
-		$this->box = new Meta_Box( new Overview( new Ledger(), new Providers() ) );
+		$this->box = new Meta_Box( new Overview( new Providers() ) );
 	}
 
 	public function tear_down(): void {
@@ -120,22 +119,6 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'data-serving="1"', $this->html( $this->ids['about'] ) );
 	}
 
-	public function test_an_old_url_with_a_non_ascii_slug_is_shown_decoded(): void {
-		$japan = $this->page( '日本', $this->ids['company'] );
-		wp_update_post(
-			[
-				'ID'        => $japan,
-				'post_name' => 'japan',
-			]
-		);
-
-		$html = $this->html( $japan );
-
-		$this->assertStringContainsString( '<code>/company/日本/</code>', $html );
-		$this->assertStringContainsString( 'Download redirects (CSV) for /company/日本/</span>', $html );
-		$this->assertStringContainsString( 'from=company%2F%25e6%2597%25a5%25e6%259c%25ac', $html, 'The download keeps the stored path.' );
-	}
-
 	public function test_a_capped_count_links_to_the_list(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
 
@@ -151,23 +134,6 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'None. This is a top-level page.', $html );
 		$this->assertStringContainsString( 'No subpages.', $html );
 		$this->assertStringNotContainsString( 'Trashing this page', $html );
-	}
-
-	public function test_old_urls_are_listed_with_what_handles_them(): void {
-		wp_update_post(
-			[
-				'ID'        => $this->ids['about'],
-				'post_name' => 'about-us',
-			]
-		);
-
-		$html = $this->html( $this->ids['about'] );
-		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Not redirected<span aria-hidden="true"> · </span><a href="', $html );
-		$this->assertStringContainsString( '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv', $html );
-		$this->assertStringContainsString( 'download><span aria-hidden="true">Download redirects (CSV)</span><span class="screen-reader-text">Download redirects (CSV) for /company/about/</span></a>', $html, 'The link’s name is one string.' );
-
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Redirects here', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_the_trash_sentence_follows_the_policy(): void {
@@ -205,66 +171,22 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Trashing this page leaves its 2+ subpages where they are.', $html );
 	}
 
-	public function test_an_old_url_of_a_page_nobody_can_view_is_not_redirected(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+	public function test_the_box_shows_where_the_page_is_not_its_old_urls(): void {
 		wp_update_post(
 			[
-				'ID'          => $this->ids['about'],
-				'post_name'   => 'about-us',
-				'post_status' => 'private',
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
 			]
 		);
 
 		$html = $this->html( $this->ids['about'] );
-		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Not redirected<span aria-hidden="true"> · </span><a href="', $html );
-		$this->assertStringNotContainsString( 'Redirects here', $html );
-	}
 
-	public function test_an_old_url_held_by_a_page_in_the_trash_says_so(): void {
-		wp_trash_post( $this->ids['about'] );
-
-		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>In the Trash<span aria-hidden="true"> · </span><a href="', $this->html( $this->ids['company'] ) );
+		$this->assertStringNotContainsString( 'Old URLs', $html );
+		$this->assertStringNotContainsString( '/company/about/', $html );
+		$this->assertStringNotContainsString( '/csv', $html );
 	}
 
 	public function test_the_list_link_shows_when_subpages_outnumber_the_children_listed(): void {
 		$this->assertStringContainsString( 'View all 3 subpages in the list', $this->html( $this->ids['about'] ) );
-	}
-
-	public function test_an_old_url_another_published_page_now_uses_is_marked_so(): void {
-		wp_update_post(
-			[
-				'ID'        => $this->ids['about'],
-				'post_name' => 'about-us',
-			]
-		);
-		$this->page( 'about', $this->ids['company'] );
-
-		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Used by another page<span aria-hidden="true"> · </span><a href="', $this->html( $this->ids['about'] ) );
-	}
-
-	public function test_an_old_url_names_the_redirect_plugin_that_can_add_it(): void {
-		add_filter(
-			'hierarchy_guard_redirect_providers',
-			static function ( array $providers ): array {
-				$providers['custom'] = [
-					'name'   => 'Custom Redirects',
-					'active' => true,
-					'url'    => admin_url( 'admin.php?page=custom-redirects' ),
-					'csv'    => 'generic',
-				];
-				return $providers;
-			}
-		);
-		wp_update_post(
-			[
-				'ID'        => $this->ids['about'],
-				'post_name' => 'about-us',
-			]
-		);
-
-		$html = $this->html( $this->ids['about'] );
-
-		remove_all_filters( 'hierarchy_guard_redirect_providers' );
-		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Add in Custom Redirects<span aria-hidden="true"> · </span><a href="', $html );
 	}
 }

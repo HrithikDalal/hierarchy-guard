@@ -9,12 +9,9 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\REST;
 
-use HierarchyGuard\Export\Csv;
-use HierarchyGuard\Ledger;
 use HierarchyGuard\Overview;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
-use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Operations;
@@ -26,9 +23,8 @@ use WP_REST_Response;
 use WP_REST_Server;
 
 /**
- * Backs the editor panel, the Quick Edit warning, the trash dialog and the
- * redirects modal. Every route is read-only and needs edit rights on the
- * post it reads.
+ * Backs the editor panel, the Quick Edit warning and the trash dialog. Every
+ * route is read-only and needs edit rights on the post it reads.
  */
 final class Hierarchy_Controller {
 
@@ -43,30 +39,12 @@ final class Hierarchy_Controller {
 	private Overview $overview;
 
 	/**
-	 * Ledger.
-	 *
-	 * @var Ledger
-	 */
-	private Ledger $ledger;
-
-	/**
-	 * Pairs.
-	 *
-	 * @var Pairs
-	 */
-	private Pairs $pairs;
-
-	/**
 	 * Constructor.
 	 *
 	 * @param Overview $overview Overview builder.
-	 * @param Ledger   $ledger   Ledger.
-	 * @param Pairs    $pairs    Pairs.
 	 */
-	public function __construct( Overview $overview, Ledger $ledger, Pairs $pairs ) {
+	public function __construct( Overview $overview ) {
 		$this->overview = $overview;
-		$this->ledger   = $ledger;
-		$this->pairs    = $pairs;
 	}
 
 	/**
@@ -99,56 +77,6 @@ final class Hierarchy_Controller {
 						'type'    => 'integer',
 						'minimum' => 1,
 						'default' => 1,
-					],
-				],
-			]
-		);
-
-		register_rest_route(
-			self::NAMESPACE,
-			'/posts/(?P<id>\d+)/pairs',
-			[
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'pairs' ],
-				'permission_callback' => [ $this, 'can_edit' ],
-				'args'                => [
-					'id'       => $id,
-					'from'     => [
-						'type'     => 'string',
-						'required' => true,
-					],
-					'page'     => [
-						'type'    => 'integer',
-						'minimum' => 1,
-						'default' => 1,
-					],
-					'per_page' => [
-						'type'    => 'integer',
-						'minimum' => 1,
-						'maximum' => max( Subtree::COUNT_CAP, Subtree::count_cap() ),
-						'default' => Pairs::PER_PAGE,
-					],
-				],
-			]
-		);
-
-		register_rest_route(
-			self::NAMESPACE,
-			'/posts/(?P<id>\d+)/csv',
-			[
-				'methods'             => WP_REST_Server::READABLE,
-				'callback'            => [ $this, 'csv' ],
-				'permission_callback' => [ $this, 'can_edit' ],
-				'args'                => [
-					'id'     => $id,
-					'from'   => [
-						'type'     => 'string',
-						'required' => true,
-					],
-					'format' => [
-						'type'    => 'string',
-						'enum'    => array_keys( Csv::LAYOUTS ),
-						'default' => 'generic',
 					],
 				],
 			]
@@ -203,34 +131,6 @@ final class Hierarchy_Controller {
 	public function hierarchy( WP_REST_Request $request ): WP_REST_Response {
 		$post = get_post( (int) $request['id'] );
 		return new WP_REST_Response( $this->overview->describe( $post, (int) $request['children_page'] ) );
-	}
-
-	/**
-	 * GET /posts/{id}/pairs: the redirects an old path recorded on the post needs.
-	 *
-	 * @param WP_REST_Request $request Request.
-	 * @return WP_REST_Response|WP_Error
-	 */
-	public function pairs( WP_REST_Request $request ) {
-		$collected = $this->collected( $request );
-		if ( $collected instanceof WP_Error ) {
-			return $collected;
-		}
-		return new WP_REST_Response( $this->pairs->page( $collected, (int) $request['page'], (int) $request['per_page'] ) );
-	}
-
-	/**
-	 * GET /posts/{id}/csv: the same pairs as a download.
-	 *
-	 * @param WP_REST_Request $request Request.
-	 * @return WP_REST_Response|WP_Error
-	 */
-	public function csv( WP_REST_Request $request ) {
-		$collected = $this->collected( $request );
-		if ( $collected instanceof WP_Error ) {
-			return $collected;
-		}
-		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $collected ) );
 	}
 
 	/**
@@ -355,20 +255,5 @@ final class Hierarchy_Controller {
 			'denied'       => $denied,
 			'denied_trash' => $denied_trash,
 		];
-	}
-
-	/**
-	 * The pairs behind the request's old path, if it is recorded on the post.
-	 *
-	 * @param WP_REST_Request $request Request.
-	 * @return array<string,mixed>|WP_Error
-	 */
-	private function collected( WP_REST_Request $request ) {
-		$post = get_post( (int) $request['id'] );
-		$from = Paths::normalize( (string) $request['from'] );
-		if ( '' === $from || ! in_array( $from, $this->ledger->paths_for( (int) $post->ID ), true ) ) {
-			return new WP_Error( 'hierarchy_guard_unknown_path', __( 'This old URL is not recorded for this page.', 'hierarchy-guard' ), [ 'status' => 404 ] );
-		}
-		return $this->pairs->collect_post( $post, $from );
 	}
 }

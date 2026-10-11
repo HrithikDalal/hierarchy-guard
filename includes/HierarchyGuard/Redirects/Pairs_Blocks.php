@@ -9,7 +9,6 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Redirects;
 
-use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
@@ -17,100 +16,18 @@ use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
- * The block sources: one block for an old path recorded on a post, one per
- * root of a trash change. A block names its old path, its head, the page its
- * new URLs start under, the first-level pages its walk starts from, and the
- * pages in the trash that moved them up.
+ * The block sources: one per root of a trash change. A block names its old
+ * path, its head, the page its new URLs start under, and the first-level
+ * pages its walk starts from.
  */
 final class Pairs_Blocks {
 
 	/**
-	 * The block for an old path recorded on a post. When a page in the trash
-	 * holds the old path, the path has no new URL: the head is none and the
-	 * reason is `trash`, while its subpages still redirect. The subpages that
-	 * pages in the trash moved up to this post are first-level pages, at their
-	 * slugs from before the move, and so are those that subpages of theirs in
-	 * the trash since moved up here. The post's own subpages are too, unless
-	 * one of those pages wrote this old path on the post as its alias: then the
-	 * post never lived there. No more pages in the trash are read than the
-	 * count cap; past it the block is incomplete.
-	 *
-	 * @param WP_Post $post     Post the old path is recorded on.
-	 * @param string  $old_path The old path, any form.
-	 * @return array<string,mixed> Block.
-	 */
-	public static function post_block( WP_Post $post, string $old_path ): array {
-		$old                 = Paths::normalize( $old_path );
-		$type                = (string) $post->post_type;
-		$id                  = (int) $post->ID;
-		$cap                 = Subtree::count_cap();
-		$holders             = Ledger::trash_holders( $type, $old, $cap + 1 );
-		$incomplete          = count( $holders ) > $cap;
-		$holders             = array_slice( $holders, 0, $cap );
-		[ $moved, $trashed ] = self::moved_tree( $holders, $type, $id );
-		$children            = [];
-		$virtual             = $holders;
-		foreach ( $holders as $holder ) {
-			$children = array_merge( $children, $moved[ $holder ] ?? [] );
-			$virtual  = array_merge( $virtual, $trashed[ $holder ] ?? [] );
-		}
-		$in_trash = [] !== $holders;
-
-		return [
-			'old'         => $old,
-			'head'        => $in_trash ? 0 : $id,
-			'reason'      => $in_trash ? 'trash' : '',
-			'base'        => Paths::uri( $post ),
-			'from'        => $in_trash && self::wrote_alias( $holders, $id, $old ) ? 0 : $id,
-			'children'    => $children,
-			// The subpages moved up here are this post's children now, and are walked once.
-			'skip'        => array_column( $children, 'id' ),
-			// Pages in the trash whose trash moved those subpages up here, where they lived before.
-			'virtual'     => array_values( array_unique( array_map( 'intval', $virtual ) ) ),
-			'incomplete'  => $incomplete,
-			'recorded_on' => $id,
-			'rebuild'     => true,
-			'target'      => $id,
-		];
-	}
-
-	/**
-	 * Whether one of the pages in the trash wrote this old path on the post
-	 * as its alias, which the trash flow remembers on that page.
-	 *
-	 * @param int[]  $holders Pages in the trash that hold the path.
-	 * @param int    $post_id The post.
-	 * @param string $path    Normalized old path.
-	 * @return bool
-	 */
-	private static function wrote_alias( array $holders, int $post_id, string $path ): bool {
-		global $wpdb;
-
-		if ( [] === $holders ) {
-			return false;
-		}
-		$placeholders = implode( ',', array_fill( 0, count( $holders ), '%d' ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per page in the trash read, at most the count cap; only the aliases row of each, on the meta_key index.
-		$rows = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND post_id IN ( {$placeholders} )", ...array_merge( [ Markers::ALIASES ], array_map( 'intval', $holders ) ) ) );
-		foreach ( (array) $rows as $row ) {
-			$aliases = maybe_unserialize( (string) $row );
-			foreach ( is_array( $aliases ) ? $aliases : [] as $alias ) {
-				$to  = (int) ( $alias['to'] ?? 0 );
-				$was = Paths::normalize( (string) ( $alias['path'] ?? '' ) );
-				if ( $to === $post_id && $was === $path ) {
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * The blocks for a trash change. A root restored since has no block,
 	 * because its URLs work again. While a root is in the trash its old path
-	 * leads nowhere and its first-level pages are the moved markers, at their
-	 * original slugs, each listed with its subpages at the paths they had until
-	 * the trash. Once it is deleted for good its old path leads to the
+	 * leads nowhere and its first-level pages are the subpages its moved
+	 * markers name, at their original slugs, each with its subpages below it at
+	 * their current slugs. Once it is deleted for good its old path leads to the
 	 * page its subpages moved under, and its first-level pages are the IDs its
 	 * change entry kept that still live there, at their slugs from before the move.
 	 * When a later root of the same bulk action took that page to the trash, or
@@ -142,9 +59,9 @@ final class Pairs_Blocks {
 		}
 
 		// Every root's status, in one query: a root missing here was deleted for good.
-		$statuses           = self::statuses( array_keys( $all ) );
-		$trashed            = array_keys( array_filter( array_intersect_key( $statuses, $roots ), static fn( string $status ): bool => 'trash' === $status ) );
-		[ $moved, $nested ] = self::moved_tree( $trashed, $type, null );
+		$statuses = self::statuses( array_keys( $all ) );
+		$trashed  = array_keys( array_filter( array_intersect_key( $statuses, $roots ), static fn( string $status ): bool => 'trash' === $status ) );
+		$moved    = self::moved_children( $trashed, $type );
 
 		$parents = [];
 		$under   = [];
@@ -170,23 +87,18 @@ final class Pairs_Blocks {
 			$to       = (int) $root['to'];
 			$trash    = 'trash' === $status;
 			$blocks[] = [
-				'old'         => Paths::normalize( (string) $root['path'] ),
+				'old'        => Paths::normalize( (string) $root['path'] ),
 				// A target that was itself a root of the change and is gone now is no page: nothing needs reading.
-				'head'        => '' === $status && ! ( isset( $all[ $to ] ) && ! isset( $statuses[ $to ] ) ) ? $to : 0,
-				'reason'      => $trash ? 'trash' : '',
-				'base'        => null !== $parent ? Paths::uri( $parent ) : '',
-				'from'        => 0,
-				'children'    => $trash ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
-				'incomplete'  => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
-				'recorded_on' => 0,
-				// While the root is in the trash its markers date the move, so each subpage is listed at the URL it had until the trash.
-				// Once it is deleted they are gone, and each keeps the slug it had before the move, with nothing rebased.
-				'rebuild'     => $trash,
-				'post'        => null !== $parent ? (int) $parent->ID : 0,
-				'virtual'     => $trash ? array_merge( [ (int) $root_id ], $nested[ $root_id ] ?? [] ) : [],
-				'target'      => (int) $under[ $root_id ]['to'],
+				'head'       => '' === $status && ! ( isset( $all[ $to ] ) && ! isset( $statuses[ $to ] ) ) ? $to : 0,
+				'reason'     => $trash ? 'trash' : '',
+				'base'       => null !== $parent ? Paths::uri( $parent ) : '',
+				'from'       => 0,
+				// In the trash, the markers keep each subpage's slug from before the move; once deleted, the change entry does.
+				'children'   => $trash ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
+				'incomplete' => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
+				'target'     => (int) $under[ $root_id ]['to'],
 				// A deleted root's old path leads to its target only through a live page that holds it.
-				'held'        => '' === $status,
+				'held'       => '' === $status,
 			];
 		}
 
@@ -216,14 +128,13 @@ final class Pairs_Blocks {
 
 	/**
 	 * Subpages the trash moved up, by root, with the slug each had under it.
+	 * A subpage in the trash since is left out.
 	 *
-	 * @param int[]    $root_ids   Roots in the trash.
-	 * @param string   $type       Post type name.
-	 * @param int|null $to         Only moves up to this page, or null for every move.
-	 * @param bool     $with_trash Whether subpages in the trash since are included.
+	 * @param int[]  $root_ids Roots in the trash.
+	 * @param string $type     Post type name.
 	 * @return array<int,array<int,array{id:int,parent:int,segment:string,slug:string,status:string}>>
 	 */
-	private static function moved_children( array $root_ids, string $type, ?int $to = null, bool $with_trash = false ): array {
+	private static function moved_children( array $root_ids, string $type ): array {
 		global $wpdb;
 
 		if ( [] === $root_ids ) {
@@ -234,23 +145,12 @@ final class Pairs_Blocks {
 			$keys[ Markers::moved_key( (int) $root_id ) ] = (int) $root_id;
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
-		// A marker's value starts with the page its subpage moved up to, so the moves up to one page are filtered before the LIMIT.
-		$args  = array_keys( $keys );
-		$where = '';
-		if ( null !== $to ) {
-			$where  = ' AND meta_value LIKE %s';
-			$args[] = $wpdb->esc_like( $to . '|' ) . '%';
-		}
-		$args[] = Subtree::count_cap() + 1;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- Range on the meta_key index, one placeholder per key, the value matched on the rows of those keys only, bounded by LIMIT.
-		$markers = $wpdb->get_results( $wpdb->prepare( "SELECT meta_key, post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ( {$placeholders} ){$where} LIMIT %d", ...$args ), ARRAY_A );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Range on the meta_key index, one placeholder per key, bounded by LIMIT.
+		$markers = $wpdb->get_results( $wpdb->prepare( "SELECT meta_key, post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ( {$placeholders} ) LIMIT %d", ...array_merge( array_keys( $keys ), [ Subtree::count_cap() + 1 ] ) ), ARRAY_A );
 
 		$found = [];
 		foreach ( (array) $markers as $marker ) {
-			$moved = Markers::decode_moved( (string) $marker['meta_value'] );
-			if ( null === $to || $to === $moved['to'] ) {
-				$found[ (int) $marker['post_id'] ][ $keys[ (string) $marker['meta_key'] ] ] = $moved;
-			}
+			$found[ (int) $marker['post_id'] ][ $keys[ (string) $marker['meta_key'] ] ] = Markers::decode_moved( (string) $marker['meta_value'] );
 		}
 		if ( [] === $found ) {
 			return [];
@@ -277,45 +177,12 @@ final class Pairs_Blocks {
 		}
 
 		$out = [];
-		foreach ( self::rows( array_keys( $root_of ), $type, $with_trash ) as $row ) {
+		foreach ( self::rows( array_keys( $root_of ), $type ) as $row ) {
 			$id                       = (int) $row['ID'];
 			$slug                     = '' !== $original[ $id ] ? $original[ $id ] : (string) $row['post_name'];
 			$out[ $root_of[ $id ] ][] = Pairs::node( $row, $slug );
 		}
 		return $out;
-	}
-
-	/**
-	 * The subpages pages in the trash moved up, and those that subpages of
-	 * theirs in the trash since moved up in turn, each with the page in the
-	 * trash it first came from as its `holder`.
-	 *
-	 * @param int[]    $root_ids Pages in the trash.
-	 * @param string   $type     Post type name.
-	 * @param int|null $to       Only their moves up to this page, or null for every move.
-	 * @return array{0:array<int,array<int,array<string,mixed>>>,1:array<int,int[]>} The live subpages by root, and the subpages in the trash since by root.
-	 */
-	private static function moved_tree( array $root_ids, string $type, ?int $to ): array {
-		$live  = [];
-		$trash = [];
-		$roots = array_fill_keys( array_map( 'intval', $root_ids ), 0 );
-		for ( $depth = 0; [] !== $roots && $depth < 5; $depth++ ) {
-			$moved = self::moved_children( array_keys( $roots ), $type, 0 === $depth ? $to : null, true );
-			$next  = [];
-			foreach ( $roots as $root => $holder ) {
-				$holder = $holder > 0 ? $holder : (int) $root;
-				foreach ( $moved[ $root ] ?? [] as $node ) {
-					if ( 'trash' === $node['status'] ) {
-						$next[ $node['id'] ] = $holder;
-						$trash[ $holder ][]  = $node['id'];
-					} else {
-						$live[ $holder ][] = $node + [ 'holder' => $holder ];
-					}
-				}
-			}
-			$roots = $next;
-		}
-		return [ $live, $trash ];
 	}
 
 	/**
@@ -416,17 +283,15 @@ final class Pairs_Blocks {
 	/**
 	 * Live posts of a type among the given IDs, in menu order then title.
 	 *
-	 * @param int[]  $ids        Post IDs, at most the count cap plus one.
-	 * @param string $type       Post type name.
-	 * @param bool   $with_trash Whether posts in the trash are included too.
+	 * @param int[]  $ids  Post IDs, at most the count cap plus one.
+	 * @param string $type Post type name.
 	 * @return array<int,array<string,string>>
 	 */
-	private static function rows( array $ids, string $type, bool $with_trash = false ): array {
+	private static function rows( array $ids, string $type ): array {
 		global $wpdb;
 
-		$in       = implode( ',', array_map( 'intval', $ids ) );
-		$statuses = $with_trash ? "'auto-draft', 'inherit'" : "'trash', 'auto-draft', 'inherit'";
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, bounded by the cap, and $statuses is one of two fixed lists; a primary-key range.
-		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( {$statuses} ) ORDER BY menu_order ASC, post_title ASC, ID ASC", $type ), ARRAY_A );
+		$in = implode( ',', array_map( 'intval', $ids ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, bounded by the cap; a primary-key range.
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC", $type ), ARRAY_A );
 	}
 }

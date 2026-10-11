@@ -1,44 +1,28 @@
 /**
  * The Hierarchy plugin for the block editor: a warning under the Summary
- * before a save changes subpage URLs, a notice after it did, and a panel
- * with what is above and below the page.
+ * before a save changes subpage URLs, and a panel with what is above and
+ * below the page.
  */
-import {
-	BaseControl,
-	Button,
-	Notice,
-	Spinner,
-	VisuallyHidden,
-} from '@wordpress/components';
-import { useDispatch, useSelect } from '@wordpress/data';
+import { BaseControl, Notice, Spinner } from '@wordpress/components';
+import { useSelect } from '@wordpress/data';
 import {
 	PluginDocumentSettingPanel,
 	PluginPostStatusInfo,
 	store as editorStore,
 } from '@wordpress/editor';
 import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
-import { __, sprintf } from '@wordpress/i18n';
-import { store as noticesStore } from '@wordpress/notices';
-import { fetchHierarchy, fetchPairs } from '../common/api';
+import { __ } from '@wordpress/i18n';
+import { fetchHierarchy } from '../common/api';
 import config from '../common/config';
 import {
-	changedSentence,
-	changedStatus,
-	pairsRedirects,
 	countsLine,
-	oldUrlState,
 	saveWarning,
 	subpagesLabel,
 	trashNote,
 	viewAllLabel,
-	viewRedirectsLabel,
 } from '../common/copy';
-import RedirectsModal from '../common/redirects-modal';
-import Url from '../common/url';
-import { decodePath } from '../common/url-parts';
 
 const PANEL = 'hierarchy-guard/hierarchy-guard';
-const NOTICE = 'hierarchy-guard-urls-changed';
 
 /**
  * A title linked to its editor when the user may edit it.
@@ -76,12 +60,11 @@ function Heading( { children } ) {
 /**
  * What the panel shows once the hierarchy is loaded.
  *
- * @param {Object}                 props        Props.
- * @param {Object}                 props.data   Hierarchy from the REST route.
- * @param {(from: string) => void} props.onView Opens the redirects of an old path.
+ * @param {Object} props      Props.
+ * @param {Object} props.data Hierarchy from the REST route.
  * @return {Element} Sections.
  */
-function Overview( { data, onView } ) {
+function Overview( { data } ) {
 	const trash = trashNote( data );
 	return (
 		<div className="hierarchy-guard-panel__body">
@@ -141,48 +124,6 @@ function Overview( { data, onView } ) {
 				) }
 			</div>
 
-			{ data.old_paths.length > 0 && (
-				<div className="hierarchy-guard-panel__section">
-					<Heading>{ __( 'Old URLs', 'hierarchy-guard' ) }</Heading>
-					<ul className="hierarchy-guard-panel__list">
-						{ data.old_paths.map( ( old ) => (
-							<li key={ old.path }>
-								<Url value={ old.url } />
-								<span className="hierarchy-guard-panel__meta">
-									{ oldUrlState(
-										data.redirects.serving,
-										data.redirects.provider,
-										old.state
-									) }
-									{ ' · ' }
-									<Button
-										variant="link"
-										onClick={ () => onView( old.path ) }
-									>
-										<span aria-hidden="true">
-											{ __(
-												'View redirects',
-												'hierarchy-guard'
-											) }
-										</span>
-										<VisuallyHidden as="span">
-											{ sprintf(
-												/* translators: %s: an old URL, such as /about-us/. Starts with the visible button text "View redirects". */
-												__(
-													'View redirects for %s',
-													'hierarchy-guard'
-												),
-												decodePath( old.url )
-											) }
-										</VisuallyHidden>
-									</Button>
-								</span>
-							</li>
-						) ) }
-					</ul>
-				</div>
-			) }
-
 			{ trash && (
 				<p className="hierarchy-guard-panel__note">
 					{ trash }{ ' ' }
@@ -232,15 +173,12 @@ export default function HierarchyPlugin() {
 			opened: editor.isEditorPanelOpened( PANEL ),
 		};
 	}, [] );
-	const { createNotice, removeNotice } = useDispatch( noticesStore );
 
 	const supported = config.postTypes.includes( postType );
 	const published = 'publish' === status;
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( '' );
-	const [ modal, setModal ] = useState( null );
 	const requested = useRef( false );
-	const newest = useRef( undefined );
 	const savingUrl = useRef( false );
 
 	const load = useCallback(
@@ -249,11 +187,6 @@ export default function HierarchyPlugin() {
 				.then( ( result ) => {
 					setData( result );
 					setError( '' );
-					if ( undefined === newest.current ) {
-						newest.current = result.old_paths[ 0 ]
-							? result.old_paths[ 0 ].path
-							: null;
-					}
 					return result;
 				} )
 				.catch( ( failure ) => {
@@ -284,7 +217,7 @@ export default function HierarchyPlugin() {
 		}
 	}, [ needed, load ] );
 
-	// A save that changed the slug or parent may have recorded an old URL.
+	// A save that changed the slug or parent moved the page: show where it is now.
 	useEffect( () => {
 		if ( saving && ! autosaving ) {
 			savingUrl.current = savingUrl.current || ( published && urlEdited );
@@ -294,107 +227,10 @@ export default function HierarchyPlugin() {
 			return;
 		}
 		savingUrl.current = false;
-		if ( ! saved ) {
-			return;
+		if ( saved ) {
+			load();
 		}
-		removeNotice( NOTICE );
-		// Without a baseline, any old URL on the page is new to this session.
-		const baseline = newest.current;
-		load().then( ( result ) => {
-			const latest =
-				result && result.old_paths[ 0 ]
-					? result.old_paths[ 0 ].path
-					: null;
-			if ( ! latest || latest === baseline ) {
-				return;
-			}
-			newest.current = latest;
-			fetchPairs( { post: postId, from: latest }, 1, 1 )
-				.then( ( pairs ) => {
-					if ( ! pairs.total ) {
-						return;
-					}
-					// The notice is about the pairs, which the server may redirect even when it does not redirect to the page itself.
-					const { serving, provider } = pairsRedirects(
-						result.redirects
-					);
-					const actions = [];
-					if ( ! serving ) {
-						actions.push( {
-							label: viewRedirectsLabel(
-								pairs.total,
-								pairs.capped
-							),
-							onClick: () =>
-								setModal( {
-									source: { post: postId, from: latest },
-									redirects: result.redirects,
-								} ),
-						} );
-					}
-					// Never offered while redirects are on for the site, even when this page isn't served.
-					if (
-						! config.serving &&
-						! provider &&
-						config.settingsUrl
-					) {
-						actions.push( {
-							label: __( 'Set up redirects', 'hierarchy-guard' ),
-							url: config.settingsUrl,
-						} );
-					}
-					createNotice(
-						changedStatus( serving, provider ),
-						changedSentence(
-							pairs.total,
-							pairs.capped,
-							serving,
-							provider
-						),
-						{ id: NOTICE, isDismissible: true, actions }
-					);
-				} )
-				.catch( () => {
-					createNotice(
-						'warning',
-						__(
-							'This save changed URLs, but their redirects couldn’t be loaded.',
-							'hierarchy-guard'
-						),
-						{
-							id: NOTICE,
-							isDismissible: true,
-							actions: [
-								{
-									label: __(
-										'View redirects',
-										'hierarchy-guard'
-									),
-									onClick: () =>
-										setModal( {
-											source: {
-												post: postId,
-												from: latest,
-											},
-											redirects: result.redirects,
-										} ),
-								},
-							],
-						}
-					);
-				} );
-		} );
-	}, [
-		saving,
-		autosaving,
-		saved,
-		published,
-		urlEdited,
-		load,
-		postId,
-		createNotice,
-		removeNotice,
-	] );
+	}, [ saving, autosaving, saved, published, urlEdited, load ] );
 
 	if ( ! supported ) {
 		return null;
@@ -424,26 +260,8 @@ export default function HierarchyPlugin() {
 					</Notice>
 				) }
 				{ ! data && ! error && <Spinner /> }
-				{ data && (
-					<Overview
-						data={ data }
-						onView={ ( from ) =>
-							setModal( {
-								source: { post: postId, from },
-								redirects: data.redirects,
-							} )
-						}
-					/>
-				) }
+				{ data && <Overview data={ data } /> }
 			</PluginDocumentSettingPanel>
-			{ modal && (
-				<RedirectsModal
-					source={ modal.source }
-					redirects={ modal.redirects }
-					editor
-					onClose={ () => setModal( null ) }
-				/>
-			) }
 		</>
 	);
 }

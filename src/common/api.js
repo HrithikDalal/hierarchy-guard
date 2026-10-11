@@ -23,38 +23,27 @@ export function fetchHierarchy( id, page = 1 ) {
 }
 
 /**
- * The route and arguments for a pairs source.
+ * The route of a change's pairs or CSV.
  *
- * @param {Object} source Either { change } or { post, from }.
- * @param {string} kind   pairs or csv.
- * @return {{route: string, args: Object}} Route and arguments.
+ * @param {{change: string}} source The change.
+ * @param {string}           kind   pairs or csv.
+ * @return {string} Route.
  */
 export function sourceRoute( source, kind ) {
-	if ( source.change ) {
-		return {
-			route: `${ config.namespace }/changes/${ source.change }/${ kind }`,
-			args: {},
-		};
-	}
-	return {
-		route: `${ config.namespace }/posts/${ source.post }/${ kind }`,
-		args: { from: source.from },
-	};
+	return `${ config.namespace }/changes/${ source.change }/${ kind }`;
 }
 
 /**
- * One page of pairs.
+ * One page of a change's pairs.
  *
- * @param {Object} source  Either { change } or { post, from }.
- * @param {number} page    Page number.
- * @param {number} perPage Pairs per page.
+ * @param {{change: string}} source  The change.
+ * @param {number}           page    Page number.
+ * @param {number}           perPage Pairs per page.
  * @return {Promise<Object>} Page of pairs.
  */
 export function fetchPairs( source, page = 1, perPage = 20 ) {
-	const { route, args } = sourceRoute( source, 'pairs' );
 	return apiFetch( {
-		path: addQueryArgs( '/' + route, {
-			...args,
+		path: addQueryArgs( '/' + sourceRoute( source, 'pairs' ), {
 			page,
 			per_page: perPage,
 		} ),
@@ -62,19 +51,18 @@ export function fetchPairs( source, page = 1, perPage = 20 ) {
 }
 
 /**
- * The CSV download URL for a source, signed for the REST cookie check.
+ * The CSV download URL for a change, signed for the REST cookie check.
  *
- * @param {Object} source Either { change } or { post, from }.
- * @param {string} format CSV layout.
+ * @param {{change: string}} source The change.
+ * @param {string}           format CSV layout.
  * @return {string} URL.
  */
 export function csvUrl( source, format ) {
-	const { route, args } = sourceRoute( source, 'csv' );
+	const route = sourceRoute( source, 'csv' );
 	const root = config.restUrl.includes( '?' )
 		? addQueryArgs( config.restUrl, { rest_route: '/' + route } )
 		: config.restUrl.replace( /\/?$/, '/' ) + route;
 	return addQueryArgs( root, {
-		...args,
 		format,
 		// apiFetch renews its nonce when it expires; the one printed at page load does not.
 		_wpnonce:

@@ -10,16 +10,12 @@ describe( 'routes', () => {
 		config.restNonce = 'abc';
 	} );
 
-	it( 'names the change and post routes', () => {
-		expect( sourceRoute( { change: 'x-1' }, 'pairs' ) ).toEqual( {
-			route: 'hierarchy-guard/v1/changes/x-1/pairs',
-			args: {},
-		} );
-		expect( sourceRoute( { post: 42, from: 'about-us' }, 'csv' ) ).toEqual(
-			{
-				route: 'hierarchy-guard/v1/posts/42/csv',
-				args: { from: 'about-us' },
-			}
+	it( 'names the change routes', () => {
+		expect( sourceRoute( { change: 'x-1' }, 'pairs' ) ).toBe(
+			'hierarchy-guard/v1/changes/x-1/pairs'
+		);
+		expect( sourceRoute( { change: 'x-1' }, 'csv' ) ).toBe(
+			'hierarchy-guard/v1/changes/x-1/csv'
 		);
 	} );
 
@@ -44,8 +40,8 @@ describe( 'routes', () => {
 
 	it( 'signs a download URL with plain permalinks', () => {
 		config.restUrl = 'https://example.org/index.php?rest_route=/';
-		expect( csvUrl( { post: 42, from: 'about-us' }, 'generic' ) ).toBe(
-			'https://example.org/index.php?rest_route=%2Fhierarchy-guard%2Fv1%2Fposts%2F42%2Fcsv&from=about-us&format=generic&_wpnonce=abc'
+		expect( csvUrl( { change: 'x-1' }, 'generic' ) ).toBe(
+			'https://example.org/index.php?rest_route=%2Fhierarchy-guard%2Fv1%2Fchanges%2Fx-1%2Fcsv&format=generic&_wpnonce=abc'
 		);
 	} );
 } );

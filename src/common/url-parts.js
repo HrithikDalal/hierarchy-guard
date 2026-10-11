@@ -5,22 +5,12 @@
  * @param {string} segment Path segment.
  * @return {string} Decoded segment.
  */
-export function decodeSegment( segment ) {
+function decodeSegment( segment ) {
 	try {
 		return decodeURIComponent( segment );
 	} catch {
 		return segment;
 	}
-}
-
-/**
- * A path as people read it, each segment decoded.
- *
- * @param {string} value Path, such as /company/%e6%97%a5%e6%9c%ac/.
- * @return {string} Decoded path.
- */
-export function decodePath( value ) {
-	return String( value ).split( '/' ).map( decodeSegment ).join( '/' );
 }
 
 /**

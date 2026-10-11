@@ -11,7 +11,6 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Overview;
-use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\REST\Csv_Download;
 use HierarchyGuard\Settings;
@@ -114,7 +113,7 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 			],
 			$data['descendants']
 		);
-		$this->assertSame( [], $data['old_paths'] );
+		$this->assertArrayNotHasKey( 'old_paths', $data, 'The panel shows where the page is now, not its past URLs.' );
 		$this->assertSame(
 			[
 				'serving'      => false,
@@ -159,57 +158,6 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( [ 'Team' ], array_column( $data['children'], 'title' ) );
 	}
 
-	public function test_old_paths_are_listed_newest_first(): void {
-		$this->rename( $this->ids['about'], 'about-us' );
-		$this->rename( $this->ids['about'], 'who-we-are' );
-
-		$data = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data();
-
-		$this->assertSame( [ 'company/about-us', 'company/about' ], array_column( $data['old_paths'], 'path' ) );
-		$this->assertSame( '/company/about-us/', $data['old_paths'][0]['url'] );
-	}
-
-	public function test_an_old_path_has_a_state(): void {
-		$this->rename( $this->ids['about'], 'about-us' );
-		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
-		$this->assertSame( 'ok', $this->get( $route )->get_data()['old_paths'][0]['state'] );
-
-		wp_update_post(
-			[
-				'ID'          => $this->ids['about'],
-				'post_status' => 'private',
-			]
-		);
-		$this->assertSame( 'none', $this->get( $route )->get_data()['old_paths'][0]['state'], 'A page nobody can view receives no redirect.' );
-		wp_update_post(
-			[
-				'ID'          => $this->ids['about'],
-				'post_status' => 'publish',
-			]
-		);
-
-		$this->page( 'about', $this->ids['company'] );
-		$this->assertSame( 'in_use', $this->get( $route )->get_data()['old_paths'][0]['state'] );
-	}
-
-	public function test_an_old_path_under_a_trashed_ancestor_has_no_redirect(): void {
-		$this->rename( $this->ids['team'], 'crew' );
-		$this->trash_raw( $this->ids['about'] );
-
-		$data = $this->get( '/posts/' . $this->ids['team'] . '/hierarchy' )->get_data();
-
-		$this->assertSame( 'none', $data['old_paths'][0]['state'] );
-	}
-
-	public function test_an_old_path_held_by_a_page_in_the_trash_is_in_the_trash(): void {
-		wp_trash_post( $this->ids['about'] );
-
-		$data = $this->get( '/posts/' . $this->ids['company'] . '/hierarchy' )->get_data();
-
-		$this->assertSame( [ 'company/about' ], array_column( $data['old_paths'], 'path' ) );
-		$this->assertSame( 'trash', $data['old_paths'][0]['state'] );
-	}
-
 	public function test_a_page_under_a_trashed_ancestor_is_not_served_redirects(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$route = '/posts/' . $this->ids['team'] . '/hierarchy';
@@ -246,57 +194,14 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertTrue( $data['descendants']['capped'] );
 	}
 
-	public function test_pairs_for_an_old_path_recorded_on_the_page(): void {
+	public function test_a_page_has_no_routes_for_its_old_urls(): void {
 		$this->rename( $this->ids['about'], 'about-us' );
 
-		$data = $this->get(
-			'/posts/' . $this->ids['about'] . '/pairs',
-			[ 'from' => 'company/about' ]
-		)->get_data();
-
-		$this->assertSame( 4, $data['total'] );
-		$this->assertSame(
-			[
-				'old' => '/company/about/',
-				'new' => '/company/about-us/',
-			],
-			$data['pairs'][0]
-		);
-	}
-
-	public function test_pairs_for_a_path_not_recorded_on_the_page_are_refused(): void {
-		$response = $this->get(
-			'/posts/' . $this->ids['about'] . '/pairs',
-			[ 'from' => 'somewhere/else' ]
-		);
-
-		$this->assertSame( 404, $response->get_status() );
-		$this->assertSame( 'hierarchy_guard_unknown_path', $response->get_data()['code'] );
-	}
-
-	public function test_the_csv_route_answers_with_a_flagged_csv_body(): void {
-		$this->rename( $this->ids['about'], 'about-us' );
-		$request = new WP_REST_Request( 'GET', '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv' );
-		$request->set_query_params(
-			[
-				'from'   => 'company/about',
-				'format' => 'redirection',
-			]
-		);
-
-		$response = rest_do_request( $request );
-		$headers  = $response->get_headers();
-
-		$this->assertSame( 'text/csv; charset=utf-8', $headers['Content-Type'] );
-		$this->assertStringContainsString( 'attachment; filename="hierarchy-guard-redirects-redirection-', $headers['Content-Disposition'] );
-		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/,/company/about-us/,0,301\r\n", $response->get_data() );
-
-		ob_start();
-		$served = ( new Csv_Download() )->serve( false, $response, $request );
-		$body   = (string) ob_get_clean();
-
-		$this->assertTrue( $served );
-		$this->assertSame( $response->get_data(), $body );
+		foreach ( [ 'pairs', 'csv' ] as $kind ) {
+			$response = $this->get( '/posts/' . $this->ids['about'] . '/' . $kind, [ 'from' => 'company/about' ] );
+			$this->assertSame( 404, $response->get_status(), $kind );
+			$this->assertSame( 'rest_no_route', $response->get_data()['code'], $kind );
+		}
 	}
 
 	public function test_a_json_response_is_left_to_the_server(): void {
@@ -338,68 +243,6 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertIsString( $data['ancestors'][1]['edit_link'] );
 	}
 
-	public function test_a_page_moved_back_to_an_old_path_does_not_list_it_as_an_old_url(): void {
-		$services = $this->page( 'services', $this->ids['company'] );
-		wp_update_post(
-			[
-				'ID'          => $services,
-				'post_parent' => $this->ids['about'],
-			]
-		);
-		// The trash moves it back to company/services.
-		wp_trash_post( $this->ids['about'] );
-
-		$data = $this->get( '/posts/' . $services . '/hierarchy' )->get_data();
-
-		$this->assertSame( 'company/services', Paths::uri( get_post( $services ) ) );
-		$this->assertSame( [], array_column( $data['old_paths'], 'path' ), 'That is its URL again.' );
-	}
-
-	public function test_an_old_path_the_ledger_gives_to_another_page_is_used_by_that_page(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->rename( $this->ids['about'], 'about-us' );
-		// A newer page took the old path and was renamed too, so the resolver sends it there.
-		$other = $this->page( 'about', $this->ids['company'] );
-		$this->rename( $other, 'about-y' );
-		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
-
-		$this->assertSame( 'in_use', $this->get( $route )->get_data()['old_paths'][0]['state'] );
-
-		// Once that page sits under the trash, the resolver passes over it and the old URL leads nowhere.
-		$archive = $this->page( 'archive', $this->ids['company'] );
-		wp_update_post(
-			[
-				'ID'          => $other,
-				'post_parent' => $archive,
-			]
-		);
-		$this->trash_raw( $archive );
-
-		$this->assertSame( 'none', $this->get( $route )->get_data()['old_paths'][0]['state'] );
-	}
-
-	public function test_twenty_old_urls_are_listed_besides_the_page_s_own_url(): void {
-		$services = $this->page( 'services', $this->ids['company'] );
-		for ( $i = 1; $i <= 20; $i++ ) {
-			$this->rename( $services, 'services-' . $i );
-		}
-		$this->rename( $services, 'services' );
-		wp_update_post(
-			[
-				'ID'          => $services,
-				'post_parent' => $this->ids['about'],
-			]
-		);
-		// The trash moves it back to company/services, its newest old path.
-		wp_trash_post( $this->ids['about'] );
-
-		$data = $this->get( '/posts/' . $services . '/hierarchy' )->get_data();
-
-		$this->assertSame( 'company/services', Paths::uri( get_post( $services ) ) );
-		$this->assertCount( Overview::MAX_OLD_PATHS, $data['old_paths'] );
-		$this->assertNotContains( 'company/services', array_column( $data['old_paths'], 'path' ) );
-	}
-
 	public function test_the_pairs_of_a_page_nobody_can_view_are_still_served(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->rename( $this->ids['about'], 'about-us' );
@@ -414,37 +257,9 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertFalse( $data['redirects']['serving'], 'Nothing redirects to the page itself.' );
 		$this->assertTrue( $data['redirects']['pairs_served'], 'Its published subpages are redirected to.' );
-		$this->assertSame( 'none', $data['old_paths'][0]['state'] );
 
 		delete_option( Settings::OPTION );
 		$this->assertFalse( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['redirects']['pairs_served'] );
-	}
-
-	public function test_a_fields_parameter_on_the_csv_route_still_gives_the_csv(): void {
-		$this->rename( $this->ids['about'], 'about-us' );
-		$request = new WP_REST_Request( 'GET', '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv' );
-		$request->set_query_params(
-			[
-				'from'    => 'company/about',
-				'format'  => 'redirection',
-				'_fields' => 'source',
-			]
-		);
-
-		// What the REST server runs on the response before serving it; core's
-		// filter is attached on rest_api_init, which earlier tests may have run.
-		add_filter( 'rest_post_dispatch', 'rest_filter_response_fields', 10, 3 );
-		$response = apply_filters( 'rest_post_dispatch', rest_ensure_response( rest_do_request( $request ) ), rest_get_server(), $request ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's hook, run the way the REST server runs it.
-
-		$this->assertSame( 200, $response->get_status() );
-		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/,/company/about-us/,0,301\r\n", $response->get_data() );
-	}
-
-	public function test_old_paths_without_a_url_are_left_out(): void {
-		$this->rename( $this->ids['about'], 'about-us' );
-		$this->set_permalink_structure( '' );
-
-		$this->assertSame( [], $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['old_paths'] );
 	}
 
 	public function test_titles_carry_no_private_or_protected_prefix(): void {
@@ -647,93 +462,5 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$page = $this->get( '/trash-preview', [ 'ids' => [ $parent ] ] )->get_data()['pages'][0];
 
 		$this->assertNull( $page['example'] );
-	}
-
-	/**
-	 * The state of each old path of a page, by path.
-	 *
-	 * @param int $post_id Page.
-	 * @return array<string,string>
-	 */
-	private function states( int $post_id ): array {
-		$rows = $this->get( '/posts/' . $post_id . '/hierarchy' )->get_data()['old_paths'];
-		return array_combine( array_column( $rows, 'path' ), array_column( $rows, 'state' ) );
-	}
-
-	public function test_an_old_url_a_blog_post_uses_now_is_used(): void {
-		$news = $this->page( 'news' );
-		$this->rename( $news, 'updates' );
-		self::factory()->post->create(
-			[
-				'post_type'   => 'post',
-				'post_name'   => 'news',
-				'post_status' => 'publish',
-			]
-		);
-
-		$this->assertSame( [ 'news' => 'in_use' ], $this->states( $news ), 'WordPress shows the blog post at /news/.' );
-	}
-
-	public function test_an_old_url_the_resolver_follows_to_a_draft_twin_is_not_redirected(): void {
-		$this->rename( $this->ids['company'], 'company-new' );
-		// A draft keeps its slug, so it sits at Company's URL; get_page_by_path() finds it, the later of the two.
-		$this->page( 'company-new', 0, 'draft' );
-
-		$this->assertSame( [ 'company' => 'none' ], $this->states( $this->ids['company'] ) );
-	}
-
-	public function test_an_old_url_the_resolver_sends_here_past_a_newer_holder_under_the_trash_redirects_here(): void {
-		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
-		$studio  = $this->page( 'studio' );
-		$archive = $this->page( 'archive' );
-		wp_update_post(
-			[
-				'ID'          => $this->ids['team'],
-				'post_parent' => $studio,
-			]
-		);
-		$other = $this->page( 'team', $this->ids['about'] );
-		wp_update_post(
-			[
-				'ID'          => $other,
-				'post_parent' => $archive,
-			]
-		);
-		$this->rename( $this->ids['about'], 'about-us' );
-		wp_update_post(
-			[
-				'ID'          => $this->ids['team'],
-				'post_parent' => $this->ids['about'],
-			]
-		);
-		wp_trash_post( $archive );
-
-		$this->assertSame( 'ok', $this->states( $this->ids['team'] )['company/about/team'], 'The resolver passes over the page under the trash and rewrites through About.' );
-	}
-
-	public function test_an_old_url_whose_newer_holder_nobody_can_view_is_not_redirected(): void {
-		$this->rename( $this->ids['about'], 'about-us' );
-		$other = $this->page( 'about', $this->ids['company'] );
-		$this->rename( $other, 'about-y' );
-		wp_update_post(
-			[
-				'ID'          => $other,
-				'post_status' => 'draft',
-			]
-		);
-
-		$this->assertSame( [ 'company/about' => 'none' ], $this->states( $this->ids['about'] ) );
-	}
-
-	public function test_an_old_url_past_the_segment_cap_that_a_page_in_the_trash_holds_is_in_the_trash(): void {
-		$this->rename( $this->ids['team'], 'crew' );
-		$other = $this->page( 'team', $this->ids['about'] );
-		$this->rename( $other, 'z-now' );
-		wp_trash_post( $other );
-		$this->assertSame( 'trash', $this->states( $this->ids['team'] )['company/about/team'] );
-
-		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 2 );
-
-		$this->assertSame( 'trash', $this->states( $this->ids['team'] )['company/about/team'], 'The server refuses a request of three segments, and a page in the trash holds the path.' );
 	}
 }

@@ -45,7 +45,7 @@ function rangeLabel( data ) {
  * The modal.
  *
  * @param {Object}     props           Props.
- * @param {Object}     props.source    Either { change } or { post, from }.
+ * @param {Object}     props.source    The change: { change }.
  * @param {Object}     props.redirects The page's redirects from the REST route: `serving`, `pairs_served` and `provider`; the site's by default.
  * @param {boolean}    props.editor    Whether the block editor shows it, which says "trash" in lower case.
  * @param {() => void} props.onClose   Closes the modal.

@@ -1,6 +1,6 @@
 <?php
 /**
- * REST routes about the current user's last trash.
+ * REST routes about the current user's last change.
  *
  * @package HierarchyGuard
  */
@@ -11,6 +11,7 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\REST\Csv_Download;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Change_Log;
 use WP_REST_Request;
@@ -19,6 +20,7 @@ use WP_UnitTestCase;
 
 /**
  * @covers \HierarchyGuard\REST\Changes_Controller
+ * @covers \HierarchyGuard\REST\Csv_Download
  */
 final class ChangesControllerTest extends WP_UnitTestCase {
 
@@ -98,6 +100,43 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$response = $this->get( '/changes/' . $this->change_id . '/csv', [ 'format' => 'generic' ] );
 
 		$this->assertSame( "source,target,code\r\n/company/about/history/,/company/history/,301\r\n/company/about/team/,/company/team/,301\r\n/company/about/team/leadership/,/company/team/leadership/,301\r\n", $response->get_data() );
+	}
+
+	public function test_the_csv_route_answers_with_a_flagged_csv_body(): void {
+		$request = new WP_REST_Request( 'GET', '/hierarchy-guard/v1/changes/' . $this->change_id . '/csv' );
+		$request->set_query_params( [ 'format' => 'redirection' ] );
+
+		$response = rest_do_request( $request );
+		$headers  = $response->get_headers();
+
+		$this->assertSame( 'text/csv; charset=utf-8', $headers['Content-Type'] );
+		$this->assertStringContainsString( 'attachment; filename="hierarchy-guard-redirects-redirection-', $headers['Content-Disposition'] );
+		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,301\r\n", $response->get_data() );
+
+		ob_start();
+		$served = ( new Csv_Download() )->serve( false, $response, $request );
+		$body   = (string) ob_get_clean();
+
+		$this->assertTrue( $served );
+		$this->assertSame( $response->get_data(), $body );
+	}
+
+	public function test_a_fields_parameter_on_the_csv_route_still_gives_the_csv(): void {
+		$request = new WP_REST_Request( 'GET', '/hierarchy-guard/v1/changes/' . $this->change_id . '/csv' );
+		$request->set_query_params(
+			[
+				'format'  => 'redirection',
+				'_fields' => 'source',
+			]
+		);
+
+		// What the REST server runs on the response before serving it; core's
+		// filter is attached on rest_api_init, which earlier tests may have run.
+		add_filter( 'rest_post_dispatch', 'rest_filter_response_fields', 10, 3 );
+		$response = apply_filters( 'rest_post_dispatch', rest_ensure_response( rest_do_request( $request ) ), rest_get_server(), $request ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's hook, run the way the REST server runs it.
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,301\r\n", $response->get_data() );
 	}
 
 	public function test_an_unknown_csv_layout_is_refused(): void {

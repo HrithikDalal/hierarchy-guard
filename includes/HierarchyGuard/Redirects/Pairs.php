@@ -19,37 +19,21 @@ use WP_Post;
  *
  * A block starts at one old path (Pairs_Blocks). Its head is the post that
  * path leads to, or none. Below it come the published pages that lived under
- * the old path when it was left, each at the path it had then (Rebuild),
- * depth first in menu order. Every block of a change is walked together, one
- * query pair per level, and no walk goes past the count cap or the server's
- * segment cap. Last, every pair is checked against a model of the server
- * (Batch_Resolver): the request must be a 404 by the site's rewrite rules as
- * Rules::is_404() reads them, and the resolver's rules must lead to the
- * pair's page. A pair the model cannot vouch for is left out. Nothing is
- * stored: the collected pairs are cached for a few minutes, keyed on the
- * posts' last change.
+ * the old path, depth first in menu order: the first-level pages at the
+ * slugs the change kept, the pages below them at their current slugs, which
+ * is exact while the change is fresh. Every block of a change is walked
+ * together, one query pair per level, and no walk goes past the count cap or
+ * the server's segment cap. Last, every pair is checked against a model of
+ * the server (Batch_Resolver): the request must be a 404 by the site's
+ * rewrite rules as Rules::is_404() reads them, and the resolver's rules must
+ * lead to the pair's page. A pair the model cannot vouch for is left out.
+ * Nothing is stored: the collected pairs are cached for a few minutes, keyed
+ * on the posts' last change.
  */
 final class Pairs {
 
 	public const PER_PAGE  = 20;
 	public const CACHE_TTL = 5 * MINUTE_IN_SECONDS;
-
-	/**
-	 * Every pair behind an old path recorded on a post: the old path leads to
-	 * the post, and each old subpage path, at the slug the subpage had under
-	 * it, to the same subpage today.
-	 *
-	 * @param WP_Post $post     Post the old path is recorded on.
-	 * @param string  $old_path The old path, any form.
-	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
-	 */
-	public function collect_post( WP_Post $post, string $old_path ): array {
-		$old = Paths::normalize( $old_path );
-		return $this->cached(
-			'post:' . (int) $post->ID . ':' . md5( $old ),
-			fn(): array => $this->collect( [ Pairs_Blocks::post_block( $post, $old ) ], (string) $post->post_type )
-		);
-	}
 
 	/**
 	 * Every pair of a trash change: one block per root whose subpages moved up.
@@ -74,13 +58,11 @@ final class Pairs {
 	 * looks, so listing it would hide that page. Its old subpage paths no
 	 * published page uses are still listed, as the resolver serves them.
 	 *
-	 * On a post's old path, and on the old path of a root still in the trash,
-	 * each page is listed at the path it had when the old path was left, rebuilt
-	 * by Rebuild::listed_then(). A deleted root lists each subpage at its slug from
-	 * before the move. An old path the ledger gives to another live post leads
-	 * to that post, so it is dropped here with the pages walked below it: that
-	 * post's own list has them. A deleted root's old path leads to its target
-	 * only while that target holds it, so with no live holder it is
+	 * Each first-level page is listed at its old segment under the block's old
+	 * path, and the pages below it at their current slugs. An old path the
+	 * ledger gives to another live post leads to that post, so it is dropped
+	 * here with the pages walked below it. A deleted root's old path leads to
+	 * its target only while that target holds it, so with no live holder it is
 	 * unresolved, while its subpages are still listed. When the newest live
 	 * holder of a block's own old path is another page outside the trash, the
 	 * whole block is unresolved. Last, each pair is checked against what the
@@ -96,8 +78,7 @@ final class Pairs {
 		$open       = self::open_blocks( $blocks, $post_type );
 		$in_use     = self::in_use( $open, $post_type, $unresolved );
 		$tree       = $this->walk( $open, $post_type, $cap );
-		$history    = self::history_of( $open, $tree, $post_type );
-		$listing    = self::listing( $open, $in_use, $tree, $history, $cap, $unresolved );
+		$listing    = self::listing( $open, $in_use, $tree, $cap, $unresolved );
 
 		// The ledger as the resolver reads it, for every prefix of every path
 		// listed, in one query.
@@ -109,7 +90,7 @@ final class Pairs {
 			'post_type'  => $post_type,
 			'pairs'      => self::served_only( $open, $listing, $gone, $post_type, $facts, $unresolved ),
 			'unresolved' => $unresolved,
-			'capped'     => $listing['capped'] || $tree['capped'] || ! empty( $history['capped'] ),
+			'capped'     => $listing['capped'] || $tree['capped'],
 		];
 	}
 
@@ -161,48 +142,17 @@ final class Pairs {
 	}
 
 	/**
-	 * What the rebuild reads for the blocks that rebuild: the ledger entries and
-	 * trash markers of every page walked and every post a block is recorded on,
-	 * and of the pages in the trash those markers name.
-	 *
-	 * @param array<int,array<string,mixed>>                                                                                              $open      Blocks by index.
-	 * @param array{tops:array<int,array<int,array<string,mixed>>>,kids:array<int,array<int,array<string,mixed>>>,ids:int[],capped:bool} $tree      The walk.
-	 * @param string                                                                                                                      $post_type Post type name.
-	 * @return array<string,array<int,mixed>> From Rebuild::history(), or empty when no block rebuilds.
-	 */
-	private static function history_of( array $open, array $tree, string $post_type ): array {
-		$others = [];
-		foreach ( $open as $block ) {
-			if ( ! empty( $block['rebuild'] ) ) {
-				$others = array_merge( $others, array_filter( [ (int) ( $block['post'] ?? $block['recorded_on'] ?? 0 ) ] ), array_map( 'intval', (array) ( $block['virtual'] ?? [] ) ) );
-			}
-		}
-		if ( [] === $others ) {
-			return [];
-		}
-		// The pages above the subpages walked that are not walked themselves, as where a moved subpage lives now.
-		$walked = array_flip( $tree['ids'] );
-		foreach ( array_merge( array_merge( [], ...array_values( $tree['tops'] ) ), array_merge( [], ...array_values( $tree['kids'] ) ) ) as $node ) {
-			if ( (int) $node['parent'] > 0 && ! isset( $walked[ (int) $node['parent'] ] ) ) {
-				$others[] = (int) $node['parent'];
-			}
-		}
-		return Rebuild::history( $tree['ids'], $others, $post_type );
-	}
-
-	/**
 	 * Each block's head and the pages listed below it, up to the cap, with the
 	 * pairs of the block above each pair.
 	 *
 	 * @param array<int,array<string,mixed>>             $open       Blocks by index.
 	 * @param array<int,true>                            $in_use     Blocks whose old path a live page uses, by index.
 	 * @param array<string,mixed>                        $tree       The walk.
-	 * @param array<string,array<int,mixed>>             $history    From history_of().
 	 * @param int                                        $cap        Most pairs.
 	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; a head with no new URL is added.
 	 * @return array{pairs:array<int,array{old:string,id:int}>,lineage:array<int,int[]>,block_of:array<int,int>,held:array<int,true>,headless:array<int,true>,capped:bool}
 	 */
-	private static function listing( array $open, array $in_use, array $tree, array $history, int $cap, array &$unresolved ): array {
+	private static function listing( array $open, array $in_use, array $tree, int $cap, array &$unresolved ): array {
 		$capped   = false;
 		$pairs    = [];
 		$lineage  = [];
@@ -239,12 +189,7 @@ final class Pairs {
 				];
 			}
 
-			$alone  = false;
-			$listed = ! empty( $block['rebuild'] )
-				? Rebuild::listed_then( $block + [ 'index' => $index ], $tree, $history, null, $alone )
-				: self::listed_by_segment( $block, $tree['tops'][ $index ] ?? [], $tree['kids'] );
-			$capped = $capped || $alone;
-			foreach ( $listed as [ $path, $id ] ) {
+			foreach ( self::listed_by_segment( $block, $tree['tops'][ $index ] ?? [], $tree['kids'] ) as [ $path, $id ] ) {
 				if ( count( $pairs ) >= $cap ) {
 					$capped = true;
 					break 2;
@@ -284,8 +229,8 @@ final class Pairs {
 	 *
 	 * The resolver rewrites an old path through the newest live post that
 	 * holds its longest known prefix. When that post for a block's own old path
-	 * is another page outside the trash, the block leads there: it is void, and
-	 * that page's own list has what sits under it. When that post sits under
+	 * is another page outside the trash, the block leads there: it is void.
+	 * When that post sits under
 	 * the trash the resolver passes over it to a shorter prefix, so the served
 	 * check decides, and an old path that leads nowhere is in the trash.
 	 *
@@ -309,9 +254,9 @@ final class Pairs {
 			}
 		}
 
-		// An old path another live post holds leads to that post, and its own
-		// panel lists what sits under it: drop it here, with the pages walked
-		// below it. A holder under the trash holds nothing for the resolver.
+		// An old path another live post holds leads to that post: drop it here,
+		// with the pages walked below it. A holder under the trash holds
+		// nothing for the resolver.
 		$dropped = [];
 		$unheld  = [];
 		foreach ( $listing['pairs'] as $i => $pair ) {
@@ -398,7 +343,7 @@ final class Pairs {
 	/**
 	 * One page of pairs as URLs relative to the home URL.
 	 *
-	 * @param array<string,mixed> $collected From collect_post() or collect_change().
+	 * @param array<string,mixed> $collected From collect_change().
 	 * @param int                 $page      Page number, from 1.
 	 * @param int                 $per_page  Pairs per page.
 	 * @return array{pairs:array<int,array{old:string,new:string}>,unresolved:array<int,array{old:string,reason:string}>,total:int,capped:bool,page:int,pages:int}
@@ -429,7 +374,7 @@ final class Pairs {
 	/**
 	 * Every pair as URLs relative to the home URL, for a download.
 	 *
-	 * @param array<string,mixed> $collected From collect_post() or collect_change().
+	 * @param array<string,mixed> $collected From collect_change().
 	 * @return array<int,array{old:string,new:string}>
 	 */
 	public function all( array $collected ): array {
@@ -445,7 +390,7 @@ final class Pairs {
 	/**
 	 * The number of pairs, stopping at the cap.
 	 *
-	 * @param array<string,mixed> $collected From collect_post() or collect_change().
+	 * @param array<string,mixed> $collected From collect_change().
 	 * @return array{count:int,capped:bool}
 	 */
 	public function count( array $collected ): array {
@@ -489,7 +434,6 @@ final class Pairs {
 	private function walk( array $blocks, string $type, int $cap ): array {
 		$tops    = [];
 		$froms   = [];
-		$skip    = [];
 		$visited = 0;
 		$room    = Batch_Resolver::room( $type );
 		// How many levels below its old path each block's pages may sit.
@@ -504,17 +448,13 @@ final class Pairs {
 			}
 			if ( (int) $block['from'] > 0 && $levels[ $index ] >= 1 ) {
 				$froms[ (int) $block['from'] ] = $index;
-				$skip[ $index ]                = array_flip( array_map( 'intval', (array) ( $block['skip'] ?? [] ) ) );
 			}
 		}
 		if ( [] !== $froms && $visited <= $cap ) {
 			$rows = Subtree::ordered_children( array_keys( $froms ), $type, $cap + 1 - $visited );
 			foreach ( $rows as $row ) {
-				$index = $froms[ (int) $row['post_parent'] ];
-				if ( ! isset( $skip[ $index ][ (int) $row['ID'] ] ) ) {
-					$tops[ $index ][] = self::node( $row, (string) $row['post_name'] );
-					++$visited;
-				}
+				$tops[ $froms[ (int) $row['post_parent'] ] ][] = self::node( $row, (string) $row['post_name'] );
+				++$visited;
 			}
 		}
 
@@ -598,8 +538,8 @@ final class Pairs {
 	}
 
 	/**
-	 * Every pair of a trash change's block: each subpage at its old segment
-	 * under the root's old path, its subpages below it, depth first.
+	 * Every pair of a block: each first-level page at its old segment under
+	 * the block's old path, its subpages below it, depth first.
 	 *
 	 * @param array<string,mixed>                          $block Block.
 	 * @param array<int,array<string,mixed>>               $tops  The block's first-level pages.

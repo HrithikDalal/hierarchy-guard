@@ -640,37 +640,6 @@ export function pairsRedirects( redirects ) {
 }
 
 /**
- * What an old URL's redirect looks like now, by what handles redirects.
- *
- * @param {boolean}     serving  Whether built-in redirects reach this page.
- * @param {Object|null} provider Detected redirect plugin.
- * @param {string}      state    The old URL's state from the REST route: `in_use`, `trash`, `none` or `ok`.
- * @return {string} Short state.
- */
-export function oldUrlState( serving, provider, state = 'ok' ) {
-	if ( 'in_use' === state ) {
-		return __( 'Used by another page', 'hierarchy-guard' );
-	}
-	if ( 'trash' === state ) {
-		return __( 'In the trash', 'hierarchy-guard' );
-	}
-	if ( 'none' === state ) {
-		return __( 'Not redirected', 'hierarchy-guard' );
-	}
-	if ( serving ) {
-		return __( 'Redirects here', 'hierarchy-guard' );
-	}
-	if ( provider && provider.name ) {
-		return sprintf(
-			/* translators: %s: name of the redirect plugin. */
-			__( 'Add in %s', 'hierarchy-guard' ),
-			provider.name
-		);
-	}
-	return __( 'Not redirected', 'hierarchy-guard' );
-}
-
-/**
  * What trashing a page would do to its subpages, for the editor panel.
  *
  * @param {Object} data Hierarchy from the REST route.

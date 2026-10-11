@@ -9,10 +9,8 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Admin;
 
-use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Overview;
 use HierarchyGuard\Post_Types;
-use HierarchyGuard\REST\Hierarchy_Controller;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use WP_Post;
@@ -126,64 +124,11 @@ final class Meta_Box {
 			}
 		}
 
-		if ( [] !== $data['old_paths'] ) {
-			echo '<p><strong>' . esc_html__( 'Old URLs', 'hierarchy-guard' ) . '</strong></p><ul class="hierarchy-guard-box__old">';
-			$provider = $data['redirects']['provider'];
-			$layout   = null !== $provider ? Csv::layout( (string) $provider['csv'] ) : 'generic';
-			foreach ( $data['old_paths'] as $old ) {
-				if ( 'in_use' === $old['state'] ) {
-					$state = __( 'Used by another page', 'hierarchy-guard' );
-				} elseif ( 'trash' === $old['state'] ) {
-					$state = __( 'In the Trash', 'hierarchy-guard' );
-				} elseif ( 'none' === $old['state'] ) {
-					$state = __( 'Not redirected', 'hierarchy-guard' );
-				} elseif ( $data['redirects']['serving'] ) {
-					$state = __( 'Redirects here', 'hierarchy-guard' );
-				} elseif ( null !== $provider && '' !== $provider['name'] ) {
-					/* translators: %s: name of the redirect plugin. */
-					$state = sprintf( __( 'Add in %s', 'hierarchy-guard' ), $provider['name'] );
-				} else {
-					$state = __( 'Not redirected', 'hierarchy-guard' );
-				}
-				// Shown decoded, as core shows permalinks; the download keeps the stored path.
-				$shown = rawurldecode( (string) $old['url'] );
-				printf(
-					'<li><code>%1$s</code><span aria-hidden="true"> · </span>%2$s<span aria-hidden="true"> · </span><a href="%3$s" download><span aria-hidden="true">%4$s</span><span class="screen-reader-text">%5$s</span></a></li>',
-					esc_html( $shown ),
-					esc_html( $state ),
-					esc_url( self::csv_url( (int) $post->ID, (string) $old['path'], $layout ) ),
-					esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' ),
-					/* translators: %s: an old URL, such as /about-us/. Starts with the visible link text "Download redirects (CSV)". */
-					esc_html( sprintf( __( 'Download redirects (CSV) for %s', 'hierarchy-guard' ), $shown ) )
-				);
-			}
-			echo '</ul>';
-		}
-
 		$trash = self::trash_sentence( $data );
 		if ( '' !== $trash ) {
 			echo '<p class="description">' . esc_html( $trash ) . '</p>';
 		}
 		echo '</div>';
-	}
-
-	/**
-	 * The download URL for the pairs behind an old path recorded on a post.
-	 *
-	 * @param int    $post_id  Post ID.
-	 * @param string $old_path Old path recorded on it.
-	 * @param string $layout   CSV layout.
-	 * @return string
-	 */
-	public static function csv_url( int $post_id, string $old_path, string $layout ): string {
-		return add_query_arg(
-			[
-				'from'     => rawurlencode( $old_path ),
-				'format'   => $layout,
-				'_wpnonce' => wp_create_nonce( 'wp_rest' ),
-			],
-			rest_url( Hierarchy_Controller::NAMESPACE . '/posts/' . $post_id . '/csv' )
-		);
 	}
 
 	/**

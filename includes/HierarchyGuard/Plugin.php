@@ -71,10 +71,10 @@ final class Plugin {
 		( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
 
 		$pairs    = new Redirects\Pairs();
-		$overview = new Overview( $ledger, $providers );
+		$overview = new Overview( $providers );
 		( new Admin\Notices( $log, $queue, $pairs, $providers ) )->register();
 		( new Admin\List_Table() )->register();
-		( new REST\Hierarchy_Controller( $overview, $ledger, $pairs ) )->register();
+		( new REST\Hierarchy_Controller( $overview ) )->register();
 		( new REST\Csv_Download() )->register();
 		( new Admin\Trash_Choice() )->register();
 		( new REST\Changes_Controller( $log, $pairs ) )->register();

@@ -1,7 +1,7 @@
 <?php
 /**
  * Seeded random histories against the resolver: every pair listed is one the
- * site serves, and every old URL the site serves to a page is listed somewhere.
+ * site serves.
  *
  * @package HierarchyGuard
  */
@@ -14,18 +14,15 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
-use HierarchyGuard\Overview;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Live_View;
 use HierarchyGuard\Redirects\Pairs;
-use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Redirects\Rules;
 use HierarchyGuard\Redirects\Server;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Change_Log;
-use HierarchyGuard\Trash\Markers;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
 use WP_UnitTestCase;
@@ -39,27 +36,17 @@ use WP_UnitTestCase;
  * adds draft twins (a draft at a published page's path: core keeps a draft's
  * slug as it is), blog posts named as a page's old one-segment path and
  * attachments named as the last segment of an old two-segment path. Then it
- * collects every list the admin screens offer: each live page's pairs for
- * each of its old paths, and the admin's latest change.
+ * collects the admin's latest change.
  *
  * - Correct: every listed pair's old URL is a 404 the resolver sends to that
  *   pair's page, and a logged-out request for it is redirected there by the
  *   Server on a real main query.
- * - Complete: every URL a live page had at the end of a step, and has no
- *   more, that is a 404 the resolver sends to that page is on some list.
- * - Told: each live page's old URLs read `ok` exactly when the resolver sends
- *   them to that page.
  *
  * The resolver runs only on a 404, so a URL a published page, a blog post or
  * an attachment uses now is served by it and is no redirect at all, on
  * either side. Only a page with no subpage at all is made a draft or private,
  * and nothing is put under one: a published page under a draft (P7, declined:
  * the resolver's prefix walk can stop at the draft) never arises.
- *
- * A served old URL no list has is excluded only when it belongs to one of the
- * engine classes named at excluded(): the ledger, the trash flow or core keep
- * nothing a bounded read of the pairs could list it from. Each exclusion is
- * counted, and printed with its seed when HG_FUZZ_REPORT is set.
  *
  * Reproduce one history: --filter 'PairsFuzzTest.*seed 17"'.
  *
@@ -108,34 +95,6 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 */
 	private array $steps = [];
 
-	/**
-	 * The step at which each page's history entry was recorded, alongside $history.
-	 *
-	 * @var array<int,int[]>
-	 */
-	private array $when = [];
-
-	/**
-	 * The step at which each ledger entry of each page first showed up.
-	 *
-	 * @var array<int,array<string,int>>
-	 */
-	private array $entered = [];
-
-	/**
-	 * Pages deleted for good.
-	 *
-	 * @var int[]
-	 */
-	private array $deleted = [];
-
-	/**
-	 * The step at which a restore last moved each page back under the page restored.
-	 *
-	 * @var array<int,int>
-	 */
-	private array $restored = [];
-
 	private int $step = 0;
 
 	/**
@@ -158,13 +117,6 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 * @var array<string,int>
 	 */
 	private static array $kinds = [];
-
-	/**
-	 * Served old URLs no list has, by engine class, for the report.
-	 *
-	 * @var array<string,string[]>
-	 */
-	private static array $excluded = [];
 
 	private int $seed = 0;
 
@@ -203,10 +155,6 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		if ( getenv( 'HG_FUZZ_REPORT' ) ) {
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- A test report on stderr.
 			fwrite( STDERR, sprintf( "real requests: %d\nsteps: %s\n", self::$requests, wp_json_encode( self::$kinds ) ) );
-			foreach ( self::$excluded as $class => $lines ) {
-				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- A test report on stderr.
-				fwrite( STDERR, sprintf( "%s: %d URLs\n  %s\n", $class, count( $lines ), implode( "\n  ", $lines ) ) );
-			}
 		}
 		parent::tear_down_after_class();
 	}
@@ -428,19 +376,8 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		if ( [] === $trashed ) {
 			return null;
 		}
-		$id      = $this->pick( $trashed );
-		$parents = [];
-		foreach ( array_keys( $this->made ) as $page ) {
-			$post             = get_post( $page );
-			$parents[ $page ] = $post instanceof WP_Post ? (int) $post->post_parent : -1;
-		}
+		$id = $this->pick( $trashed );
 		wp_untrash_post( $id );
-		foreach ( $parents as $page => $parent ) {
-			$post = get_post( $page );
-			if ( $page !== $id && $parent >= 0 && $post instanceof WP_Post && (int) $post->post_parent !== $parent ) {
-				$this->restored[ $page ] = $this->step;
-			}
-		}
 		return sprintf( 'restore %s: %s', $this->made[ $id ], $this->path( $id ) );
 	}
 
@@ -454,8 +391,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		if ( [] === $trashed ) {
 			return null;
 		}
-		$id              = $this->pick( $trashed );
-		$this->deleted[] = $id;
+		$id = $this->pick( $trashed );
 		wp_delete_post( $id, true );
 		return sprintf( 'delete %s', $this->made[ $id ] );
 	}
@@ -595,14 +531,13 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Every violation of the three rules, one line each.
+	 * Every listed pair the site does not serve, one line each.
 	 *
 	 * @return string[]
 	 */
 	private function violations(): array {
 		$resolver = new Resolver( new Ledger() );
 		$out      = [];
-		$listed   = [];
 		$asked    = [];
 
 		foreach ( $this->lists() as $name => $collected ) {
@@ -612,54 +547,6 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 					$out[] = sprintf( 'A: %s lists /%s/ -> %s, the site serves %s [%s]', $name, $pair['old'], $this->name( $pair['id'] ), $this->name( $served ), $this->describe( $pair['old'] ) );
 				}
 				$asked[ $pair['old'] ][ $pair['id'] ] = $name;
-			}
-			foreach ( $this->pairs->all( $collected ) as $row ) {
-				$listed[ $row['old'] ] = true;
-			}
-		}
-
-		$doubts = [];
-		foreach ( $this->history as $id => $paths ) {
-			$post = get_post( $id );
-			if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status ) {
-				continue;
-			}
-			$current = Paths::uri( $post );
-			if ( Paths::has_trashed_segment( $current ) ) {
-				continue;
-			}
-			foreach ( array_unique( $paths ) as $path ) {
-				if ( $path === $current || isset( $listed[ Paths::relative( Paths::url( 'page', $path ) ) ] ) ) {
-					continue;
-				}
-				if ( $this->served( $resolver, $path ) !== $id ) {
-					// A blog post or an attachment the 404 test says is shown there: a real request says whether it is.
-					$there = get_page_by_path( $path, OBJECT, 'page' );
-					if ( ! ( $there instanceof WP_Post && is_post_publicly_viewable( $there ) ) && $this->resolved( $resolver, $path ) === $id ) {
-						$doubts[ $path ] = $id;
-					}
-					continue;
-				}
-				$class = $this->excluded( $path, $id );
-				if ( '' !== $class ) {
-					self::$excluded[ $class ][] = sprintf( 'seed %d: /%s/ -> %s [%s]', $this->seed, $path, $this->made[ $id ], $this->describe( $path ) );
-					continue;
-				}
-				$out[] = sprintf( 'B: the site serves /%s/ -> %s, no list has it [%s]', $path, $this->made[ $id ], $this->describe( $path ) );
-			}
-		}
-
-		$overview = new Overview( new Ledger(), new Providers() );
-		foreach ( array_keys( $this->made ) as $id ) {
-			$post = get_post( $id );
-			if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
-				continue;
-			}
-			foreach ( $overview->describe( $post )['old_paths'] as $row ) {
-				$served = $this->served( $resolver, $row['path'] );
-				if ( ( 'ok' === $row['state'] ) !== ( $served === $id ) ) {
-					$out[] = sprintf( 'C: %s says /%s/ is %s, the site serves %s [%s]', $this->made[ $id ], $row['path'], $row['state'], $this->name( $served ), $this->describe( $row['path'] ) );
-				}
 			}
 		}
 
@@ -674,12 +561,6 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				if ( Paths::relative( (string) get_permalink( $id ) ) !== $got ) {
 					$out[] = sprintf( 'A: %s lists /%s/ -> %s, a request for it gets %s', $name, $old, $this->name( $id ), '' !== $got ? $got : 'no redirect' );
 				}
-			}
-		}
-		foreach ( $doubts as $path => $id ) {
-			++self::$requests;
-			if ( Paths::relative( (string) get_permalink( $id ) ) === $this->request( $server, (string) $path ) ) {
-				$out[] = sprintf( 'B: a request for /%s/ is redirected to %s, no list has it [%s]', $path, $this->made[ $id ], $this->describe( (string) $path ) );
 			}
 		}
 		wp_set_current_user( $user );
@@ -701,182 +582,9 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The engine class a served old URL no list has belongs to, or none.
-	 *
-	 * - `root-list`: the resolver rewrites a prefix through the root list
-	 *   (Ledger::ROOT_OPTION), which the trash flow writes for subpages moved
-	 *   to the top level. No post holds that path, so only its trash change
-	 *   could list it, and a change keeps only the root's own path, and its
-	 *   markers only while the root is in the trash. Not excluded when the
-	 *   prefix is the own path of a root of the latest change still in the trash.
-	 * - `deleted-below`: the URL runs through the path of a page deleted for
-	 *   good, below the old path the resolver rewrote first. The markers of its
-	 *   trash go with it (Operations::step_cleanup()), and core moves the
-	 *   subpages it still had up without a record (wp_delete_post()), so the
-	 *   tree under it then cannot be rebuilt.
-	 * - `left-subtree`: the resolver reaches the page through the entry of a
-	 *   page that has left the pages the list of the old path it rewrote first
-	 *   walks (or the page itself has): the post's subtree, or the subpages a
-	 *   page in the trash moved up when it wrote the path on the post. Finding
-	 *   a page that left them means looking ledger entries up by path prefix,
-	 *   which the ledger's hashed keys cannot do.
-	 * - `restored-back`: since the page had the URL, a restore moved it, or a
-	 *   page above it, back under the page restored. Within an hour of the move
-	 *   up the restore records no interim path (Operations::INTERIM_AGE), and it
-	 *   deletes the markers, so where it lived meanwhile is not recorded.
-	 * - `pruned-return`: since the page had the URL, it, or a page above it,
-	 *   came back to a path it had had, and the ledger dropped its entry for
-	 *   that path (Ledger::prune()), so where it lived before is not recorded.
-	 * - `second-stay`: the post whose entry the resolver rewrites first was at
-	 *   that path twice, and the page had the URL during the second stay.
-	 *   Ledger::record() writes a path once per post, so only the first stay is
-	 *   dated, and the pages under the path are rebuilt as they were then.
-	 * - `restore-kept-url`: since the page had the URL, a restore that could
-	 *   not move it, or a page above it, back recorded the URL it had before
-	 *   the trash on it (Operations::keep_original_url()), dated at the restore,
-	 *   and deleted the markers that dated the move. That entry reads as a move
-	 *   made at the restore.
-	 *
-	 * @param string $path Normalized path the resolver sends to the page.
-	 * @param int    $id   The page.
-	 * @return string The class, or an empty string.
-	 */
-	private function excluded( string $path, int $id ): string {
-		$rounds = $this->rounds( $path );
-		if ( [] === $rounds ) {
-			return '';
-		}
-
-		$change = $this->changes->latest( $this->admin );
-		$roots  = [];
-		foreach ( (array) ( $change['roots'] ?? [] ) as $root ) {
-			if ( 'trash' === ( $change['action'] ?? '' ) && Settings::POLICY_REPARENT === ( $root['policy'] ?? '' ) && 'trash' === get_post_status( (int) $root['root'] ) ) {
-				$roots[ Paths::normalize( (string) $root['path'] ) ] = (int) $root['root'];
-			}
-		}
-		foreach ( $rounds as [ $prefix, $holder ] ) {
-			if ( 0 === $holder && ! isset( $roots[ $prefix ] ) ) {
-				return 'root-list';
-			}
-		}
-
-		[ $prefix, $first ] = $rounds[0];
-		foreach ( $this->deleted as $deleted ) {
-			foreach ( $this->history[ $deleted ] ?? [] as $was ) {
-				if ( strlen( $was ) > strlen( $prefix ) && str_starts_with( $path, $was . '/' ) ) {
-					return 'deleted-below';
-				}
-			}
-		}
-
-		// The pages the list of the old path the resolver rewrote first walks: the
-		// post's subtree, or the subpages moved up by the page in the trash that
-		// wrote it on the post as its alias, or by the change's root.
-		$movers = $first > 0 ? array_filter( Ledger::trash_holders( 'page', $prefix ), fn( int $holder ): bool => $this->wrote( $holder, $first, $prefix ) ) : [ $roots[ $prefix ] ];
-		$tops   = [ $first ];
-		if ( [] !== $movers ) {
-			$tops = [];
-			foreach ( $movers as $mover ) {
-				foreach ( Markers::rows( Markers::moved_key( $mover ), 1000 ) as $row ) {
-					$tops[] = $row['post_id'];
-				}
-			}
-		}
-		$inside = static function ( int $page ) use ( $tops ): bool {
-			return [] !== array_intersect( $tops, array_merge( [ $page ], array_map( 'intval', get_post_ancestors( $page ) ) ) );
-		};
-		if ( ! $inside( $id ) ) {
-			return 'left-subtree';
-		}
-		foreach ( array_slice( $rounds, 1 ) as [ , $holder ] ) {
-			if ( $holder > 0 && ! $inside( $holder ) ) {
-				return 'left-subtree';
-			}
-		}
-
-		// When the page first had the URL, and what moved on the way since without a record.
-		$since = $this->when[ $id ][ (int) array_search( $path, $this->history[ $id ], true ) ];
-		$pages = array_unique( array_merge( [ $id ], array_map( 'intval', get_post_ancestors( $id ) ), array_filter( array_column( $rounds, 1 ) ) ) );
-		foreach ( $pages as $page ) {
-			if ( ( $this->restored[ $page ] ?? 0 ) > $since ) {
-				return 'restored-back';
-			}
-		}
-		foreach ( $pages as $page ) {
-			$had = [];
-			foreach ( $this->history[ $page ] ?? [] as $i => $was ) {
-				if ( isset( $had[ $was ] ) && $this->when[ $page ][ $i ] > $since ) {
-					return 'pruned-return';
-				}
-				$had[ $was ] = true;
-			}
-		}
-
-		if ( $first > 0 ) {
-			// The first post's stays at the path: a second one is dated by nothing.
-			$stays = [];
-			foreach ( $this->history[ $first ] ?? [] as $i => $was ) {
-				if ( $was === $prefix && ( 0 === $i || $this->history[ $first ][ $i - 1 ] !== $prefix ) ) {
-					$stays[] = $this->when[ $first ][ $i ];
-				}
-			}
-			if ( count( $stays ) > 1 && $since >= $stays[1] ) {
-				return 'second-stay';
-			}
-		}
-
-		// An entry a restore wrote on a page on the way, for a path it had left before, since the page had the URL.
-		foreach ( $pages as $page ) {
-			foreach ( $this->entered[ $page ] ?? [] as $entry => $step ) {
-				if ( $step > $since && str_starts_with( $this->steps[ $step - 1 ] ?? '', 'restore ' ) && $this->path_at( $page, $step - 1 ) !== $entry ) {
-					return 'restore-kept-url';
-				}
-			}
-		}
-		return '';
-	}
-
-	/**
-	 * A page's path at the end of a step, from its history.
-	 *
-	 * @param int $id   Page ID.
-	 * @param int $step Step, 0 for the start.
-	 * @return string
-	 */
-	private function path_at( int $id, int $step ): string {
-		$path = '';
-		foreach ( $this->history[ $id ] ?? [] as $i => $was ) {
-			if ( $this->when[ $id ][ $i ] > $step ) {
-				break;
-			}
-			$path = $was;
-		}
-		return $path;
-	}
-
-	/**
-	 * Whether a page in the trash wrote an old path on a post as its alias.
-	 *
-	 * @param int    $holder Page in the trash.
-	 * @param int    $post   Post.
-	 * @param string $path   Normalized path.
-	 * @return bool
-	 */
-	private function wrote( int $holder, int $post, string $path ): bool {
-		foreach ( (array) get_post_meta( $holder, Markers::ALIASES, true ) as $alias ) {
-			$to  = is_array( $alias ) ? (int) ( $alias['to'] ?? 0 ) : 0;
-			$was = is_array( $alias ) ? Paths::normalize( (string) ( $alias['path'] ?? '' ) ) : '';
-			if ( $to === $post && $was === $path ) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * The resolver's rounds for a path, as Rules::rewrite_once() takes them on
 	 * the live ledger: the prefix it rewrote and the post that holds it, 0 for
-	 * the root list. Only used to name the engine class of a served URL no list has.
+	 * the root list.
 	 *
 	 * @param string $path Normalized path.
 	 * @return array<int,array{0:string,1:int,2:string}> Prefix, holder and the path it was rewritten to.
@@ -902,23 +610,12 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Every list the admin screens offer: each page's pairs for each of its
-	 * old paths, drafts and private pages too, and the admin's latest change.
+	 * Every list the admin screens offer: the admin's latest change.
 	 *
 	 * @return array<string,array<string,mixed>> Collected pairs by list.
 	 */
 	private function lists(): array {
-		$ledger = new Ledger();
 		$out    = [];
-		foreach ( array_keys( $this->made ) as $id ) {
-			$post = get_post( $id );
-			if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
-				continue;
-			}
-			foreach ( $ledger->paths_for( $id ) as $from ) {
-				$out[ sprintf( '%s at /%s/', $this->made[ $id ], $from ) ] = $this->pairs->collect_post( $post, $from );
-			}
-		}
 		$change = $this->changes->latest( $this->admin );
 		if ( null !== $change ) {
 			$out['the latest change'] = $this->pairs->collect_change( $change );
@@ -977,13 +674,6 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			$seen = $this->history[ $id ] ?? [];
 			if ( end( $seen ) !== $path ) {
 				$this->history[ $id ][] = $path;
-				$this->when[ $id ][]    = $this->step;
-			}
-		}
-		$ledger = new Ledger();
-		foreach ( array_keys( $this->made ) as $id ) {
-			foreach ( $ledger->paths_for( $id ) as $entry ) {
-				$this->entered[ $id ][ $entry ] = $this->entered[ $id ][ $entry ] ?? $this->step;
 			}
 		}
 	}

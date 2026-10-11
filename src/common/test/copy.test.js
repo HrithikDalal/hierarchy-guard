@@ -15,7 +15,6 @@ import {
 	formatCount,
 	initialSentence,
 	keptUrl,
-	oldUrlState,
 	optionDescription,
 	optionLabel,
 	pairsRedirects,
@@ -288,19 +287,6 @@ describe( 'warnings and outcomes', () => {
 		expect( viewRedirectsLabel( 1000, true ) ).toBe(
 			'View redirects (1,000+)'
 		);
-	} );
-
-	it( 'says how each old URL is handled', () => {
-		expect( oldUrlState( true, null ) ).toBe( 'Redirects here' );
-		expect( oldUrlState( false, { name: 'Redirection' } ) ).toBe(
-			'Add in Redirection'
-		);
-		expect( oldUrlState( false, null ) ).toBe( 'Not redirected' );
-		expect( oldUrlState( true, null, 'in_use' ) ).toBe(
-			'Used by another page'
-		);
-		expect( oldUrlState( true, null, 'trash' ) ).toBe( 'In the trash' );
-		expect( oldUrlState( true, null, 'none' ) ).toBe( 'Not redirected' );
 	} );
 
 	it( 'says what trashing the page would do, by policy', () => {

@@ -349,37 +349,6 @@ final class Ledger {
 	}
 
 	/**
-	 * Every post in the trash that holds this path, oldest entry first. The
-	 * trash flow records a trashed page's own paths on it, so the pages that
-	 * left the path are among them; so is a page renamed away from it before
-	 * it went to the trash.
-	 *
-	 * @param string   $post_type Post type name.
-	 * @param string   $path      Path, any form; normalized here.
-	 * @param int|null $limit     Most posts to read, or null for all.
-	 * @return int[] Post IDs; empty when no post in the trash holds the path.
-	 */
-	public static function trash_holders( string $post_type, string $path, ?int $limit = null ): array {
-		global $wpdb;
-
-		$path = Paths::normalize( $path );
-		if ( '' === $path ) {
-			return [];
-		}
-
-		$sql  = "SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' ORDER BY pm.meta_id ASC";
-		$args = [ self::key( $post_type, $path ), $post_type ];
-		if ( null !== $limit ) {
-			$sql   .= ' LIMIT %d';
-			$args[] = max( 1, $limit );
-		}
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Seek on the meta_key index, one row per page in the trash that held the path, bounded by $limit when given; $sql holds placeholders only.
-		$ids = $wpdb->get_col( $wpdb->prepare( $sql, ...$args ) );
-
-		return array_map( 'intval', (array) $ids );
-	}
-
-	/**
 	 * Single index seek on the hashed key: a live holder first, newest entry first.
 	 * A post in the trash comes back only when no live post holds the key; find()
 	 * then answers as if it held nothing.
