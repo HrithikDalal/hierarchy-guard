@@ -2,6 +2,7 @@
  * The trash dialog: one sentence under the page's policy, and the other two
  * policies behind "Other options".
  */
+import { speak } from '@wordpress/a11y';
 import { Button, Modal, Notice, Spinner } from '@wordpress/components';
 import {
 	createInterpolateElement,
@@ -14,18 +15,21 @@ import { trashPreview } from '../common/api';
 import config from '../common/config';
 import {
 	POLICIES,
-	bulkSentence,
 	deniedSentence,
 	dialogTitle,
-	initialSentence,
 	keptUrl,
 	optionDescription,
 	optionLabel,
 	previewError,
-	trashSentence,
 } from '../common/copy';
 import Url from '../common/url';
-import { confirmedPolicy, showsDenied } from './trash-choice';
+import {
+	confirmedPolicy,
+	dialogSentence,
+	openingPolicy,
+	showsDenied,
+	singlePage,
+} from './trash-choice';
 
 export const MAX_PREVIEW = 50;
 
@@ -91,13 +95,33 @@ export default function TrashDialog( {
 					onConfirm( null );
 					return;
 				}
-				const own =
-					1 === selected && 1 === result.pages.length
-						? result.pages[ 0 ].policy
-						: result.policy;
+				const own = openingPolicy(
+					result,
+					selected,
+					withChildren,
+					ids.length
+				);
 				setInitial( own );
 				setPolicy( own );
 				setPreview( result );
+				// Said once, when the preview arrives; each option reads its own description.
+				speak(
+					[
+						dialogSentence( {
+							preview: result,
+							policy: own,
+							selected,
+							withChildren,
+							previewed: ids.length,
+							title,
+							children,
+						} ),
+						showsDenied( result, own ) ? deniedSentence( own ) : '',
+					]
+						.filter( Boolean )
+						.join( ' ' ),
+					'polite'
+				);
 			} )
 			.catch( () => {
 				if ( live ) {
@@ -111,35 +135,29 @@ export default function TrashDialog( {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [] );
 
-	const single =
-		preview && 1 === selected && 1 === preview.pages.length
-			? preview.pages[ 0 ]
-			: null;
-
-	let sentence;
-	if ( single ) {
-		sentence = trashSentence( single, policy, config.cap );
-	} else if ( preview ) {
-		sentence = bulkSentence(
-			{
-				...preview,
-				more: preview.more + Math.max( 0, withChildren - ids.length ),
-			},
-			policy,
-			withChildren,
-			config.cap
-		);
-	} else if ( 1 === selected ) {
-		sentence = initialSentence( title, children, policy );
-	} else {
-		sentence = '';
-	}
-
+	const single = singlePage( preview, selected );
+	const sentence = dialogSentence( {
+		preview,
+		policy,
+		selected,
+		withChildren,
+		previewed: ids.length,
+		title,
+		children,
+	} );
 	const denied = showsDenied( preview, policy );
 
 	const confirm = () => {
 		setBusy( true );
-		onConfirm( confirmedPolicy( preview, single, policy, initial ) );
+		onConfirm(
+			confirmedPolicy(
+				preview,
+				single,
+				policy,
+				initial,
+				withChildren > ids.length
+			)
+		);
 	};
 
 	return (
@@ -153,7 +171,7 @@ export default function TrashDialog( {
 			size="medium"
 			aria={ { describedby: 'hierarchy-guard-trash-sentence' } }
 		>
-			<div id="hierarchy-guard-trash-sentence" aria-live="polite">
+			<div id="hierarchy-guard-trash-sentence">
 				{ sentence && <p>{ sentence }</p> }
 				{ denied && <p>{ deniedSentence( policy ) }</p> }
 			</div>

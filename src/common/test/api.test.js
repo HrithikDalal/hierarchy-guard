@@ -33,10 +33,13 @@ describe( 'routes', () => {
 	it( 'signs a download URL with the nonce apiFetch renewed', () => {
 		config.restUrl = 'https://example.org/wp-json/';
 		globalThis.wp = { apiFetch: { nonceMiddleware: { nonce: 'fresh' } } };
-		expect( csvUrl( { change: 'x-1' }, 'generic' ) ).toBe(
-			'https://example.org/wp-json/hierarchy-guard/v1/changes/x-1/csv?format=generic&_wpnonce=fresh'
-		);
-		delete globalThis.wp;
+		try {
+			expect( csvUrl( { change: 'x-1' }, 'generic' ) ).toBe(
+				'https://example.org/wp-json/hierarchy-guard/v1/changes/x-1/csv?format=generic&_wpnonce=fresh'
+			);
+		} finally {
+			delete globalThis.wp;
+		}
 	} );
 
 	it( 'signs a download URL with plain permalinks', () => {

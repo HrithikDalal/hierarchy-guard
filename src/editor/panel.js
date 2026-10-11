@@ -322,10 +322,18 @@ export default function HierarchyPlugin() {
 								pairs.capped
 							),
 							onClick: () =>
-								setModal( { post: postId, from: latest } ),
+								setModal( {
+									source: { post: postId, from: latest },
+									redirects: result.redirects,
+								} ),
 						} );
 					}
-					if ( ! serving && ! provider && config.settingsUrl ) {
+					// Never offered while redirects are on for the site, even when this page isn't served.
+					if (
+						! config.serving &&
+						! provider &&
+						config.settingsUrl
+					) {
 						actions.push( {
 							label: __( 'Set up redirects', 'hierarchy-guard' ),
 							url: config.settingsUrl,
@@ -360,8 +368,11 @@ export default function HierarchyPlugin() {
 									),
 									onClick: () =>
 										setModal( {
-											post: postId,
-											from: latest,
+											source: {
+												post: postId,
+												from: latest,
+											},
+											redirects: result.redirects,
 										} ),
 								},
 							],
@@ -413,14 +424,18 @@ export default function HierarchyPlugin() {
 					<Overview
 						data={ data }
 						onView={ ( from ) =>
-							setModal( { post: postId, from } )
+							setModal( {
+								source: { post: postId, from },
+								redirects: data.redirects,
+							} )
 						}
 					/>
 				) }
 			</PluginDocumentSettingPanel>
 			{ modal && (
 				<RedirectsModal
-					source={ modal }
+					source={ modal.source }
+					redirects={ modal.redirects }
 					editor
 					onClose={ () => setModal( null ) }
 				/>

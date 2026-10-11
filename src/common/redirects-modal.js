@@ -43,13 +43,19 @@ function rangeLabel( data ) {
 /**
  * The modal.
  *
- * @param {Object}     props         Props.
- * @param {Object}     props.source  Either { change } or { post, from }.
- * @param {boolean}    props.editor  Whether the block editor shows it, which says "trash" in lower case.
- * @param {() => void} props.onClose Closes the modal.
+ * @param {Object}                                      props           Props.
+ * @param {Object}                                      props.source    Either { change } or { post, from }.
+ * @param {{serving: boolean, provider: (Object|null)}} props.redirects Whether the server redirects to the page, and the redirect plugin; the site's by default.
+ * @param {boolean}                                     props.editor    Whether the block editor shows it, which says "trash" in lower case.
+ * @param {() => void}                                  props.onClose   Closes the modal.
  * @return {Element} Modal.
  */
-export default function RedirectsModal( { source, editor = false, onClose } ) {
+export default function RedirectsModal( {
+	source,
+	redirects = { serving: config.serving, provider: config.provider },
+	editor = false,
+	onClose,
+} ) {
 	const [ page, setPage ] = useState( 1 );
 	const [ data, setData ] = useState( null );
 	const [ loading, setLoading ] = useState( true );
@@ -120,7 +126,7 @@ export default function RedirectsModal( { source, editor = false, onClose } ) {
 		}
 	}, [ copy.text ] );
 
-	const provider = config.provider;
+	const { serving, provider } = redirects;
 	const layout = provider ? provider.csv : 'generic';
 	const name = provider && provider.name ? provider.name : '';
 
@@ -169,7 +175,7 @@ export default function RedirectsModal( { source, editor = false, onClose } ) {
 	};
 
 	let intro;
-	if ( config.serving ) {
+	if ( serving ) {
 		intro = __(
 			'These old URLs redirect to their new pages.',
 			'hierarchy-guard'
@@ -192,7 +198,7 @@ export default function RedirectsModal( { source, editor = false, onClose } ) {
 	return (
 		<Modal
 			title={
-				config.serving
+				serving
 					? __( 'Redirects', 'hierarchy-guard' )
 					: __( 'Redirects needed', 'hierarchy-guard' )
 			}
@@ -296,7 +302,7 @@ export default function RedirectsModal( { source, editor = false, onClose } ) {
 						/>
 					) }
 					<div className="hierarchy-guard-modal__actions">
-						{ ! config.serving && provider && provider.url && (
+						{ ! serving && provider && provider.url && (
 							<ExternalLink href={ provider.url }>
 								{ name
 									? sprintf(
@@ -339,6 +345,7 @@ export default function RedirectsModal( { source, editor = false, onClose } ) {
 									: __( 'Download CSV', 'hierarchy-guard' ) }
 							</Button>
 						) }
+						{ /* Never offered while redirects are on for the site, even when this page isn't served. */ }
 						{ ! config.serving &&
 							! provider &&
 							config.settingsUrl && (

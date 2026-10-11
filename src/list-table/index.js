@@ -8,7 +8,7 @@ import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
 import bindQuickEdit from './quick-edit';
 import TrashDialog, { MAX_PREVIEW } from './trash-dialog';
-import { plainTitle } from './trash-choice';
+import { rowTitle } from './trash-choice';
 import '../common/modal.scss';
 import './list-table.scss';
 
@@ -25,17 +25,6 @@ function childCount( id ) {
 		`#post-${ id } .hierarchy-guard-cell`
 	);
 	return cell ? Number( cell.dataset.children || 0 ) : 0;
-}
-
-/**
- * A row's title as the list shows it.
- *
- * @param {number} id Post ID.
- * @return {string} Title.
- */
-function rowTitle( id ) {
-	const link = window.document.querySelector( `#post-${ id } .row-title` );
-	return link ? plainTitle( link.textContent ) : '';
 }
 
 /**
@@ -77,7 +66,7 @@ function bindRowTrash() {
 				ids={ [ id ] }
 				selected={ 1 }
 				withChildren={ 1 }
-				title={ rowTitle( id ) }
+				title={ rowTitle( window.document, id ) }
 				children={ children }
 				onCancel={ close }
 				onConfirm={ ( policy ) => {
@@ -126,7 +115,11 @@ function bindBulkTrash() {
 				ids={ parents.slice( 0, MAX_PREVIEW ) }
 				selected={ selected.length }
 				withChildren={ parents.length }
-				title={ 1 === selected.length ? rowTitle( selected[ 0 ] ) : '' }
+				title={
+					1 === selected.length
+						? rowTitle( window.document, selected[ 0 ] )
+						: ''
+				}
 				children={
 					1 === selected.length ? childCount( selected[ 0 ] ) : 0
 				}

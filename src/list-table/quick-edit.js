@@ -69,15 +69,16 @@ function printNotice( status, sentence, source, label, redirects ) {
 		button.textContent = label;
 		button.addEventListener( 'click', () => {
 			open( ( close ) => (
-				<RedirectsModal source={ source } onClose={ close } />
+				<RedirectsModal
+					source={ source }
+					redirects={ redirects }
+					onClose={ close }
+				/>
 			) );
 		} );
 		text.appendChild( button );
-		if (
-			! redirects.serving &&
-			! redirects.provider &&
-			config.settingsUrl
-		) {
+		// Never offered while redirects are on for the site, even when this page isn't served.
+		if ( ! config.serving && ! redirects.provider && config.settingsUrl ) {
 			// Set apart the way the server notice sets its link apart.
 			const divider = window.document.createElement( 'span' );
 			divider.setAttribute( 'aria-hidden', 'true' );

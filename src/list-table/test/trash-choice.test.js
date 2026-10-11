@@ -2,7 +2,14 @@
  * What the trash dialog sends and shows.
  */
 import { describe, expect, it } from 'vitest';
-import { confirmedPolicy, plainTitle, showsDenied } from '../trash-choice';
+import {
+	confirmedPolicy,
+	dialogSentence,
+	openingPolicy,
+	plainTitle,
+	rowTitle,
+	showsDenied,
+} from '../trash-choice';
 
 const page = ( policy, denied = false, deniedTrash = false ) => ( {
 	policy,
@@ -34,12 +41,129 @@ describe( 'the policy the dialog sends', () => {
 		expect( confirmedPolicy( preview, null, 'reparent', 'reparent' ) ).toBe(
 			null
 		);
+		const kept = { pages: [ page( 'keep' ), page( 'keep' ) ] };
+		expect( confirmedPolicy( kept, null, 'keep', 'keep' ) ).toBe( null );
 	} );
 
-	it( 'sends nothing extra when the preview failed', () => {
+	it( 'sends the policy it stated when the preview failed', () => {
 		expect( confirmedPolicy( null, null, 'reparent', 'reparent' ) ).toBe(
-			null
+			'reparent'
 		);
+	} );
+
+	it( 'sends the policy shown when some selected parents were not previewed', () => {
+		const preview = { pages: [ page( 'reparent' ), page( 'reparent' ) ] };
+		expect(
+			confirmedPolicy( preview, null, 'reparent', 'reparent', true )
+		).toBe( 'reparent' );
+	} );
+} );
+
+describe( 'the policy the dialog opens with', () => {
+	const result = ( pages ) => ( { policy: 'reparent', pages } );
+
+	it( 'is the page’s own for one page', () => {
+		expect( openingPolicy( result( [ page( 'keep' ) ] ), 1, 1, 1 ) ).toBe(
+			'keep'
+		);
+	} );
+
+	it( 'is the policy every previewed page shares', () => {
+		const pages = [ page( 'keep' ), page( 'keep' ) ];
+		expect( openingPolicy( result( pages ), 2, 2, 2 ) ).toBe( 'keep' );
+		expect(
+			openingPolicy( result( [ page( 'keep' ) ] ), 3, 1, 1 ),
+			'One parent among pages without subpages.'
+		).toBe( 'keep' );
+	} );
+
+	it( 'is the site default for mixed policies, or when some parents were not previewed', () => {
+		expect(
+			openingPolicy(
+				result( [ page( 'keep' ), page( 'trash_children' ) ] ),
+				2,
+				2,
+				2
+			)
+		).toBe( 'reparent' );
+		expect(
+			openingPolicy(
+				result( [ page( 'keep' ), page( 'keep' ) ] ),
+				60,
+				60,
+				50
+			)
+		).toBe( 'reparent' );
+	} );
+} );
+
+describe( 'the dialog’s sentence', () => {
+	const preview = {
+		policy: 'reparent',
+		more: 0,
+		total: { count: 5, capped: false },
+		pages: [
+			{
+				id: 4,
+				title: 'Studio',
+				children: 2,
+				descendants: { count: 5, capped: false },
+				policy: 'reparent',
+			},
+		],
+	};
+
+	it( 'describes the previewed page', () => {
+		expect(
+			dialogSentence( {
+				preview,
+				policy: 'reparent',
+				selected: 1,
+				withChildren: 1,
+				previewed: 1,
+				title: 'Studio',
+				children: 2,
+			} )
+		).toContain( '“Studio” has 2 subpages directly under it, 5 in all.' );
+	} );
+
+	it( 'counts the parents left out of the preview', () => {
+		expect(
+			dialogSentence( {
+				preview,
+				policy: 'reparent',
+				selected: 3,
+				withChildren: 3,
+				previewed: 1,
+				title: '',
+				children: 0,
+			} )
+		).toBe(
+			dialogSentence( {
+				preview: { ...preview, more: 2 },
+				policy: 'reparent',
+				selected: 3,
+				withChildren: 3,
+				previewed: 3,
+				title: '',
+				children: 0,
+			} )
+		);
+	} );
+
+	it( 'falls back to the row before the preview, and to nothing for a bulk selection', () => {
+		const before = {
+			preview: null,
+			policy: 'reparent',
+			withChildren: 1,
+			previewed: 1,
+			title: 'Studio',
+			children: 2,
+		};
+		expect( dialogSentence( { ...before, selected: 1 } ) ).toContain(
+			'Studio'
+		);
+		expect( dialogSentence( { ...before, selected: 2 } ) ).toBe( '' );
 	} );
 } );
 
@@ -58,9 +182,49 @@ describe( 'the note about subpages the user can’t edit', () => {
 } );
 
 describe( 'a row title', () => {
-	it( 'drops the dashes WordPress 6.6 puts before a subpage’s title', () => {
+	it( 'drops only the dashes WordPress 6.6 puts before a subpage’s title', () => {
 		expect( plainTitle( '— — Team' ) ).toBe( 'Team' );
-		expect( plainTitle( '—Team' ) ).toBe( 'Team' );
 		expect( plainTitle( ' About — us ' ) ).toBe( 'About — us' );
+		expect(
+			plainTitle( '—Team' ),
+			'Core’s pad is a dash and a space.'
+		).toBe( '—Team' );
+	} );
+
+	it( 'keeps a title that is only a dash', () => {
+		expect( plainTitle( '—' ) ).toBe( '—' );
+		expect( plainTitle( '— —' ) ).toBe( '—' );
+	} );
+
+	it( 'reads the raw title core prints for Quick Edit first', () => {
+		const doc = ( nodes ) => ( {
+			querySelector: ( selector ) =>
+				undefined !== nodes[ selector ]
+					? { textContent: nodes[ selector ] }
+					: null,
+		} );
+		expect(
+			rowTitle(
+				doc( {
+					'#inline_7 .post_title': '— Intro',
+					'#post-7 .row-title': '— — — Intro',
+				} ),
+				7
+			)
+		).toBe( '— Intro' );
+		expect(
+			rowTitle( doc( { '#post-7 .row-title': '— Team' } ), 7 ),
+			'Without the Quick Edit data, the link’s text without the pad.'
+		).toBe( 'Team' );
+		expect(
+			rowTitle(
+				doc( {
+					'#inline_7 .post_title': '',
+					'#post-7 .row-title': '(no title)',
+				} ),
+				7
+			)
+		).toBe( '(no title)' );
+		expect( rowTitle( doc( {} ), 7 ) ).toBe( '' );
 	} );
 } );
