@@ -142,7 +142,7 @@ final class Settings_Section {
 			);
 		}
 
-		$help = __( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.', 'hierarchy-guard' );
+		$help = __( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'The Pages list asks each time.', 'hierarchy-guard' );
 		if ( ! EMPTY_TRASH_DAYS ) {
 			$help .= ' ' . __( 'The trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
 		}
@@ -166,12 +166,13 @@ final class Settings_Section {
 		$name = null !== $provider ? trim( (string) ( $provider['name'] ?? '' ) ) : '';
 		if ( null !== $provider && '' !== $name ) {
 			/* translators: %s: name of the detected redirect plugin. */
-			$help = sprintf( __( '%s is active and can handle these. URL changes are recorded either way.', 'hierarchy-guard' ), $name );
+			$help = sprintf( __( '%s is active and can handle these.', 'hierarchy-guard' ), $name );
 		} elseif ( null !== $provider ) {
-			$help = __( 'A redirect plugin is active and can handle these. URL changes are recorded either way.', 'hierarchy-guard' );
+			$help = __( 'A redirect plugin is active and can handle these.', 'hierarchy-guard' );
 		} else {
-			$help = __( 'No redirect plugin was found. Turn this on so old URLs reach their new pages. URL changes are recorded either way.', 'hierarchy-guard' );
+			$help = __( 'No redirect plugin was found.', 'hierarchy-guard' ) . ' ' . __( 'Turn this on so old URLs reach their new pages.', 'hierarchy-guard' );
 		}
+		$help .= ' ' . __( 'URL changes are recorded either way.', 'hierarchy-guard' );
 		echo '<p class="description">' . esc_html( $help ) . '</p>';
 	}
 }

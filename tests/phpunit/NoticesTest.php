@@ -646,4 +646,35 @@ final class NoticesTest extends WP_UnitTestCase {
 			$queue->delete( $entry['root'] );
 		}
 	}
+
+	public function test_a_success_urls_notice_asks_for_the_list_script_when_printed(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->trash_about();
+
+		$before = did_action( 'hierarchy_guard_list_script' );
+		$html   = $this->rendered();
+
+		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
+		$this->assertStringContainsString( 'notice-success', $html );
+		$this->assertGreaterThanOrEqual( 1, did_action( 'hierarchy_guard_list_script' ) - $before );
+	}
+
+	public function test_building_a_urls_notice_does_not_load_the_list_script(): void {
+		$this->trash_about();
+
+		$before = did_action( 'hierarchy_guard_list_script' );
+		$this->urls_notice();
+
+		$this->assertSame( 0, did_action( 'hierarchy_guard_list_script' ) - $before );
+	}
+
+	public function test_the_nudge_asks_for_the_list_script(): void {
+		$this->record_an_old_url();
+
+		$before = did_action( 'hierarchy_guard_list_script' );
+		$html   = $this->rendered();
+
+		$this->assertStringContainsString( 'hierarchy-guard-nudge', $html );
+		$this->assertGreaterThanOrEqual( 1, did_action( 'hierarchy_guard_list_script' ) - $before );
+	}
 }

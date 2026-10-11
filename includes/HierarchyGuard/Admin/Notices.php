@@ -183,15 +183,15 @@ final class Notices {
 			esc_attr( sprintf( __( 'View redirects (%s)', 'hierarchy-guard' ), $shown ) ),
 			esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' )
 		);
-		do_action( 'hierarchy_guard_list_script' );
 
 		if ( null !== $provider ) {
 			$name = trim( (string) ( $provider['name'] ?? '' ) );
-			$text = '' !== $name
-				/* translators: 1: number of URLs, such as 12 or 1,000+, 2: name of the redirect plugin. */
-				? sprintf( _n( '%1$s URL changed. Add its redirect in %2$s.', '%1$s URLs changed. Add their redirects in %2$s.', $n, 'hierarchy-guard' ), $shown, $name )
-				/* translators: %s: number of URLs, such as 12 or 1,000+. */
-				: sprintf( _n( '%s URL changed. Add its redirect in your redirect plugin.', '%s URLs changed. Add their redirects in your redirect plugin.', $n, 'hierarchy-guard' ), $shown );
+			/* translators: %s: number of URLs, such as 12 or 1,000+. */
+			$text  = sprintf( _n( '%s URL changed.', '%s URLs changed.', $n, 'hierarchy-guard' ), $shown ) . ' ';
+			$text .= '' !== $name
+				/* translators: %s: name of the redirect plugin. */
+				? sprintf( _n( 'Add its redirect in %s.', 'Add their redirects in %s.', $n, 'hierarchy-guard' ), $name )
+				: _n( 'Add its redirect in your redirect plugin.', 'Add their redirects in your redirect plugin.', $n, 'hierarchy-guard' );
 			return [
 				'type'    => 'info',
 				'message' => esc_html( $text ) . ' ' . $view,
@@ -238,6 +238,7 @@ final class Notices {
 		if ( null !== $this->shown ) {
 			$notice = $this->urls_notice( $this->shown );
 			if ( null !== $notice ) {
+				do_action( 'hierarchy_guard_list_script' );
 				wp_admin_notice(
 					$notice['message'],
 					[
