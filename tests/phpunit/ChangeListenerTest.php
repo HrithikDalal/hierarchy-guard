@@ -15,6 +15,7 @@ use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Markers;
+use WP_REST_Request;
 use WP_UnitTestCase;
 
 /**
@@ -383,5 +384,70 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		wp_delete_post( $other, true );
 
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ) );
+	}
+
+	public function test_a_holder_a_status_update_puts_in_the_trash_drops_the_cached_lookup(): void {
+		$other = $this->newer_holder();
+		$this->assertSame( $other, $this->ledger->find( 'page', 'company/about' ), 'Cached: the newer page holds the path.' );
+
+		// As `wp post update --post_status=trash` does it: no wp_trash_post(), so no trashed_post.
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_status' => 'trash',
+			]
+		);
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ), 'The live holder takes over at once.' );
+		$this->assertSame( $this->team, ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team' )->ID );
+	}
+
+	public function test_a_holder_a_status_update_takes_out_of_the_trash_drops_the_cached_lookup(): void {
+		$other = $this->newer_holder();
+		wp_trash_post( $other );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ), 'Cached: the page in the trash holds nothing.' );
+
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_status' => 'publish',
+			]
+		);
+
+		$this->assertSame( $other, $this->ledger->find( 'page', 'company/about' ), 'The page out of the trash holds the path again.' );
+	}
+
+	public function test_a_holder_the_rest_api_takes_out_of_the_trash_drops_the_cached_lookup(): void {
+		$other = $this->newer_holder();
+		wp_trash_post( $other );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ) );
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+
+		// The block editor's "Restore" on a page in the trash: a status change, not wp_untrash_post().
+		$request = new WP_REST_Request( 'POST', '/wp/v2/pages/' . $other );
+		$request->set_param( 'status', 'publish' );
+		$response = rest_get_server()->dispatch( $request );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( $other, $this->ledger->find( 'page', 'company/about' ) );
+	}
+
+	public function test_trashing_a_holder_looks_its_entries_up_once(): void {
+		global $wpdb;
+		$other   = $this->newer_holder();
+		$lookups = 0;
+		$count   = static function ( string $sql ) use ( &$lookups, $wpdb ): string {
+			if ( str_starts_with( $sql, "SELECT 1 FROM {$wpdb->postmeta} WHERE post_id" ) ) {
+				++$lookups;
+			}
+			return $sql;
+		};
+		add_filter( 'query', $count );
+
+		wp_trash_post( $other );
+		wp_untrash_post( $other );
+
+		remove_filter( 'query', $count );
+		$this->assertSame( 2, $lookups, 'The status change and core\'s trash hook that follows it check the page once between them.' );
 	}
 }

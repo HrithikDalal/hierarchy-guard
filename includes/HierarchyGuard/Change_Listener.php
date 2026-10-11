@@ -39,6 +39,14 @@ final class Change_Listener {
 	private array $deleting = [];
 
 	/**
+	 * Posts a status change took into or out of the trash in this request, by
+	 * ID: core's trash hooks that follow it have nothing left to drop.
+	 *
+	 * @var array<int,true>
+	 */
+	private array $crossed = [];
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Ledger $ledger Ledger.
@@ -53,6 +61,7 @@ final class Change_Listener {
 	public function register(): void {
 		add_action( 'post_updated', [ $this, 'on_post_updated' ], 10, 3 );
 		add_action( 'before_delete_post', [ $this, 'on_before_delete' ], 10, 2 );
+		add_action( 'transition_post_status', [ $this, 'on_status_changed' ], 10, 3 );
 		add_action( 'trashed_post', [ $this, 'on_holder_changed' ] );
 		add_action( 'untrashed_post', [ $this, 'on_holder_changed' ] );
 		add_action( 'deleted_post', [ $this, 'on_deleted' ] );
@@ -148,18 +157,40 @@ final class Change_Listener {
 	}
 
 	/**
+	 * A post went into or out of the trash by a status change, as
+	 * wp_update_post(), WP-CLI's `post update` and the REST API make it with
+	 * no wp_trash_post() or wp_untrash_post(): see on_holder_changed(). Core's
+	 * own trash and restore make the same change first.
+	 *
+	 * @param string  $new_status New status.
+	 * @param string  $old_status Old status.
+	 * @param WP_Post $post       Post.
+	 */
+	public function on_status_changed( string $new_status, string $old_status, WP_Post $post ): void {
+		if ( $new_status === $old_status || ( 'trash' !== $new_status && 'trash' !== $old_status ) ) {
+			return;
+		}
+		$this->crossed[ (int) $post->ID ] = true;
+		$this->drop_lookups( (int) $post->ID, (string) $post->post_type );
+	}
+
+	/**
 	 * A post that holds ledger entries went to the trash or came back: the
 	 * ledger's cached lookups may name it, or a holder it hid, so they are
 	 * dropped. Trashing a page with no subpages writes nothing to the ledger.
+	 * When the status change before this hook dropped them, nothing is left to do.
 	 *
 	 * @param int $post_id Post ID.
 	 */
 	public function on_holder_changed( int $post_id ): void {
-		$type = get_post_type( $post_id );
-		if ( false === $type || ! Post_Types::is_supported( $type ) || ! Ledger::has_entries( $post_id ) ) {
+		if ( isset( $this->crossed[ $post_id ] ) ) {
+			unset( $this->crossed[ $post_id ] );
 			return;
 		}
-		$this->ledger->invalidate();
+		$type = get_post_type( $post_id );
+		if ( false !== $type ) {
+			$this->drop_lookups( $post_id, $type );
+		}
 	}
 
 	/**
@@ -170,6 +201,18 @@ final class Change_Listener {
 	public function on_deleted( int $post_id ): void {
 		if ( isset( $this->deleting[ $post_id ] ) ) {
 			unset( $this->deleting[ $post_id ] );
+			$this->ledger->invalidate();
+		}
+	}
+
+	/**
+	 * Drops the ledger's cached lookups when a supported post holds any entry.
+	 *
+	 * @param int    $post_id   Post ID.
+	 * @param string $post_type Post type name.
+	 */
+	private function drop_lookups( int $post_id, string $post_type ): void {
+		if ( Post_Types::is_supported( $post_type ) && Ledger::has_entries( $post_id ) ) {
 			$this->ledger->invalidate();
 		}
 	}
