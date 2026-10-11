@@ -78,23 +78,25 @@ final class Pairs {
 		$holder = Ledger::trash_holder( $type, $old );
 		if ( $holder > 0 ) {
 			return [
-				'old'        => $old,
-				'head'       => 0,
-				'reason'     => 'trash',
-				'base'       => Paths::uri( $post ),
-				'from'       => 0,
-				'children'   => self::moved_children( [ $holder ], $type )[ $holder ] ?? [],
-				'incomplete' => false,
+				'old'         => $old,
+				'head'        => 0,
+				'reason'      => 'trash',
+				'base'        => Paths::uri( $post ),
+				'from'        => 0,
+				'children'    => self::moved_children( [ $holder ], $type )[ $holder ] ?? [],
+				'incomplete'  => false,
+				'recorded_on' => (int) $post->ID,
 			];
 		}
 		return [
-			'old'        => $old,
-			'head'       => (int) $post->ID,
-			'reason'     => '',
-			'base'       => Paths::uri( $post ),
-			'from'       => (int) $post->ID,
-			'children'   => [],
-			'incomplete' => false,
+			'old'         => $old,
+			'head'        => (int) $post->ID,
+			'reason'      => '',
+			'base'        => Paths::uri( $post ),
+			'from'        => (int) $post->ID,
+			'children'    => [],
+			'incomplete'  => false,
+			'recorded_on' => (int) $post->ID,
 		];
 	}
 
@@ -158,13 +160,15 @@ final class Pairs {
 			$status   = $statuses[ $root_id ] ?? '';
 			$parent   = $parents[ $root_id ];
 			$blocks[] = [
-				'old'        => Paths::normalize( (string) $root['path'] ),
-				'head'       => '' === $status ? (int) $root['to'] : 0,
-				'reason'     => 'trash' === $status ? 'trash' : '',
-				'base'       => null !== $parent ? Paths::uri( $parent ) : '',
-				'from'       => 0,
-				'children'   => 'trash' === $status ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
-				'incomplete' => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
+				'old'         => Paths::normalize( (string) $root['path'] ),
+				'head'        => '' === $status ? (int) $root['to'] : 0,
+				'reason'      => 'trash' === $status ? 'trash' : '',
+				'base'        => null !== $parent ? Paths::uri( $parent ) : '',
+				'from'        => 0,
+				'children'    => 'trash' === $status ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
+				'incomplete'  => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
+				// Each subpage keeps the slug it had before the move: nothing is rebased.
+				'recorded_on' => 0,
 			];
 		}
 
@@ -182,11 +186,12 @@ final class Pairs {
 	 * hidden, an old subpage path one of its published subpages uses is
 	 * dropped for the same reason.
 	 *
-	 * A page renamed after its parent moved is listed at the slug it had when
-	 * the parent left the old path, read from its own old paths. An old path
-	 * the ledger gives to another live post
-	 * leads to that post, so it is dropped here with the pages walked below
-	 * it: that post's own list has them.
+	 * On a post's old path, a page renamed after its parent left that path is
+	 * listed at the slug it had then, read from its own old paths recorded
+	 * after the post's entry for the path. A trash change lists each subpage at
+	 * its slug from before the move. An old path the ledger gives to another
+	 * live post leads to that post, so it is dropped here with the pages walked
+	 * below it: that post's own list has them.
 	 *
 	 * @param array<int,array<string,mixed>> $blocks    Blocks.
 	 * @param string                         $post_type Post type name.
@@ -228,8 +233,9 @@ final class Pairs {
 			$capped         = $capped || ! empty( $block['incomplete'] );
 		}
 
-		$tree   = $this->walk( $live, $post_type, $cap );
-		$former = self::ledger_paths( $tree['ids'] );
+		$tree     = $this->walk( $live, $post_type, $cap );
+		$recorded = array_filter( array_map( static fn( array $block ): int => (int) ( $block['recorded_on'] ?? 0 ), $live ) );
+		$former   = self::ledger_paths( array_merge( $tree['ids'], array_values( $recorded ) ) );
 
 		$pairs    = [];
 		$lineage  = [];
@@ -239,6 +245,8 @@ final class Pairs {
 			$head = (int) $block['head'];
 			$post = $head > 0 ? get_post( $head ) : null;
 			$top  = [];
+			// The post's own entry for the old path dates the moment its pages left it.
+			$since = isset( $recorded[ $index ] ) ? self::entry_id( $former[ $recorded[ $index ] ] ?? [], $old ) : null;
 			if ( $post instanceof WP_Post && is_post_publicly_viewable( $post ) ) {
 				$top                         = [ count( $pairs ) ];
 				$block_of[ count( $pairs ) ] = $index;
@@ -270,7 +278,7 @@ final class Pairs {
 				[ $node, $old_parent, $current_parent, $above ] = array_pop( $stack );
 
 				// Core skips an empty slug when it builds a path, so the old path does too.
-				$segment = self::old_segment( $node, $former[ $node['id'] ] ?? [], $current_parent );
+				$segment = self::old_segment( $node, $former[ $node['id'] ] ?? [], $current_parent, $since );
 				$path    = '' !== $segment ? $old_parent . '/' . $segment : $old_parent;
 				$current = '' !== $node['slug'] ? ltrim( $current_parent . '/' . $node['slug'], '/' ) : $current_parent;
 				if ( 'publish' === $node['status'] ) {
@@ -629,19 +637,29 @@ final class Pairs {
 
 	/**
 	 * The segment a page had under its parent's old path. A page renamed after
-	 * its parent moved holds an old path one segment below the parent's current
-	 * path: the oldest such segment is the slug it had when the parent left the
-	 * old path. Otherwise the node's own segment. An old path one segment below
-	 * the parent's old path is older than that segment, and the page's own
-	 * list has it.
+	 * its parent left the old path holds an old path one segment below the
+	 * parent's current path, recorded after the post's entry for the old path:
+	 * the oldest such segment is the slug it had when the parent left. One
+	 * recorded before that entry is from an earlier time the page lived there.
+	 * Otherwise, and on a trash change, the node's own segment. An old path one
+	 * segment below the parent's old path is older than that segment, and the
+	 * page's own list has it.
 	 *
-	 * @param array<string,mixed> $node           Tree node.
-	 * @param string[]            $paths          The page's old paths, oldest first.
-	 * @param string              $current_parent The parent's current path, empty at top level.
+	 * @param array<string,mixed>                  $node           Tree node.
+	 * @param array<int,array{id:int,path:string}> $paths          The page's old paths, oldest first.
+	 * @param string                               $current_parent The parent's current path, empty at top level.
+	 * @param int|null                             $since          The meta ID of the post's entry for the old path; null on a trash change, which is never rebased.
 	 * @return string
 	 */
-	private static function old_segment( array $node, array $paths, string $current_parent ): string {
-		foreach ( $paths as $path ) {
+	private static function old_segment( array $node, array $paths, string $current_parent, ?int $since ): string {
+		if ( null === $since ) {
+			return (string) $node['segment'];
+		}
+		foreach ( $paths as $entry ) {
+			if ( $entry['id'] <= $since ) {
+				continue;
+			}
+			$path = $entry['path'];
 			if ( '' === $current_parent ) {
 				$rest = $path;
 			} elseif ( str_starts_with( $path, $current_parent . '/' ) ) {
@@ -724,10 +742,11 @@ final class Pairs {
 	}
 
 	/**
-	 * The old paths recorded on the given pages, oldest first, by page.
+	 * The old paths recorded on the given pages, oldest first, by page, each
+	 * with its meta ID, which orders the entries of every page.
 	 *
-	 * @param int[] $ids Page IDs the walk read, at most the count cap plus one.
-	 * @return array<int,string[]>
+	 * @param int[] $ids Page IDs the walk read, and the posts the blocks' old paths are recorded on; at most the count cap plus a few.
+	 * @return array<int,array<int,array{id:int,path:string}>>
 	 */
 	private static function ledger_paths( array $ids ): array {
 		global $wpdb;
@@ -737,14 +756,33 @@ final class Pairs {
 			return [];
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per page the walk read; a range on the post_id index, bounded by the count cap.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key LIKE %s AND post_id IN ( {$placeholders} ) ORDER BY meta_id ASC", ...array_merge( [ $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%' ], $ids ) ), ARRAY_A );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per page the walk read or block's post; a range on the post_id index, bounded by the count cap.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT meta_id, post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key LIKE %s AND post_id IN ( {$placeholders} ) ORDER BY meta_id ASC", ...array_merge( [ $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%' ], $ids ) ), ARRAY_A );
 
 		$out = [];
 		foreach ( (array) $rows as $row ) {
-			$out[ (int) $row['post_id'] ][] = (string) $row['meta_value'];
+			$out[ (int) $row['post_id'] ][] = [
+				'id'   => (int) $row['meta_id'],
+				'path' => (string) $row['meta_value'],
+			];
 		}
 		return $out;
+	}
+
+	/**
+	 * The meta ID of a post's ledger entry for a path, or 0 when it holds none.
+	 *
+	 * @param array<int,array{id:int,path:string}> $entries The post's old paths, from ledger_paths().
+	 * @param string                               $path    Normalized path.
+	 * @return int
+	 */
+	private static function entry_id( array $entries, string $path ): int {
+		foreach ( $entries as $entry ) {
+			if ( $path === $entry['path'] ) {
+				return $entry['id'];
+			}
+		}
+		return 0;
 	}
 
 	/**

@@ -671,4 +671,103 @@ final class PairsTest extends WP_UnitTestCase {
 
 		$this->assertContains( '/company/about/history/ -> /company/story/', $lines );
 	}
+
+	public function test_a_trash_lists_a_subpage_moved_in_and_renamed_at_the_url_it_had_until_the_trash(): void {
+		// Careers lived under Company, moved under about, and was renamed jobs there.
+		$careers = $this->page( 'careers', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $careers,
+				'post_parent' => $this->ids['about'],
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $careers,
+				'post_name' => 'jobs',
+			]
+		);
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+
+		$collected = $this->pairs->collect_change( $change );
+		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $collected ), 'The URL that worked until the trash.' );
+		$this->assertNotContains( '/company/about/careers/ -> /company/jobs/', $this->lines( $collected ), 'The older URL is on the page’s own list.' );
+		$this->assert_the_resolver_agrees( $collected );
+
+		$company = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $company ), 'Company’s alias lists it too.' );
+		$this->assertNotContains( '/company/about/careers/ -> /company/jobs/', $this->lines( $company ) );
+		$this->assert_the_resolver_agrees( $company );
+
+		wp_delete_post( $this->ids['about'], true );
+		$collected = $this->pairs->collect_change( $change );
+		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $collected ), 'Once the trash is emptied too.' );
+		$this->assertNotContains( '/company/about/careers/ -> /company/jobs/', $this->lines( $collected ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_trash_lists_a_subpage_renamed_before_it_moved_in_at_the_url_it_had_until_the_trash(): void {
+		$services = $this->page( 'services', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'        => $services,
+				'post_name' => 'our-services',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $services,
+				'post_parent' => $this->ids['about'],
+			]
+		);
+		wp_trash_post( $this->ids['about'] );
+
+		$collected = $this->last_change();
+
+		$this->assertContains( '/company/about/our-services/ -> /company/our-services/', $this->lines( $collected ) );
+		$this->assertNotContains( '/company/about/services/ -> /company/our-services/', $this->lines( $collected ), 'That URL never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_trash_of_a_top_level_page_lists_a_subpage_at_the_url_it_had_until_the_trash(): void {
+		$services = $this->page( 'services' );
+		$web      = $this->page( 'web-design' );
+		wp_update_post(
+			[
+				'ID'        => $web,
+				'post_name' => 'web',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $web,
+				'post_parent' => $services,
+			]
+		);
+		wp_trash_post( $services );
+
+		$collected = $this->last_change();
+
+		$this->assertSame( [ '/services/web/ -> /web/' ], $this->lines( $collected ), '/services/web-design/ never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_parent_renamed_and_renamed_back_lists_a_subpage_at_the_url_it_had_then(): void {
+		foreach ( [ [ 'team', 'crew' ], [ 'about', 'about-us' ], [ 'about', 'about' ] ] as [ $page, $slug ] ) {
+			wp_update_post(
+				[
+					'ID'        => $this->ids[ $page ],
+					'post_name' => $slug,
+				]
+			);
+		}
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' );
+
+		$this->assertContains( '/company/about-us/crew/ -> /company/about/crew/', $this->lines( $collected ), 'Crew was crew while about was about-us.' );
+		$this->assertContains( '/company/about-us/crew/leadership/ -> /company/about/crew/leadership/', $this->lines( $collected ) );
+		$this->assertNotContains( '/company/about-us/team/ -> /company/about/crew/', $this->lines( $collected ), 'That URL never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
 }
