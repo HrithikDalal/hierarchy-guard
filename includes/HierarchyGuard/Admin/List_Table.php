@@ -42,13 +42,6 @@ final class List_Table {
 	private bool $counted = false;
 
 	/**
-	 * Whether the counts come from core's tree, which holds every row of the view.
-	 *
-	 * @var bool
-	 */
-	private bool $tree = false;
-
-	/**
 	 * Whether the list-table script was asked for.
 	 *
 	 * @var bool
@@ -298,7 +291,7 @@ final class List_Table {
 			$this->counted = true;
 			$this->counts  = $this->screen_counts( $post_type );
 		}
-		if ( ! array_key_exists( $post_id, $this->counts ) && ! $this->tree ) {
+		if ( ! array_key_exists( $post_id, $this->counts ) ) {
 			// A row the screen query did not return, such as a Quick Edit save over Ajax.
 			$this->counts += Subtree::child_counts( [ $post_id ], $post_type, Subtree::count_cap() + 1 );
 		}
@@ -308,12 +301,10 @@ final class List_Table {
 	/**
 	 * Live child counts for the screen's rows, and their parents primed.
 	 *
-	 * In core's indented tree mode the query already holds the ID and parent of
-	 * every page in the view, so children are counted from it without a query.
-	 * Otherwise the rows core shows on this page are counted in one statement,
-	 * and their parents, which the column prints, are loaded in another. A
-	 * search keeps core's tree query but shows one page of it, which is the
-	 * slice counted here.
+	 * In core's indented tree mode the rows core shows on this page are worked
+	 * out from the query's ID and parent rows, without a query, and counted in
+	 * one statement like any other screen. A search keeps core's tree query but
+	 * shows one flat page of it, which is the slice counted here.
 	 *
 	 * @param string $post_type Post type name.
 	 * @return array<int,int>
@@ -326,34 +317,114 @@ final class List_Table {
 		}
 
 		$tree_query = 'id=>parent' === ( $wp_query->query['fields'] ?? '' );
-		if ( $tree_query && empty( $wp_query->query['s'] ) ) {
-			$this->tree = true;
-			$counts     = [];
-			foreach ( $wp_query->posts as $row ) {
-				$parent = is_object( $row ) && isset( $row->post_parent ) ? (int) $row->post_parent : 0;
-				if ( $parent > 0 ) {
-					$counts[ $parent ] = ( $counts[ $parent ] ?? 0 ) + 1;
-				}
+		$per_page   = self::per_page( $post_type );
+		$pagenum    = max( 1, (int) $wp_query->get( 'paged' ) );
+		$rows       = array_values( (array) $wp_query->posts );
+
+		$parent_of = [];
+		foreach ( $rows as $row ) {
+			if ( is_object( $row ) && isset( $row->ID ) ) {
+				$parent_of[ (int) $row->ID ] = isset( $row->post_parent ) ? (int) $row->post_parent : 0;
 			}
-			return $counts;
 		}
 
-		$per_page = self::per_page( $post_type );
-		$start    = $tree_query ? ( max( 1, (int) $wp_query->get( 'paged' ) ) - 1 ) * $per_page : 0;
-		$shown    = array_slice( array_values( (array) $wp_query->posts ), $start, $per_page );
-		$ids      = [];
-		$parents  = [];
-		foreach ( $shown as $row ) {
-			if ( is_object( $row ) && isset( $row->ID ) ) {
-				$ids[] = (int) $row->ID;
-				if ( ! empty( $row->post_parent ) ) {
-					$parents[] = (int) $row->post_parent;
+		if ( $tree_query && empty( $wp_query->query['s'] ) ) {
+			$ids = self::tree_slice( $rows, $pagenum, $per_page );
+		} else {
+			$start = $tree_query ? ( $pagenum - 1 ) * $per_page : 0;
+			$ids   = [];
+			foreach ( array_slice( $rows, $start, $per_page ) as $row ) {
+				if ( is_object( $row ) && isset( $row->ID ) ) {
+					$ids[] = (int) $row->ID;
 				}
+			}
+		}
+
+		$parents = [];
+		foreach ( $ids as $id ) {
+			if ( ! empty( $parent_of[ $id ] ) ) {
+				$parents[] = $parent_of[ $id ];
 			}
 		}
 		_prime_post_caches( array_values( array_unique( $parents ) ), false, false );
 
 		return Subtree::child_counts( $ids, $post_type, Subtree::count_cap() + 1 );
+	}
+
+	/**
+	 * The IDs core shows on one page of its indented tree, worked out from the
+	 * query's ID and parent rows the way WP_Posts_List_Table pages them: each
+	 * top-level page followed by its subtree, the ancestors of a page that
+	 * starts the screen mid-subtree, then pages whose parent the view leaves out.
+	 *
+	 * @param array<int,object> $rows     The tree query's rows, with ID and post_parent.
+	 * @param int               $pagenum  Page number, from 1.
+	 * @param int               $per_page Rows per page.
+	 * @return int[]
+	 */
+	private static function tree_slice( array $rows, int $pagenum, int $per_page ): array {
+		$top      = [];
+		$children = [];
+		foreach ( $rows as $row ) {
+			if ( ! is_object( $row ) || ! isset( $row->ID ) ) {
+				continue;
+			}
+			$id     = (int) $row->ID;
+			$parent = isset( $row->post_parent ) ? (int) $row->post_parent : 0;
+			if ( $parent > 0 && $parent !== $id ) {
+				$children[ $parent ][] = $id;
+			} else {
+				$top[] = $id;
+			}
+		}
+
+		$start = ( $pagenum - 1 ) * $per_page;
+		$end   = $start + $per_page;
+		$count = 0;
+		$shown = [];
+		$walk  = static function ( int $parent_id ) use ( &$walk, &$children, &$count, &$shown, $start, $end ): void {
+			foreach ( $children[ $parent_id ] ?? [] as $id ) {
+				if ( $count >= $end ) {
+					break;
+				}
+				if ( $count === $start ) {
+					// Core prints the ancestors of a page that starts the screen mid-subtree.
+					foreach ( get_post_ancestors( $id ) as $ancestor ) {
+						$shown[] = (int) $ancestor;
+					}
+				}
+				if ( $count >= $start ) {
+					$shown[] = $id;
+				}
+				++$count;
+				$walk( $id );
+			}
+			unset( $children[ $parent_id ] );
+		};
+
+		foreach ( $top as $id ) {
+			if ( $count >= $end ) {
+				break;
+			}
+			if ( $count >= $start ) {
+				$shown[] = $id;
+			}
+			++$count;
+			$walk( $id );
+		}
+		foreach ( $children as $orphans ) {
+			foreach ( $orphans as $id ) {
+				if ( $count >= $end ) {
+					break 2;
+				}
+				if ( $count >= $start ) {
+					$shown[] = $id;
+				}
+				++$count;
+			}
+		}
+
+		return array_values( array_unique( $shown ) );
 	}
 
 	/**

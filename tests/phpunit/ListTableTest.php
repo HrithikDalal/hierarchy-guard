@@ -164,15 +164,82 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertSame( 1, get_num_queries() - $queries );
 	}
 
-	public function test_core_s_tree_mode_is_counted_without_a_query(): void {
+	public function test_core_s_tree_mode_counts_the_shown_rows_in_one_query(): void {
 		$this->screen_rows( array_values( $this->ids ), 'id=>parent' );
+		// Forces the parent priming to query: Company and Team are not in the cache.
+		clean_post_cache( $this->ids['company'] );
+		clean_post_cache( $this->ids['team'] );
 
 		$queries = get_num_queries();
 		$cells   = array_map( [ $this, 'cell' ], [ $this->ids['about'], $this->ids['team'] ] );
 
-		$this->assertSame( 0, get_num_queries() - $queries );
+		// Two statements: the parents of the shown rows (one SELECT), then the live child counts of the shown rows (one UNION ALL).
+		$this->assertSame( 2, get_num_queries() - $queries );
 		$this->assertStringContainsString( 'data-children="2"', $cells[0] );
 		$this->assertStringContainsString( 'data-children="1"', $cells[1] );
+	}
+
+	public function test_a_narrowed_tree_view_counts_the_children_outside_it(): void {
+		// A published page whose only subpage is a draft: the published view holds no draft row.
+		self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'draft',
+				'post_parent' => $this->ids['history'],
+			]
+		);
+		$this->screen_rows( [ $this->ids['company'], $this->ids['about'], $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], 'id=>parent' );
+		$asked = 0;
+		add_action(
+			'hierarchy_guard_list_script',
+			static function () use ( &$asked ): void {
+				++$asked;
+			}
+		);
+
+		$cell = $this->cell( $this->ids['history'] );
+
+		$this->assertStringContainsString( 'data-children="1"', $cell );
+		$this->assertStringContainsString( '1 subpage</a>', $cell );
+		$this->assertSame( 1, $asked, 'The script is asked, so the Trash link opens the dialog.' );
+	}
+
+	public function test_page_two_of_a_tree_counts_only_the_shown_rows_and_their_ancestors(): void {
+		update_user_option( get_current_user_id(), 'edit_page_per_page', 2 );
+		// Page 2 of the tree shows About (printed as the ancestor of History), then History and Team.
+		$this->screen_rows( [ $this->ids['company'], $this->ids['about'], $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], 'id=>parent' );
+		$query = $GLOBALS['wp_query'];
+		$query->set( 'paged', 2 );
+
+		$sql = [];
+		$log = static function ( string $statement ) use ( &$sql ): string {
+			$sql[] = $statement;
+			return $statement;
+		};
+		add_filter( 'query', $log );
+		$cells = [ $this->cell( $this->ids['about'] ), $this->cell( $this->ids['team'] ), $this->cell( $this->ids['history'] ) ];
+		remove_filter( 'query', $log );
+
+		$this->assertStringContainsString( 'data-children="2"', $cells[0] );
+		$this->assertStringContainsString( 'data-children="1"', $cells[1] );
+		$this->assertStringContainsString( 'data-children="0"', $cells[2] );
+
+		$counting = implode( "\n", array_filter( $sql, static fn( string $s ): bool => false !== strpos( $s, 'post_status NOT IN' ) ) );
+		$this->assertCount( 1, array_filter( $sql, static fn( string $s ): bool => false !== strpos( $s, 'post_status NOT IN' ) ), 'One statement counts the screen.' );
+		$this->assertMatchesRegularExpression( '/post_parent = ' . $this->ids['team'] . '\b/', $counting );
+		$this->assertDoesNotMatchRegularExpression( '/post_parent = ' . $this->ids['leadership'] . '\b/', $counting, 'Leadership is past the page.' );
+	}
+
+	public function test_a_trashed_page_whose_subpages_were_trashed_counts_zero(): void {
+		foreach ( [ 'about', 'history', 'team', 'leadership' ] as $slug ) {
+			$this->trash_raw( $this->ids[ $slug ] );
+		}
+		$this->screen_rows( [ $this->ids['about'], $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], 'id=>parent' );
+
+		$cell = $this->cell( $this->ids['about'] );
+
+		$this->assertStringContainsString( 'data-children="0"', $cell );
+		$this->assertStringNotContainsString( 'View the 2 subpages', $cell );
 	}
 
 	public function test_rows_with_subpages_get_view_subpages(): void {
