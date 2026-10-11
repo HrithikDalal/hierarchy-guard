@@ -63,7 +63,7 @@ final class Change_Log {
 	 * @param int                 $user_id   User whose change it is. Nothing is stored for 0.
 	 * @param string              $action    What happened: trash or restore.
 	 * @param string              $post_type Post type of the root.
-	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, counts, kept_ids, urls, job.
+	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, ids, urls, job.
 	 * @param int[]               $ids       Affected post IDs.
 	 * @return string The change ID, or an empty string when nothing was stored.
 	 */
@@ -128,6 +128,7 @@ final class Change_Log {
 				[
 					'counts'   => $counts,
 					'kept_ids' => $kept_ids,
+					'ids'      => $ids,
 					'job'      => $running,
 				]
 			)
@@ -210,8 +211,11 @@ final class Change_Log {
 			'to'       => (int) ( $entry['to'] ?? 0 ),
 			'policy'   => (string) ( $entry['policy'] ?? '' ),
 			'fallback' => (bool) ( $entry['fallback'] ?? false ),
+			'path'     => (string) ( $entry['path'] ?? '' ),
 			'counts'   => $counts,
 			'kept_ids' => array_slice( array_map( 'intval', (array) ( $entry['kept_ids'] ?? [] ) ), 0, self::MAX_KEPT ),
+			// This root's own affected IDs, so its redirects can be listed after it is deleted for good.
+			'ids'      => array_slice( array_map( 'intval', (array) ( $entry['ids'] ?? [] ) ), 0, self::MAX_IDS ),
 			'urls'     => [
 				'count'  => (int) ( $urls['count'] ?? 0 ),
 				'capped' => (bool) ( $urls['capped'] ?? false ),

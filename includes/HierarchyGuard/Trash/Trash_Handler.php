@@ -525,8 +525,11 @@ final class Trash_Handler {
 				'to'       => (int) $job['to'],
 				'policy'   => (string) $job['policy'],
 				'fallback' => (bool) $job['fallback'],
+				// The root's own old path: the redirects modal rebuilds the pairs from it.
+				'path'     => (string) ( $job['paths'][0] ?? '' ),
 				'counts'   => (array) $job['counts'],
 				'kept_ids' => (array) $job['kept_ids'],
+				'ids'      => (array) $job['ids'],
 				'urls'     => (array) $job['urls'],
 				'job'      => $running,
 			],
