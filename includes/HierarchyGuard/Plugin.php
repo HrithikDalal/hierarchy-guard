@@ -79,6 +79,7 @@ final class Plugin {
 		( new Admin\Trash_Choice() )->register();
 		( new REST\Changes_Controller( $log, $pairs ) )->register();
 		( new Admin\Meta_Box( $overview ) )->register();
+		( new Admin\Assets( $providers ) )->register();
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'hierarchy-guard', new Batch\CLI_Command( $queue, $processor ) );
