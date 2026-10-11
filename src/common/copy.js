@@ -620,6 +620,26 @@ export function viewRedirectsLabel( count, capped ) {
 }
 
 /**
+ * What handles the redirects of a page's pairs: the server redirects them
+ * whenever it serves the type, even when the page itself is not viewable,
+ * since the pairs list only pages it redirects to. A page's own old URL
+ * follows the page's own `serving` instead.
+ *
+ * @param {{serving: boolean, pairs_served: (boolean|undefined), provider: (Object|null)}} redirects The page's redirects from the REST route, or the site's.
+ * @return {{serving: boolean, provider: (Object|null)}} Redirects for the pairs.
+ */
+export function pairsRedirects( redirects ) {
+	return {
+		serving: Boolean(
+			undefined !== redirects.pairs_served
+				? redirects.pairs_served
+				: redirects.serving
+		),
+		provider: redirects.provider || null,
+	};
+}
+
+/**
  * What an old URL's redirect looks like now, by what handles redirects.
  *
  * @param {boolean}     serving  Whether built-in redirects reach this page.

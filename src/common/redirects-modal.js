@@ -16,6 +16,7 @@ import config from './config';
 import {
 	copiedSentence,
 	formatCount,
+	pairsRedirects,
 	pairsText,
 	unresolvedSentence,
 } from './copy';
@@ -43,11 +44,11 @@ function rangeLabel( data ) {
 /**
  * The modal.
  *
- * @param {Object}                                      props           Props.
- * @param {Object}                                      props.source    Either { change } or { post, from }.
- * @param {{serving: boolean, provider: (Object|null)}} props.redirects Whether the server redirects to the page, and the redirect plugin; the site's by default.
- * @param {boolean}                                     props.editor    Whether the block editor shows it, which says "trash" in lower case.
- * @param {() => void}                                  props.onClose   Closes the modal.
+ * @param {Object}     props           Props.
+ * @param {Object}     props.source    Either { change } or { post, from }.
+ * @param {Object}     props.redirects The page's redirects from the REST route: `serving`, `pairs_served` and `provider`; the site's by default.
+ * @param {boolean}    props.editor    Whether the block editor shows it, which says "trash" in lower case.
+ * @param {() => void} props.onClose   Closes the modal.
  * @return {Element} Modal.
  */
 export default function RedirectsModal( {
@@ -126,7 +127,8 @@ export default function RedirectsModal( {
 		}
 	}, [ copy.text ] );
 
-	const { serving, provider } = redirects;
+	// The modal lists the pairs, which the server may redirect even when it does not redirect to the page itself.
+	const { serving, provider } = pairsRedirects( redirects );
 	const layout = provider ? provider.csv : 'generic';
 	const name = provider && provider.name ? provider.name : '';
 

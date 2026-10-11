@@ -198,10 +198,14 @@ describe( 'a row title', () => {
 
 	it( 'reads the raw title core prints for Quick Edit first', () => {
 		const doc = ( nodes ) => ( {
-			querySelector: ( selector ) =>
-				undefined !== nodes[ selector ]
-					? { textContent: nodes[ selector ] }
-					: null,
+			querySelector: ( selector ) => {
+				if ( undefined === nodes[ selector ] ) {
+					return null;
+				}
+				return selector.startsWith( '#inline_' )
+					? raw( [ nodes[ selector ] ] )
+					: { textContent: nodes[ selector ] };
+			},
 		} );
 		expect(
 			rowTitle(
@@ -216,15 +220,92 @@ describe( 'a row title', () => {
 			rowTitle( doc( { '#post-7 .row-title': '— Team' } ), 7 ),
 			'Without the Quick Edit data, the link’s text without the pad.'
 		).toBe( 'Team' );
-		expect(
-			rowTitle(
-				doc( {
-					'#inline_7 .post_title': '',
-					'#post-7 .row-title': '(no title)',
-				} ),
-				7
-			)
-		).toBe( '(no title)' );
 		expect( rowTitle( doc( {} ), 7 ) ).toBe( '' );
 	} );
+
+	it( 'says an untitled page has no title, whatever the link adds', () => {
+		const doc = {
+			querySelector: ( selector ) =>
+				( {
+					'#inline_7 .post_title': raw( [] ),
+					// WordPress 7.1 adds the excerpt of an untitled page to its link.
+					'#post-7 .row-title': {
+						textContent:
+							'(no title) Body words of the untitled page.',
+					},
+				} )[ selector ] || null,
+		};
+		expect( rowTitle( doc, 7 ) ).toBe( '(no title)' );
+	} );
+
+	it( 'reads the raw title as text, with its emoji', () => {
+		// The raw title is printed escaped, so a stored entity shows as text.
+		const entities = { '&amp;': '&', '&lt;': '<', '&gt;': '>' };
+		globalThis.document = {
+			implementation: {
+				createHTMLDocument: () => ( {
+					createElement: () => {
+						const area = { textContent: '' };
+						Object.defineProperty( area, 'innerHTML', {
+							set( html ) {
+								area.textContent = html.replace(
+									/&(?:amp|lt|gt);/g,
+									( match ) => entities[ match ]
+								);
+							},
+						} );
+						return area;
+					},
+				} ),
+			},
+		};
+		try {
+			const doc = ( parts ) => ( {
+				querySelector: ( selector ) =>
+					'#inline_7 .post_title' === selector ? raw( parts ) : null,
+			} );
+			expect( rowTitle( doc( [ 'Tom &amp; Jerry' ] ), 7 ) ).toBe(
+				'Tom & Jerry'
+			);
+			expect(
+				rowTitle( doc( [ { alt: '🇩🇪' }, ' Germany' ] ), 7 ),
+				'An emoji wp-emoji turned into an image reads as its alt.'
+			).toBe( '🇩🇪 Germany' );
+		} finally {
+			delete globalThis.document;
+		}
+	} );
 } );
+
+/**
+ * A stand-in for the raw title node: text, and emoji images as `{ alt }`.
+ *
+ * @param {Array<string|Object>} parts The node's text and images.
+ * @return {Object} Node.
+ */
+function raw( parts ) {
+	const node = {
+		parts: [ ...parts ],
+		get textContent() {
+			return this.parts
+				.map( ( part ) => ( 'string' === typeof part ? part : '' ) )
+				.join( '' );
+		},
+		cloneNode() {
+			return raw( this.parts );
+		},
+		querySelectorAll( selector ) {
+			return 'img' === selector
+				? this.parts
+						.filter( ( part ) => 'string' !== typeof part )
+						.map( ( img ) => ( {
+							alt: img.alt,
+							replaceWith: ( text ) => {
+								this.parts[ this.parts.indexOf( img ) ] = text;
+							},
+						} ) )
+				: [];
+		},
+	};
+	return node;
+}

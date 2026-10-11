@@ -18,6 +18,7 @@ import {
 	oldUrlState,
 	optionDescription,
 	optionLabel,
+	pairsRedirects,
 	pairsText,
 	previewError,
 	quickEditWarning,
@@ -363,5 +364,37 @@ describe( 'warnings and outcomes', () => {
 				{ old: '/a/c/', new: '/b/c/' },
 			] )
 		).toBe( '/a/ /b/\n/a/c/ /b/c/' );
+	} );
+} );
+
+describe( 'what redirects the pairs', () => {
+	it( 'follows the pairs, not the page, when the page itself is not redirected to', () => {
+		const redirects = pairsRedirects( {
+			serving: false,
+			pairs_served: true,
+			provider: null,
+		} );
+		expect( redirects.serving ).toBe( true );
+		expect( changedStatus( redirects.serving, redirects.provider ) ).toBe(
+			'success'
+		);
+		expect(
+			changedSentence( 3, false, redirects.serving, redirects.provider )
+		).toBe( '3 old URLs now redirect to their new pages.' );
+	} );
+
+	it( 'keeps the provider, and falls back to the page’s answer', () => {
+		const provider = { name: 'Redirection', csv: 'redirection' };
+		expect(
+			pairsRedirects( {
+				serving: false,
+				pairs_served: false,
+				provider,
+			} )
+		).toEqual( { serving: false, provider } );
+		expect( pairsRedirects( { serving: true, provider: null } ) ).toEqual( {
+			serving: true,
+			provider: null,
+		} );
 	} );
 } );

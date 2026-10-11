@@ -24,6 +24,7 @@ import config from '../common/config';
 import {
 	changedSentence,
 	changedStatus,
+	pairsRedirects,
 	countsLine,
 	oldUrlState,
 	saveWarning,
@@ -313,7 +314,10 @@ export default function HierarchyPlugin() {
 					if ( ! pairs.total ) {
 						return;
 					}
-					const { serving, provider } = result.redirects;
+					// The notice is about the pairs, which the server may redirect even when it does not redirect to the page itself.
+					const { serving, provider } = pairsRedirects(
+						result.redirects
+					);
 					const actions = [];
 					if ( ! serving ) {
 						actions.push( {

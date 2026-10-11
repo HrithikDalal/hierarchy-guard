@@ -2,6 +2,8 @@
  * What the trash dialog sends and shows, kept out of the component so it can
  * be tested.
  */
+import { decodeEntities } from '@wordpress/html-entities';
+import { __ } from '@wordpress/i18n';
 import config from '../common/config';
 import { bulkSentence, initialSentence, trashSentence } from '../common/copy';
 
@@ -146,7 +148,10 @@ export function plainTitle( text ) {
 
 /**
  * A row's title. Core prints the raw title in the row's Quick Edit data for
- * anyone who may edit the page; otherwise the title link's text is read.
+ * anyone who may edit the page, escaped once more, so a stored entity reads
+ * as text; an emoji wp-emoji turned into an image reads as its alt, as in
+ * core's Quick Edit. An empty raw title means the page has none. Without the
+ * Quick Edit data the title link's text is read.
  *
  * @param {Document} doc The document.
  * @param {number}   id  Post ID.
@@ -154,8 +159,13 @@ export function plainTitle( text ) {
  */
 export function rowTitle( doc, id ) {
 	const raw = doc.querySelector( `#inline_${ id } .post_title` );
-	if ( raw && '' !== raw.textContent.trim() ) {
-		return raw.textContent.trim();
+	if ( raw ) {
+		const node = raw.cloneNode( true );
+		node.querySelectorAll( 'img' ).forEach( ( img ) =>
+			img.replaceWith( img.alt )
+		);
+		const title = decodeEntities( node.textContent.trim() );
+		return '' !== title ? title : __( '(no title)', 'hierarchy-guard' );
 	}
 	const link = doc.querySelector( `#post-${ id } .row-title` );
 	return link ? plainTitle( link.textContent ) : '';

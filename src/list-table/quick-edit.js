@@ -9,6 +9,7 @@ import config from '../common/config';
 import {
 	changedSentence,
 	changedStatus,
+	pairsRedirects,
 	quickEditWarning,
 	viewRedirectsLabel,
 } from '../common/copy';
@@ -37,10 +38,14 @@ function makeDismissible() {
  * What handles redirects for the site, used when the page's own answer could
  * not be loaded.
  *
- * @return {{serving: boolean, provider: Object|null}} Redirects.
+ * @return {{serving: boolean, pairs_served: boolean, provider: Object|null}} Redirects.
  */
 function siteRedirects() {
-	return { serving: config.serving, provider: config.provider };
+	return {
+		serving: config.serving,
+		pairs_served: config.serving,
+		provider: config.provider,
+	};
 }
 
 /**
@@ -125,7 +130,8 @@ function printFailure( source, redirects = siteRedirects() ) {
  */
 function announce( postId, from, redirects ) {
 	const source = { post: postId, from };
-	const { serving, provider } = redirects;
+	// The notice is about the pairs, which the server may redirect even when it does not redirect to the page itself.
+	const { serving, provider } = pairsRedirects( redirects );
 	fetchPairs( source, 1, 1 )
 		.then( ( pairs ) => {
 			if ( ! pairs.total ) {
