@@ -16,8 +16,10 @@ use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Live_View;
 use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Redirects\Resolver;
+use HierarchyGuard\Redirects\Rules;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
@@ -562,51 +564,18 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The resolver's rounds for a path, as Resolver::rewrite_once() takes them:
-	 * the prefix it rewrote and the post that holds it, 0 for the root list.
-	 * Only used to name the engine class of a served URL no list has.
+	 * The resolver's rounds for a path, as Rules::rewrite_once() takes them on
+	 * the live ledger: the prefix it rewrote and the post that holds it, 0 for
+	 * the root list. Only used to name the engine class of a served URL no list has.
 	 *
 	 * @param string $path Normalized path.
 	 * @return array<int,array{0:string,1:int,2:string}> Prefix, holder and the path it was rewritten to.
 	 */
 	private function rounds( string $path ): array {
-		$ledger = new Ledger();
-		$out    = [];
-		$seen   = [];
-		for ( $round = 0; $round < Resolver::MAX_ROUNDS && '' !== $path && ! isset( $seen[ $path ] ); $round++ ) {
-			$seen[ $path ] = true;
-			$segments      = explode( '/', $path );
-			$candidate     = null;
-			for ( $length = count( $segments ); $length >= 1 && null === $candidate; $length-- ) {
-				$prefix = implode( '/', array_slice( $segments, 0, $length ) );
-				$hit    = $ledger->find( 'page', $prefix );
-				if ( null === $hit ) {
-					continue;
-				}
-				$base = '';
-				if ( $hit > 0 ) {
-					$post = get_post( $hit );
-					if ( ! $post instanceof WP_Post || 'trash' === $post->post_status || Paths::has_trashed_segment( Paths::uri( $post ) ) ) {
-						continue;
-					}
-					if ( count( $segments ) === $length && Ledger::held_in_trash( 'page', $prefix ) ) {
-						return $out;
-					}
-					$base = Paths::uri( $post );
-				}
-				$candidate = trim( $base . '/' . implode( '/', array_slice( $segments, $length ) ), '/' );
-				$out[]     = [ $prefix, $hit, $candidate ];
-			}
-			if ( null === $candidate ) {
-				break;
-			}
-			$target = get_page_by_path( $candidate, OBJECT, [ 'page' ] );
-			if ( $target instanceof WP_Post && is_post_publicly_viewable( $target ) && ! Paths::has_trashed_segment( Paths::uri( $target ) ) ) {
-				break;
-			}
-			$path = $candidate;
-		}
-		return $out;
+		$trace     = [];
+		$temporary = false;
+		Rules::resolve( new Live_View( new Ledger() ), 'page', $path, $temporary, $trace );
+		return $trace;
 	}
 
 	/**

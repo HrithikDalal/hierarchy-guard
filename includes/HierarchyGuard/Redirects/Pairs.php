@@ -14,6 +14,7 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Markers;
+use OutOfBoundsException;
 use WP_Post;
 
 /**
@@ -1517,11 +1518,13 @@ final class Pairs {
 	}
 
 	/**
-	 * The page the resolver redirects each path to, or 0: a published page at
-	 * the path is reached first, so it is no redirect. The same rounds as
-	 * Resolver::resolve() for every path at once: per round one ledger query
-	 * for the prefixes not read yet, one get_page_by_path() lookup for every
-	 * candidate, and the posts found primed a level at a time.
+	 * The page the server redirects each path to, or 0, for every path at once:
+	 * Rules::serves() on facts read ahead. Each run of the rules that asks for
+	 * a fact not read yet stops; the facts every run asked for are read in one
+	 * query, ledger facts or path lookups, and the runs start again. The paths
+	 * go round by round together, so each round costs one ledger query, one
+	 * get_page_by_path() lookup for every rewritten path, the request lookups
+	 * with the first, and the posts found primed a level at a time.
 	 *
 	 * @param string[]                                $paths     Normalized old paths, at most the count cap.
 	 * @param string                                  $post_type Post type name.
@@ -1529,134 +1532,63 @@ final class Pairs {
 	 * @return array<string,int> Page ID by path, 0 for none.
 	 */
 	private static function served( array $paths, string $post_type, array &$facts ): array {
+		$view    = new Prefetched_View( $post_type, $facts );
 		$out     = [];
 		$pending = [];
-		$seen    = [];
-		$roots   = null;
 		foreach ( $paths as $path ) {
 			$pending[ (string) $path ] = (string) $path;
 		}
 
-		for ( $round = 0; [] !== $pending && $round <= Resolver::MAX_ROUNDS; $round++ ) {
-			$need = [];
-			foreach ( $pending as $start => $path ) {
-				if ( Resolver::MAX_ROUNDS === $round || '' === $path || isset( $seen[ $start ][ $path ] ) ) {
-					$out[ $start ] = 0;
-					unset( $pending[ $start ] );
-					continue;
-				}
-				$seen[ $start ][ $path ] = true;
-				foreach ( self::prefixes( [ $path ] ) as $prefix ) {
-					if ( ! isset( $facts[ $prefix ] ) ) {
-						$need[ $prefix ] = true;
-					}
-				}
+		for ( $wave = 0; [] !== $pending && $wave < 2 * ( Rules::MAX_ROUNDS + 1 ); $wave++ ) {
+			$needs = $view->take_needs();
+			if ( 0 === $wave ) {
+				$needs['facts'] = array_values( array_filter( self::prefixes( array_values( $pending ) ), static fn( string $prefix ): bool => ! isset( $facts[ $prefix ] ) ) );
 			}
-			if ( [] !== $need ) {
-				$facts += self::ledger_facts( array_map( 'strval', array_keys( $need ) ), $post_type );
+			if ( [] !== $needs['facts'] ) {
+				$facts += self::ledger_facts( $needs['facts'], $post_type );
 			}
-
+			$found = [];
+			if ( [] !== $needs['requests'] || [] !== $needs['candidates'] ) {
+				[ $at, $there ] = self::lookup( $needs['requests'], $needs['candidates'], $post_type );
+				$view->add_lookups( $needs['requests'], $at, $needs['candidates'], $there );
+				$found = array_merge( array_values( $at ), array_values( $there ) );
+			}
+			// The live posts that hold a prefix of the path each run rewrites next, and the posts found, with the pages above them.
 			$live = [];
-			foreach ( $pending as $path ) {
-				foreach ( self::prefixes( [ $path ] ) as $prefix ) {
-					if ( $facts[ $prefix ]['live'] > 0 ) {
+			foreach ( $pending as $current ) {
+				foreach ( self::prefixes( [ $current ] ) as $prefix ) {
+					if ( ( $facts[ $prefix ]['live'] ?? 0 ) > 0 ) {
 						$live[] = $facts[ $prefix ]['live'];
 					}
 				}
 			}
-			self::prime_with_ancestors( array_values( array_unique( $live ) ) );
+			self::prime_with_ancestors( array_values( array_unique( array_merge( $live, $found ) ) ) );
 
-			$candidates = [];
-			foreach ( $pending as $start => $path ) {
-				$candidate = self::rewrite( $path, $facts, $post_type, $roots );
-				if ( null === $candidate ) {
-					$out[ $start ] = 0;
-					unset( $pending[ $start ] );
-					continue;
+			$next = [];
+			foreach ( array_keys( $pending ) as $start ) {
+				$start = (string) $start;
+				$trace = [];
+				$view->begin();
+				try {
+					$target = Rules::serves( $view, $post_type, $start, $trace );
+					if ( null === $target || ! $view->guessed() ) {
+						$out[ $start ] = null !== $target ? (int) $target->ID : 0;
+						continue;
+					}
+				} catch ( OutOfBoundsException $unread ) {
+					// The facts it asked for are read next; it runs again then.
+					unset( $unread );
 				}
-				$candidates[ $start ] = $candidate;
+				$view->keep();
+				$next[ $start ] = [] !== $trace ? (string) $trace[ count( $trace ) - 1 ][2] : $start;
 			}
-
-			// The first round also looks the old paths up as a request: only a 404 reaches the resolver.
-			[ $at, $there ] = self::lookup( 0 === $round ? array_keys( $candidates ) : [], array_values( $candidates ), $post_type );
-			self::prime_with_ancestors( array_values( array_unique( array_merge( array_values( $at ), array_values( $there ) ) ) ) );
-			foreach ( $candidates as $start => $candidate ) {
-				if ( 0 === $round && isset( $at[ $start ] ) && is_post_publicly_viewable( $at[ $start ] ) ) {
-					$out[ $start ] = 0;
-					unset( $pending[ $start ] );
-					continue;
-				}
-				$target = $there[ $candidate ] ?? 0;
-				if ( self::reachable( $target, $post_type ) ) {
-					$out[ $start ] = $target;
-					unset( $pending[ $start ] );
-					continue;
-				}
-				$pending[ $start ] = $candidate;
-			}
+			$pending = $next;
 		}
 
+		foreach ( array_keys( $pending ) as $start ) {
+			$out[ (string) $start ] = 0;
+		}
 		return $out;
-	}
-
-	/**
-	 * Resolver::rewrite_once() on facts already read: the longest prefix the
-	 * ledger knows, through a holder that is not under the trash, replaced
-	 * with where it leads now. An exact old path a page in the trash holds
-	 * leads nowhere.
-	 *
-	 * @param string                                  $path      Normalized path.
-	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts for every prefix of the path.
-	 * @param string                                  $post_type Post type name.
-	 * @param array<string,true>|null                 $roots     The root list as a set, read once when first needed.
-	 * @return string|null The rewritten path, or null when nothing leads on.
-	 */
-	private static function rewrite( string $path, array $facts, string $post_type, ?array &$roots ): ?string {
-		$segments = explode( '/', $path );
-		for ( $length = count( $segments ); $length >= 1; $length-- ) {
-			$prefix = implode( '/', array_slice( $segments, 0, $length ) );
-			$fact   = $facts[ $prefix ] ?? [
-				'live' => 0,
-				'held' => false,
-			];
-			$base   = '';
-			if ( $fact['live'] > 0 ) {
-				$holder = get_post( $fact['live'] );
-				if ( ! $holder instanceof WP_Post || 'trash' === $holder->post_status ) {
-					continue;
-				}
-				$base = Paths::uri( $holder );
-				if ( Paths::has_trashed_segment( $base ) ) {
-					continue;
-				}
-				if ( count( $segments ) === $length && $fact['held'] ) {
-					return null;
-				}
-			} else {
-				if ( null === $roots ) {
-					$list  = get_option( Ledger::ROOT_OPTION, [] );
-					$roots = array_fill_keys( array_map( 'strval', (array) ( is_array( $list ) ? ( $list[ $post_type ] ?? [] ) : [] ) ), true );
-				}
-				if ( ! isset( $roots[ $prefix ] ) ) {
-					continue;
-				}
-			}
-			return trim( $base . '/' . implode( '/', array_slice( $segments, $length ) ), '/' );
-		}
-		return null;
-	}
-
-	/**
-	 * Whether a post is one the resolver redirects to: of the type, viewable
-	 * by anyone, and not under the trash.
-	 *
-	 * @param int    $post_id   Post ID, 0 for none.
-	 * @param string $post_type Post type name.
-	 * @return bool
-	 */
-	private static function reachable( int $post_id, string $post_type ): bool {
-		$post = $post_id > 0 ? get_post( $post_id ) : null;
-		return $post instanceof WP_Post && $post_type === $post->post_type && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) );
 	}
 
 	/**

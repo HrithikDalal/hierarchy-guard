@@ -15,18 +15,18 @@ use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
- * Longest-prefix resolution with a bounded number of rewrite rounds.
+ * Resolves an old path through the shared rules, on the live ledger.
  */
 final class Resolver {
 
-	public const MAX_ROUNDS = 5;
+	public const MAX_ROUNDS = Rules::MAX_ROUNDS;
 
 	/**
-	 * Ledger.
+	 * The ledger and core, read live.
 	 *
-	 * @var Ledger
+	 * @var Live_View
 	 */
-	private Ledger $ledger;
+	private Live_View $view;
 
 	/**
 	 * Constructor.
@@ -34,7 +34,7 @@ final class Resolver {
 	 * @param Ledger $ledger Ledger.
 	 */
 	public function __construct( Ledger $ledger ) {
-		$this->ledger = $ledger;
+		$this->view = new Live_View( $ledger );
 	}
 
 	/**
@@ -47,86 +47,15 @@ final class Resolver {
 	 */
 	public function resolve( string $post_type, string $path, ?bool &$temporary = null ): ?WP_Post {
 		$temporary = false;
-		$path      = Paths::normalize( $path );
-		$seen      = [];
-
-		for ( $round = 0; $round < self::MAX_ROUNDS; $round++ ) {
-			if ( '' === $path || isset( $seen[ $path ] ) ) {
-				return null;
-			}
-			$seen[ $path ] = true;
-
-			$candidate = $this->rewrite_once( $post_type, $path, $temporary );
-			if ( null === $candidate ) {
-				return null;
-			}
-
-			$target = get_page_by_path( $candidate, OBJECT, [ $post_type ] );
-			if (
-				$target instanceof WP_Post
-				&& $target->post_type === $post_type
-				&& is_post_publicly_viewable( $target )
-				&& ! Paths::has_trashed_segment( Paths::uri( $target ) )
-			) {
-				// The target, or a page above it, sits where the trash flow moved it: a restore moves it back.
-				foreach ( array_merge( [ $target->ID ], get_post_ancestors( $target ) ) as $id ) {
-					$temporary = $temporary || Markers::has_moved_row( (int) $id );
-				}
-				return $target;
-			}
-
-			$path = $candidate;
+		$target    = Rules::resolve( $this->view, $post_type, Paths::normalize( $path ), $temporary );
+		if ( null === $target ) {
+			return null;
 		}
 
-		return null;
-	}
-
-	/**
-	 * Replaces the longest prefix the ledger knows with the location it now maps to.
-	 * Ledger hits on trashed posts, or on posts under a trashed ancestor, are
-	 * skipped so a shorter prefix can match. An exact old parent path whose page
-	 * is only in the trash resolves to nothing: a 301 to the grandparent would
-	 * stay in browsers after the page is restored.
-	 *
-	 * @param string $post_type Post type name.
-	 * @param string $path      Normalized path.
-	 * @param bool   $temporary Set to true when the prefix used is held by a page in the trash.
-	 * @return string|null The rewritten path, or null when no prefix matched.
-	 */
-	private function rewrite_once( string $post_type, string $path, bool &$temporary ): ?string {
-		$segments = explode( '/', $path );
-
-		for ( $length = count( $segments ); $length >= 1; $length-- ) {
-			$prefix = implode( '/', array_slice( $segments, 0, $length ) );
-			$hit    = $this->ledger->find( $post_type, $prefix );
-			if ( null === $hit ) {
-				continue;
-			}
-
-			$base = '';
-			if ( $hit > 0 ) {
-				$post = get_post( $hit );
-				if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
-					continue;
-				}
-				$base = Paths::uri( $post );
-				if ( Paths::has_trashed_segment( $base ) ) {
-					continue;
-				}
-				if ( count( $segments ) === $length && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
-					return null;
-				}
-			}
-
-			$remainder = implode( '/', array_slice( $segments, $length ) );
-
-			if ( ! $temporary && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
-				$temporary = true;
-			}
-
-			return trim( $base . '/' . $remainder, '/' );
+		// The target, or a page above it, sits where the trash flow moved it: a restore moves it back.
+		foreach ( array_merge( [ $target->ID ], get_post_ancestors( $target ) ) as $id ) {
+			$temporary = $temporary || Markers::has_moved_row( (int) $id );
 		}
-
-		return null;
+		return $target;
 	}
 }
