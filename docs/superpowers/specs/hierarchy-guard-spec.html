@@ -179,7 +179,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <h1>Hierarchy Guard</h1>
   <p class="lede">Shows the parent and child structure of pages inside wp-admin, warns before a slug change, re-parenting, or trash breaks a subtree, and makes sure every old URL has somewhere to go.</p>
   <div class="meta">
-    <span>Status <b>Plans 1 and 2 built; plan 3 (admin UI) in progress</b></span>
+    <span>Status <b>Plans 1 and 2 built; plan 3 (admin UI) in review</b></span>
     <span>Date <b>11 October 2026</b></span>
     <span>Slug <b>hierarchy-guard</b></span>
     <span>Requires <b>WordPress 6.6 · PHP 8.0</b></span>
@@ -259,7 +259,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <div class="prose"><p>Mockups below use the default "Modern" admin colour scheme. The real plugin sets no colours: React surfaces come from <code>@wordpress/components</code> and PHP surfaces use core admin classes, so they follow whatever scheme and tokens the site has.</p></div>
 
   <h3>Editor sidebar panel</h3>
-  <div class="prose"><p>A "Hierarchy" document settings panel answers the two questions an editor has before changing anything: what is above this page, and what is underneath it. A plugin panel starts closed and renders nothing inside it, so nothing an editor must see lives only there. The warning appears under the page's Summary, right below the Parent row, the moment the slug or parent differs from the saved value on a published page with subpages. After a save that changed URLs, an editor notice says how many old URLs changed and offers View redirects. The panel loads its data only when it is open or such an edit is made. Parent pages are listed when the page sits two or more levels deep, since the Summary already names the parent. Status is shown only when it isn't Published. The classic editor gets the same data as a read-only meta box, with a CSV download for each old URL, plus a plain confirmation when the form is submitted with a changed slug or parent.</p></div>
+  <div class="prose"><p>A "Hierarchy" document settings panel answers the two questions an editor has before changing anything: what is above this page, and what is underneath it. A plugin panel starts closed and renders nothing inside it, so nothing an editor must see lives only there. The warning appears under the page's Summary, right below the Parent row, the moment the slug or parent differs from the saved value on a published page with subpages. After a save that changed URLs, an editor notice says how many old URLs changed and offers View redirects for that change. The panel loads its data only when it is open or such an edit is made. Parent pages are listed when the page sits two or more levels deep, since the Summary already names the parent. Status is shown only when it isn't Published. The classic editor gets the same data as a read-only meta box, a plain confirmation when the form is submitted with a changed slug or parent, and after such a save a notice at the top of the edit screen with the redirects that save needs. The panel and the box show where a page is now, not its past URLs: the redirects a change needs are offered when it happens.</p></div>
   <div class="mock" style="max-width:380px">
     <div class="mock-bar">Block editor · Settings sidebar · Page tab</div>
     <div class="wp w-side">
@@ -279,7 +279,6 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
           </div>
           <a class="w-link" style="display:inline-block;margin-top:8px">View all 12 in the list</a>
         </div>
-        <div><div class="w-lbl">Old URLs</div><div><code>/about-us/</code><div class="w-muted">Not redirected · <a>View redirects</a></div></div></div>
         <div class="w-muted w-small">Trashing this page moves its 4 subpages under “Company”. <a>Change this in Settings</a></div>
       </div>
     </div>
@@ -591,7 +590,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
     <thead><tr><th>Redirect plugin detected</th><th>Built-in serving</th><th>Message after a URL change</th></tr></thead>
     <tbody>
       <tr><td>Yes</td><td>Off (default)</td><td>Info notice: "12 URLs changed. Add their redirects in Redirection." with View redirects (12). The modal offers Open Redirection and Download CSV for Redirection.</td></tr>
-      <tr><td>Yes</td><td>On</td><td>Success notice: "12 old URLs now redirect to their new pages." Pairs still available for reference.</td></tr>
+      <tr><td>Yes</td><td>On</td><td>Success notice: "12 old URLs now redirect to their new pages."</td></tr>
       <tr><td>No</td><td>Off (default)</td><td>Warning notice: "12 old URLs now show “Page not found”." with Set up redirects (for administrators) and View redirects (12). Once the site has an old URL, a one-time dismissible nudge appears on the Pages screen, never beside this notice.</td></tr>
       <tr><td>No</td><td>On</td><td>Success notice: "12 old URLs now redirect to their new pages."</td></tr>
     </tbody>
@@ -617,7 +616,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}</code></td><td>Type, root, target parent, post type, triggering user, cursor or depth-first stack, counts, total, up to 200 affected IDs, created and touched times</td><td>One background job per root, for work above the inline budget. Replaced by a newer job for the same root and deleted on completion.</td></tr>
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}_next</code></td><td>A job, in the same shape</td><td>Left by a trash or restore that finds a batch for the same root running in another process. That process adopts it after its current step, so the newer action wins.</td></tr>
       <tr><td>Option row, not autoloaded</td><td><code>hierarchy_guard_lock_{root_id}</code></td><td>Expiry time</td><td>An atomic lock written with an insert that fails when the row exists, so two runs never step the same root's job.</td></tr>
-      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Change ID, action, post type, one entry per root (new parent, policy, fallback, the root's old path, counts, up to 20 kept IDs, up to 200 of its own affected IDs (all reparent roots together at most the count cap; later roots are trimmed first), each moved subpage’s slug before the move (up to 200), URL count, whether a job is still running), summed counts, up to 200 affected IDs, created and updated times, whether it was shown</td><td>One change per request, so a bulk trash of three parents is one notice. Background batches keep it current. Feeds the outcome notices and the redirects modal for thirty minutes; a root's own IDs keep its redirects listable after it is deleted for good. Titles, URLs and pairs are never stored; they are computed when shown.</td></tr>
+      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Change ID, action (trash, restore, or a save that changed the page's URL), post type, one entry per root (new parent, policy, fallback, the root's old path, counts, up to 20 kept IDs, up to 200 of its own affected IDs (all reparent roots together at most the count cap; later roots are trimmed first), each moved subpage’s slug before the move (up to 200), URL count, whether a job is still running), summed counts, up to 200 affected IDs, created and updated times, whether it was shown</td><td>One change per request, so a bulk trash of three parents is one notice. Background batches keep it current. Feeds the outcome notices and the redirects modal for thirty minutes; a root's own IDs keep its redirects listable after it is deleted for good. Titles, URLs and pairs are never stored; they are computed when shown.</td></tr>
     </tbody>
   </table>
   </div>
@@ -632,17 +631,15 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   "children_total": 4,
   "has_more":    false,
   "descendants": { "count": 12, "capped": false },
-  "old_paths":   [ { "path": "about-us", "url": "/about-us/" } ],
+  "latest_change": "{change_id}",
   "redirects":   { "serving": false, "provider": { "name": "Redirection", "url": "…", "csv": "redirection" } },
   "trash_policy": "reparent",
   "trash_to":    { "id": 7, "title": "Company", "edit_link": "…" },
   "list_url":    "…/edit.php?post_type=page&amp;hierarchy_guard_under=42"
 }
 
-GET /wp-json/hierarchy-guard/v1/posts/42/pairs?from=about-us&amp;page=1   → the redirects an old path recorded on the page needs
-GET /wp-json/hierarchy-guard/v1/posts/42/csv?from=about-us&amp;format=redirection
 GET /wp-json/hierarchy-guard/v1/trash-preview?ids[]=42&amp;ids[]=51   → what the trash dialog says, for at most 50 pages
-GET /wp-json/hierarchy-guard/v1/changes/{change_id}/pairs?page=1      → paged old/new pairs for the modal
+GET /wp-json/hierarchy-guard/v1/changes/{change_id}/pairs?page=1      → paged old/new pairs of the user's latest change (a trash, a restore or a URL-changing save)
 GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → streamed download</code></pre>
 </section>
 
@@ -670,7 +667,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
 │   ├── Redirects/Server.php         template_redirect priority 9, GET/HEAD, validate, 301
 │   ├── Redirects/Providers.php      detect redirect plugins, deep links, CSV layouts
 │   ├── Redirects/Pairs.php          old and new URL pairs behind an old path, capped, cached, never stored
-│   ├── Overview.php                 one page's ancestors, paged children, counts, old URLs, trash outcome
+│   ├── Overview.php                 one page's ancestors, paged children, counts, trash outcome, the user's latest change on it
 │   ├── Export/Csv.php               CSV per provider layout
 │   ├── REST/Hierarchy_Controller.php · REST/Changes_Controller.php · REST/Csv_Download.php · REST/Page_Field.php
 │   └── Admin/
@@ -766,7 +763,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <li>Hierarchical custom post type with a rewrite slug: entries include the prefix and resolve correctly.</li>
       <li>Plain permalinks: nothing is recorded and the server is inert.</li>
       <li>List table: the Hierarchy column adds at most two queries per screen regardless of row count, in core's tree mode too, and counts subpages the current view hides; the subtree filter returns exactly the descendants and caps at 1,000; no child query sorts every child of a parent.</li>
-      <li>Redirect pairs: published pages only, depth first in menu order, capped; none without pretty permalinks; an old URL a live page uses now is never listed; a deleted root lists only its own subpages; the blocks of a bulk trash cost the same few queries whatever its size.</li>
+      <li>Redirect pairs of a change: computed from the pages that change moved or renamed, at their URLs from just before it; published pages only, depth first in menu order, capped; none without pretty permalinks; every pair listed is one the built-in server serves (an old URL a live page uses now is never listed); the blocks of a bulk trash cost the same few queries whatever its size.</li>
       <li>REST routes require <code>edit_post</code>; response shapes are stable; children page correctly.</li>
       <li>Markers are absent from a WXR export; old-path entries are present.</li>
     </ol>
@@ -800,6 +797,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
   <h2>Out of scope for 1.0</h2>
   <div class="prose">
     <ul>
+      <li>Lists of a page's past URLs, or redirect lists for an old URL long after it changed. Declined: the redirects a change needs are offered when it happens, and the built-in server keeps every recorded old URL working.</li>
       <li>One-click "Add to Redirection" and "Add to Safe Redirect Manager" adapters. Natural 1.1 candidates since both have stable PHP APIs; the CSV export in their layouts covers 1.0.</li>
       <li>Incrementally maintained descendant counts stored on ancestors. Every such write would bump the posts cache key; the capped walk is enough.</li>
       <li>A zero-query first-segment gate for the 404 handler. Cached misses with a TTL cover bot traffic; revisit if real sites show otherwise.</li>
