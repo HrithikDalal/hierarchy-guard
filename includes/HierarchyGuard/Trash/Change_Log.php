@@ -1,6 +1,6 @@
 <?php
 /**
- * Summary of the last trash or restore, per user.
+ * Summary of the last trash, restore or URL-changing save, per user.
  *
  * @package HierarchyGuard
  */
@@ -14,9 +14,11 @@ use HierarchyGuard\Subtree;
 
 /**
  * Feeds the outcome notice and Undo. One change per request, so a bulk trash
- * of three parents is one change with three roots. Background batches keep
- * their root's entry current. Titles, URLs and old/new pairs are never stored;
- * they are computed when shown.
+ * of three parents is one change with three roots, and a later change
+ * replaces it. A save that changed a page's URL is a change too, with the
+ * page as its root. Background batches keep their root's entry current.
+ * Titles, URLs and old/new pairs are never stored; they are computed when
+ * shown.
  */
 final class Change_Log {
 
@@ -64,7 +66,7 @@ final class Change_Log {
 	 * Adds or replaces one root's entry in the user's change for this request.
 	 *
 	 * @param int                 $user_id   User whose change it is. Nothing is stored for 0.
-	 * @param string              $action    What happened: trash or restore.
+	 * @param string              $action    What happened: trash, restore or save.
 	 * @param string              $post_type Post type of the root.
 	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, ids, slugs, urls, job.
 	 * @param int[]               $ids       Affected post IDs.

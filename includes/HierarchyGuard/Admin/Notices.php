@@ -110,7 +110,8 @@ final class Notices {
 
 		$user   = get_current_user_id();
 		$change = $this->log->latest( $user );
-		if ( null === $change || ! empty( $change['shown'] ) || $type !== $change['post_type'] ) {
+		// A save's notice is its own, on the screen the save was made from.
+		if ( null === $change || ! empty( $change['shown'] ) || $type !== $change['post_type'] || ! in_array( $change['action'], [ 'trash', 'restore' ], true ) ) {
 			return $messages;
 		}
 		$slot = 'trash' === $change['action'] ? 'trashed' : 'untrashed';

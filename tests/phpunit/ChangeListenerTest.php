@@ -14,6 +14,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
+use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
 use WP_REST_Request;
 use WP_UnitTestCase;
@@ -24,6 +25,8 @@ use WP_UnitTestCase;
 final class ChangeListenerTest extends WP_UnitTestCase {
 
 	private Ledger $ledger;
+
+	private Change_Log $log;
 
 	private int $company;
 
@@ -37,11 +40,13 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		delete_option( Ledger::ROOT_OPTION );
 		Post_Types::reset();
 		Change_Listener::suspend( false );
+		Change_Log::reset_request();
 		$this->set_permalink_structure( '/%postname%/' );
 		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
 		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
 
 		$this->ledger  = new Ledger();
+		$this->log     = new Change_Log();
 		$this->company = self::factory()->post->create(
 			[
 				'post_type' => 'page',
@@ -132,7 +137,7 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 
 	public function test_saving_without_slug_or_parent_change_runs_no_queries(): void {
 		Post_Types::supported();
-		$listener = new Change_Listener( $this->ledger );
+		$listener = new Change_Listener( $this->ledger, $this->log );
 		$post     = get_post( $this->about );
 
 		$queries = get_num_queries();
@@ -140,6 +145,189 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 
 		$this->assertSame( $queries, get_num_queries() );
 		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
+	}
+
+	public function test_a_url_changing_save_records_a_change_for_the_user(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+
+		$change = $this->log->latest( $user );
+		$this->assertNotNull( $change );
+		$this->assertSame( 'save', $change['action'] );
+		$this->assertSame( 'page', $change['post_type'] );
+		$this->assertSame( [ $this->about ], array_keys( $change['roots'] ) );
+		$root = $change['roots'][ $this->about ];
+		$this->assertSame( $this->about, $root['root'] );
+		$this->assertSame( $this->company, $root['to'], 'Its parent after the save.' );
+		$this->assertSame( 'company/about', $root['path'], 'Its path right before the save.' );
+		$this->assertSame( '', $root['policy'] );
+		$this->assertSame( Change_Log::empty_counts(), $root['counts'] );
+		$this->assertSame( Change_Log::empty_counts(), $change['counts'] );
+	}
+
+	public function test_a_move_records_the_new_parent_and_the_old_path(): void {
+		$user = self::factory()->user->create( [ 'role' => 'editor' ] );
+		wp_set_current_user( $user );
+
+		wp_update_post(
+			[
+				'ID'          => $this->team,
+				'post_parent' => $this->company,
+			]
+		);
+
+		$root = $this->log->latest( $user )['roots'][ $this->team ];
+		$this->assertSame( $this->company, $root['to'] );
+		$this->assertSame( 'company/about/team', $root['path'] );
+	}
+
+	public function test_a_save_without_a_user_records_the_old_path_but_no_change(): void {
+		wp_set_current_user( 0 );
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+
+		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->about ) );
+		$this->assertNull( $this->log->latest( 0 ) );
+	}
+
+	public function test_a_save_that_records_no_old_path_records_no_change(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		$draft = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'draft',
+				'post_name'   => 'draft',
+			]
+		);
+
+		wp_update_post(
+			[
+				'ID'        => $draft,
+				'post_name' => 'draft-two',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'         => $this->about,
+				'post_title' => 'About us',
+			]
+		);
+		Change_Listener::suspend( true );
+		wp_update_post(
+			[
+				'ID'        => $this->team,
+				'post_name' => 'crew',
+			]
+		);
+		Change_Listener::suspend( false );
+
+		$this->assertNull( $this->log->latest( $user ), 'A draft has no URL, a title is no URL, and a suspended listener records nothing.' );
+	}
+
+	public function test_a_save_the_ledger_does_not_record_is_no_change(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		add_filter( 'hierarchy_guard_should_record', '__return_false' );
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+
+		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
+		$this->assertNull( $this->log->latest( $user ), 'Nothing redirects that old URL, so there are no redirects to offer.' );
+	}
+
+	public function test_an_old_path_the_page_already_holds_is_still_a_change(): void {
+		global $wpdb;
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		// Back at its old path without a save, as a raw move makes it: the entry stays.
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'about' ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+		Change_Log::reset_request();
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'who-we-are',
+			]
+		);
+
+		$change = $this->log->latest( $user );
+		$this->assertSame( 'save', $change['action'] );
+		$this->assertSame( 'company/about', $change['roots'][ $this->about ]['path'] );
+	}
+
+	public function test_saves_in_one_request_are_one_change_and_a_later_change_replaces_it(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+
+		// One request, as a bulk edit makes it.
+		foreach ( [
+			$this->about => 'company-info',
+			$this->team  => 'crew',
+		] as $id => $slug ) {
+			wp_update_post(
+				[
+					'ID'        => $id,
+					'post_name' => $slug,
+				]
+			);
+		}
+		$first = $this->log->latest( $user );
+		$this->assertSame( [ $this->about, $this->team ], array_keys( $first['roots'] ) );
+		$this->assertSame( 'company/company-info/team', $first['roots'][ $this->team ]['path'] );
+
+		Change_Log::reset_request();
+		wp_update_post(
+			[
+				'ID'          => $this->team,
+				'post_parent' => $this->company,
+			]
+		);
+		$second = $this->log->latest( $user );
+		$this->assertNotSame( $first['id'], $second['id'] );
+		$this->assertSame( [ $this->team ], array_keys( $second['roots'] ) );
+
+		Change_Log::reset_request();
+		remove_all_filters( 'hierarchy_guard_trash_policy' );
+		wp_trash_post( $this->company );
+		$this->assertSame( 'trash', $this->log->latest( $user )['action'], 'A trash replaces the save.' );
+	}
+
+	public function test_a_rest_save_that_changes_the_slug_records_a_change(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		$request = new WP_REST_Request( 'POST', '/wp/v2/pages/' . $this->about );
+		$request->set_body_params( [ 'slug' => 'company-info' ] );
+
+		$this->assertSame( 200, rest_do_request( $request )->get_status() );
+
+		$change = $this->log->latest( $user );
+		$this->assertSame( 'save', $change['action'] );
+		$this->assertSame( 'company/about', $change['roots'][ $this->about ]['path'] );
 	}
 
 	public function test_unsupported_types_and_unpublished_pages_are_ignored(): void {

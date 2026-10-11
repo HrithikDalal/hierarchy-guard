@@ -36,7 +36,8 @@ final class Pairs {
 	public const CACHE_TTL = 5 * MINUTE_IN_SECONDS;
 
 	/**
-	 * Every pair of a trash change: one block per root whose subpages moved up.
+	 * Every pair of a change: one block per page a save moved or renamed, or
+	 * per root of a trash whose subpages moved up.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
 	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}

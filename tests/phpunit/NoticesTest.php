@@ -228,6 +228,25 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertStringEndsWith( '2 subpages moved back under “About”.', $messages['page']['untrashed'] );
 	}
 
+	public function test_a_save_change_leaves_core_s_trash_and_restore_notices_alone(): void {
+		$this->set_permalink_structure( '/%postname%/' );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( 'save', $change['action'] );
+		$_REQUEST['ids'] = (string) $this->ids['about'];
+
+		foreach ( [ 'trashed', 'untrashed' ] as $slot ) {
+			$this->assertSame( $this->core_messages(), $this->notice->append( $this->core_messages(), [ $slot => 1 ] ), $slot );
+		}
+		$this->assertFalse( $this->log->latest( $this->admin )['shown'], 'The save’s own notice is still to come.' );
+		$this->assertStringNotContainsString( 'hierarchy-guard-urls', $this->rendered(), 'The list screen prints no URLs notice for a save.' );
+	}
+
 	public function test_trash_sentences_for_one_page(): void {
 		$this->assertSame( [ '1 subpage moved up under “Company”.' ], Notices::sentences( $this->change( 'trash', [ $this->about( [ 'counts' => [ 'moved' => 1 ] ] ) ] ) ) );
 		Change_Log::reset_request();

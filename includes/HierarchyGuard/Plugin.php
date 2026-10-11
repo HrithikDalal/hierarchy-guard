@@ -57,13 +57,13 @@ final class Plugin {
 		add_action( 'switch_blog', [ Post_Types::class, 'reset' ] );
 
 		$ledger    = new Ledger();
+		$log       = new Trash\Change_Log();
 		$providers = new Redirects\Providers();
-		( new Change_Listener( $ledger ) )->register();
+		( new Change_Listener( $ledger, $log ) )->register();
 		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
 		( new Admin\Settings_Section( $providers ) )->register();
 		( new Trash\Markers() )->register();
 
-		$log        = new Trash\Change_Log();
 		$queue      = new Batch\Queue();
 		$operations = new Trash\Operations( $ledger, new Trash\Mover() );
 		$processor  = new Batch\Processor( $queue, $operations, $log );

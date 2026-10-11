@@ -9,11 +9,14 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
- * Records URL changes. Every handler returns as early and as cheaply as it can.
+ * Records URL changes. Every handler returns as early and as cheaply as it
+ * can. A save that records an old path is also the current user's latest
+ * change, so the redirects it needs can be offered right after it.
  */
 final class Change_Listener {
 
@@ -30,6 +33,13 @@ final class Change_Listener {
 	 * @var Ledger
 	 */
 	private Ledger $ledger;
+
+	/**
+	 * The change log the redirects a save needs are offered from.
+	 *
+	 * @var Change_Log
+	 */
+	private Change_Log $log;
 
 	/**
 	 * Posts being deleted that hold ledger entries, by ID: core deletes their meta before deleted_post.
@@ -49,10 +59,12 @@ final class Change_Listener {
 	/**
 	 * Constructor.
 	 *
-	 * @param Ledger $ledger Ledger.
+	 * @param Ledger     $ledger Ledger.
+	 * @param Change_Log $log    Change log.
 	 */
-	public function __construct( Ledger $ledger ) {
+	public function __construct( Ledger $ledger, Change_Log $log ) {
 		$this->ledger = $ledger;
+		$this->log    = $log;
 	}
 
 	/**
@@ -86,7 +98,10 @@ final class Change_Listener {
 	}
 
 	/**
-	 * Records the old path of a post whose slug or parent changed.
+	 * Records the old path of a post whose slug or parent changed, and, once
+	 * the ledger holds that path on the post, the save as the current user's
+	 * latest change: the post at its old path under its new parent. With no
+	 * user, as in cron, nothing is shown.
 	 *
 	 * @param int     $post_id Post ID.
 	 * @param WP_Post $after   Post after the update.
@@ -109,8 +124,26 @@ final class Change_Listener {
 			return;
 		}
 
-		$this->ledger->record( $post_id, Paths::uri( $before ) );
+		$path = Paths::uri( $before );
+		$this->ledger->record( $post_id, $path );
 		$this->ledger->prune( $post_id );
+
+		// Only an old path the ledger now holds on the post is redirected to it; anything else is no change to offer.
+		$user = get_current_user_id();
+		if ( $user > 0 && metadata_exists( 'post', $post_id, Ledger::key( (string) $after->post_type, Paths::normalize( $path ) ) ) ) {
+			$this->log->record(
+				$user,
+				'save',
+				(string) $after->post_type,
+				[
+					'root'   => $post_id,
+					'to'     => (int) $after->post_parent,
+					'path'   => $path,
+					'policy' => '',
+					'counts' => Change_Log::empty_counts(),
+				]
+			);
+		}
 	}
 
 	/**

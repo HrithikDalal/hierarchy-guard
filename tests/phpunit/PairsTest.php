@@ -95,6 +95,34 @@ final class PairsTest extends WP_UnitTestCase {
 		return $this->pairs->collect_change( $this->log->latest( $this->admin ) );
 	}
 
+	/**
+	 * Saves a page as the admin, in a request of its own, and returns the
+	 * change the save recorded.
+	 *
+	 * @param int                 $post_id Page.
+	 * @param array<string,mixed> $fields  Fields to save.
+	 * @return array<string,mixed>
+	 */
+	private function save( int $post_id, array $fields ): array {
+		Change_Log::reset_request();
+		wp_update_post( array_merge( [ 'ID' => $post_id ], $fields ) );
+		$change = $this->log->latest( $this->admin );
+		$this->assertIsArray( $change, 'The save recorded a change.' );
+		$this->assertSame( 'save', $change['action'] );
+		return $change;
+	}
+
+	/**
+	 * Renames a page as the admin, in a request of its own, and returns the change.
+	 *
+	 * @param int    $post_id Page.
+	 * @param string $slug    New slug.
+	 * @return array<string,mixed>
+	 */
+	private function rename( int $post_id, string $slug ): array {
+		return $this->save( $post_id, [ 'post_name' => $slug ] );
+	}
+
 	public function test_a_trash_lists_the_moved_subpages_under_the_old_path(): void {
 		wp_trash_post( $this->ids['about'] );
 		$collected = $this->last_change();
@@ -681,5 +709,603 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertSame( '/company-new/about/history/', $this->served_on_request( 'company/about/history' ) );
 		$this->assertSame( '', $this->served_on_request( 'company/services' ) );
 		$this->assertSame( '/updates/', $this->served_on_request( 'news' ) );
+	}
+
+	public function test_a_save_change_has_one_block_per_page_it_saved(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+
+		$this->assertSame(
+			[
+				[
+					'old'        => 'company/about',
+					'head'       => $this->ids['about'],
+					'reason'     => '',
+					'base'       => 'company/about-us',
+					'from'       => $this->ids['about'],
+					'children'   => [],
+					'incomplete' => false,
+					'target'     => $this->ids['about'],
+					'held'       => false,
+				],
+			],
+			Pairs_Blocks::change_blocks( $change ),
+			'The page at its old path, its subtree walked at its current slugs.'
+		);
+
+		wp_delete_post( $this->ids['about'], true );
+		$this->assertSame( [], Pairs_Blocks::change_blocks( $change ), 'A page deleted since has no URL to list.' );
+	}
+
+	public function test_a_rename_lists_the_page_and_its_subpages_at_the_urls_they_had(): void {
+		$collected = $this->pairs->collect_change( $this->rename( $this->ids['about'], 'about-us' ) );
+
+		$this->assertSame(
+			[
+				'/company/about/ -> /company/about-us/',
+				'/company/about/history/ -> /company/about-us/history/',
+				'/company/about/team/ -> /company/about-us/team/',
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
+			],
+			$this->lines( $collected ),
+			'Depth first, in menu order then title.'
+		);
+		$this->assertSame( [], $collected['unresolved'] );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_move_lists_the_page_and_its_subpages_at_the_urls_they_had(): void {
+		$collected = $this->pairs->collect_change( $this->save( $this->ids['team'], [ 'post_parent' => $this->ids['company'] ] ) );
+
+		$this->assertSame(
+			[
+				'/company/about/team/ -> /company/team/',
+				'/company/about/team/leadership/ -> /company/team/leadership/',
+			],
+			$this->lines( $collected )
+		);
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_saves_in_one_request_list_every_page_they_moved(): void {
+		Change_Log::reset_request();
+		// One request, as a bulk edit makes it.
+		foreach ( [ 'team', 'history' ] as $page ) {
+			wp_update_post(
+				[
+					'ID'          => $this->ids[ $page ],
+					'post_parent' => $this->ids['company'],
+				]
+			);
+		}
+		$collected = $this->last_change();
+
+		$this->assertSame(
+			[
+				'/company/about/team/ -> /company/team/',
+				'/company/about/team/leadership/ -> /company/team/leadership/',
+				'/company/about/history/ -> /company/history/',
+			],
+			$this->lines( $collected )
+		);
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_save_lists_no_draft_subpage_but_its_published_subpages(): void {
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_status' => 'draft',
+			]
+		);
+
+		$this->assertSame(
+			[
+				'/company/about/ -> /company/about-us/',
+				'/company/about/history/ -> /company/about-us/history/',
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
+			],
+			$this->lines( $this->pairs->collect_change( $this->rename( $this->ids['about'], 'about-us' ) ) )
+		);
+	}
+
+	public function test_a_saved_page_that_is_not_published_now_is_listed_as_unresolved(): void {
+		$change = $this->save(
+			$this->ids['about'],
+			[
+				'post_name'   => 'about-us',
+				'post_status' => 'draft',
+			]
+		);
+
+		$page = $this->pairs->page( $this->pairs->collect_change( $change ), 1, 100 );
+
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'unpublished',
+				],
+			],
+			$page['unresolved']
+		);
+		$this->assertSame( 3, $page['total'], 'Its published subpages still redirect.' );
+	}
+
+	public function test_a_save_s_pairs_are_paged(): void {
+		$collected = $this->pairs->collect_change( $this->rename( $this->ids['about'], 'about-us' ) );
+
+		$page = $this->pairs->page( $collected, 2, 3 );
+
+		$this->assertSame( 4, $page['total'] );
+		$this->assertSame( 2, $page['pages'] );
+		$this->assertSame( 2, $page['page'] );
+		$this->assertSame( [ '/company/about/team/leadership/' ], array_column( $page['pairs'], 'old' ) );
+		$this->assertSame( 2, $this->pairs->page( $collected, 9, 3 )['page'], 'A page past the end shows the last one.' );
+		$this->assertCount( 4, $this->pairs->all( $collected ), 'A download has every pair.' );
+	}
+
+	public function test_a_save_s_walk_stops_at_the_count_cap(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
+
+		$this->assertSame(
+			[
+				'count'  => 2,
+				'capped' => true,
+			],
+			$this->pairs->count( $this->pairs->collect_change( $change ) )
+		);
+	}
+
+	public function test_a_save_s_walk_costs_two_queries_per_level_and_is_then_cached(): void {
+		$change  = $this->rename( $this->ids['about'], 'about-us' );
+		$queries = get_num_queries();
+
+		$this->pairs->collect_change( $change );
+
+		$this->assertLessThanOrEqual( 9, get_num_queries() - $queries, 'One path lookup for the old path, an index read and a sort per level (about; team and history; leadership), the ledger for the paths listed and their prefixes, and the lookups of the resolver’s check of every pair at once.' );
+
+		$queries = get_num_queries();
+		$this->pairs->collect_change( $change );
+		$this->assertSame( 0, get_num_queries() - $queries, 'The collected pairs are cached until a post changes.' );
+	}
+
+	public function test_without_pretty_permalinks_a_save_lists_nothing(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		$this->assertCount( 4, $this->pairs->collect_change( $change )['pairs'] );
+
+		$this->set_permalink_structure( '' );
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame( [], $collected['pairs'], 'No URL ever held the path, and a permalink change is not served from the cache.' );
+		$this->assertSame( [], $collected['unresolved'] );
+		$this->assertSame( [], $this->pairs->all( $collected ) );
+	}
+
+	public function test_an_old_url_a_live_page_uses_now_is_not_redirected(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		$about  = $this->page( 'about', $this->ids['company'] );
+		$this->page( 'team', $about );
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame(
+			[
+				'/company/about/history/ -> /company/about-us/history/',
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
+			],
+			$this->lines( $collected ),
+			'The new page and its team are reached before any redirect; the old URLs no page uses still lead on.'
+		);
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'in_use',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_save_back_to_the_current_path_lists_nothing(): void {
+		$first = $this->rename( $this->ids['about'], 'about-us' );
+		$this->rename( $this->ids['about'], 'about' );
+
+		$this->assertSame( [], $this->pairs->collect_change( $first )['pairs'], 'The old path is the page’s URL again.' );
+	}
+
+	public function test_a_saved_page_in_the_trash_since_lists_nothing(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		$this->trash_raw( $this->ids['about'] );
+
+		$this->assertSame( [], $this->pairs->collect_change( $change )['pairs'], 'Its subpages now sit under a __trashed URL.' );
+	}
+
+	public function test_a_save_lists_a_subpage_renamed_before_it_at_the_url_it_had_right_before_the_save(): void {
+		$this->rename( $this->ids['team'], 'crew' );
+		$collected = $this->pairs->collect_change( $this->rename( $this->ids['about'], 'about-us' ) );
+
+		$this->assertContains( '/company/about/crew/ -> /company/about-us/crew/', $this->lines( $collected ), 'The URL crew had until about moved.' );
+		$this->assertNotContains( '/company/about/team/ -> /company/about-us/crew/', $this->lines( $collected ), 'That URL belongs to crew’s own, earlier change.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_subpage_moved_and_renamed_in_one_save_is_listed_at_the_url_it_had(): void {
+		$this->rename( $this->ids['about'], 'about-us' );
+		// One save, as Quick Edit makes it: a new parent and a new slug.
+		$change = $this->save(
+			$this->ids['team'],
+			[
+				'post_parent' => $this->ids['history'],
+				'post_name'   => 'crew',
+			]
+		);
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame(
+			[
+				'/company/about-us/team/ -> /company/about-us/history/crew/',
+				'/company/about-us/team/leadership/ -> /company/about-us/history/crew/leadership/',
+			],
+			$this->lines( $collected )
+		);
+		$this->assertSame( '/company/about-us/history/crew/', $this->served_on_request( 'company/about-us/team' ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_collecting_a_save_costs_the_same_few_queries_for_fifty_subpages(): void {
+		$five  = $this->queries_to_collect_save( 'services', 5 );
+		$fifty = $this->queries_to_collect_save( 'products', 50 );
+
+		$this->assertSame( $five, $fifty, 'Lookups are batched for every block and page, never one per subpage.' );
+		$this->assertLessThanOrEqual( 11, $fifty );
+	}
+
+	public function test_collecting_a_save_under_a_hidden_page_costs_the_same_few_queries_for_fifty_subpages(): void {
+		$five  = $this->queries_to_collect_save( 'services', 5, true );
+		$fifty = $this->queries_to_collect_save( 'products', 50, true );
+
+		$this->assertSame( $five, $fifty, 'The pages at the old subpage paths are looked up at once, never one per subpage.' );
+	}
+
+	/**
+	 * Queries a cold collect of a rename costs, for a page with subpages.
+	 *
+	 * @param string $slug     The page's old slug.
+	 * @param int    $subpages How many subpages it has.
+	 * @param bool   $hidden   Whether a private page takes the old slug, so the page there is hidden.
+	 * @return int
+	 */
+	private function queries_to_collect_save( string $slug, int $subpages, bool $hidden = false ): int {
+		$parent = $this->page( $slug, $this->ids['company'] );
+		for ( $i = 1; $i <= $subpages; $i++ ) {
+			$this->page( $slug . '-' . $i, $parent );
+		}
+		$change = $this->rename( $parent, $slug . '-now' );
+		if ( $hidden ) {
+			$this->page( $slug, $this->ids['company'], 'private' );
+		}
+		wp_cache_flush();
+
+		$queries   = get_num_queries();
+		$collected = $this->pairs->collect_change( $change );
+		$this->assertCount( $subpages + 1, $collected['pairs'] );
+		return get_num_queries() - $queries;
+	}
+
+	public function test_with_two_pages_at_one_path_the_pairs_follow_the_one_core_finds(): void {
+		$services = $this->page( 'services', $this->ids['company'] );
+		// Core leaves a draft's slug as it is, so the draft sits at the same path.
+		$this->page( 'services', $this->ids['company'], 'draft' );
+
+		$collected = $this->pairs->collect_change( $this->rename( $this->ids['company'], 'company-new' ) );
+
+		$this->assertSame( 'company-new/services', Paths::uri( get_post( $services ) ) );
+		$this->assertNotContains( '/company/services/ -> /company-new/services/', $this->lines( $collected ), 'get_page_by_path() finds the draft there, the later of the two, which nobody can view.' );
+		$this->assertContains( '/company/about/ -> /company-new/about/', $this->lines( $collected ) );
+		$this->assertSame( '', $this->served_on_request( 'company/services' ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_an_old_url_a_blog_post_uses_now_is_not_listed(): void {
+		$news   = $this->page( 'news' );
+		$change = $this->rename( $news, 'updates' );
+		self::factory()->post->create(
+			[
+				'post_type'   => 'post',
+				'post_name'   => 'news',
+				'post_status' => 'publish',
+			]
+		);
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame( [], $this->lines( $collected ), 'WordPress shows the blog post at /news/.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/news/',
+					'reason' => 'in_use',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assertSame( '', $this->served_on_request( 'news' ) );
+	}
+
+	public function test_an_old_url_an_attachment_uses_now_is_not_listed(): void {
+		$services = $this->page( 'services', $this->ids['company'] );
+		$gallery  = $this->page( 'gallery' );
+		$change   = $this->rename( $services, 'offers' );
+		// WordPress serves /anything/services/ as this attachment, wherever it is attached.
+		self::factory()->attachment->create(
+			[
+				'post_name'      => 'services',
+				'post_title'     => 'services',
+				'post_parent'    => $gallery,
+				'post_mime_type' => 'image/jpeg',
+				'file'           => 'services.jpg',
+			]
+		);
+
+		$this->assertSame( [], $this->lines( $this->pairs->collect_change( $change ) ) );
+		$this->assertSame( '', $this->served_on_request( 'company/services' ) );
+	}
+
+	public function test_an_old_url_deeper_than_the_server_s_segment_cap_is_not_listed(): void {
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 3 );
+
+		$lines = $this->lines( $this->pairs->collect_change( $this->rename( $this->ids['company'], 'company-new' ) ) );
+
+		$this->assertContains( '/company/about/team/ -> /company-new/about/team/', $lines );
+		$this->assertNotContains( '/company/about/team/leadership/ -> /company-new/about/team/leadership/', $lines, 'The server refuses a request of four segments.' );
+		$this->assertSame( '', $this->served_on_request( 'company/about/team/leadership' ) );
+	}
+
+	public function test_an_old_url_whose_newer_holder_nobody_can_view_leads_nowhere(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		$other  = $this->page( 'about', $this->ids['company'] );
+		$this->rename( $other, 'about-y' );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_status' => 'draft',
+			]
+		);
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame( [], $this->lines( $collected ) );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'none',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved'],
+			'The resolver follows the draft, which nobody can view, so the URL leads nowhere.'
+		);
+		$this->assertSame( '', $this->served_on_request( 'company/about' ) );
+	}
+
+	public function test_under_category_permalinks_an_old_url_a_category_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/%category%/%postname%/' );
+		$news   = $this->page( 'news' );
+		$change = $this->rename( $news, 'updates' );
+		self::factory()->category->create(
+			[
+				'slug' => 'news',
+				'name' => 'News',
+			]
+		);
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame( [], $this->lines( $collected ), 'WordPress shows the category archive at /news/, with no posts in it too.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/news/',
+					'reason' => 'in_use',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assertSame( '', $this->served_on_request( 'news' ) );
+	}
+
+	public function test_under_category_permalinks_an_old_url_a_blog_post_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/%category%/%postname%/' );
+		$press = $this->page( 'press' );
+		$this->page( 'release', $press );
+		$this->page( 'archive', $press );
+		$change   = $this->rename( $press, 'media' );
+		$category = self::factory()->category->create(
+			[
+				'slug' => 'press',
+				'name' => 'Press',
+			]
+		);
+		$post     = self::factory()->post->create(
+			[
+				'post_name'     => 'release',
+				'post_status'   => 'publish',
+				'post_category' => [ $category ],
+			]
+		);
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertSame( '/press/release/', Paths::relative( (string) get_permalink( $post ) ), 'The old URL of the page is the blog post\'s.' );
+		$this->assertSame( [ '/press/archive/ -> /media/archive/' ], $lines, 'The category is shown at /press/ and the blog post at /press/release/.' );
+		$this->assertSame( '', $this->served_on_request( 'press' ) );
+		$this->assertSame( '', $this->served_on_request( 'press/release' ) );
+		$this->assertSame( '/media/archive/', $this->served_on_request( 'press/archive' ) );
+	}
+
+	public function test_under_a_blog_front_an_old_url_a_blog_post_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/blog/%postname%/' );
+		$blog = $this->page( 'blog' );
+		$this->page( 'foo', $blog );
+		$this->page( 'bar', $blog );
+		$change = $this->rename( $blog, 'journal' );
+		$post   = self::factory()->post->create(
+			[
+				'post_name'   => 'foo',
+				'post_status' => 'publish',
+			]
+		);
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertSame( '/blog/foo/', Paths::relative( (string) get_permalink( $post ) ), 'The old URL of the page is the blog post\'s.' );
+		$this->assertSame( [ '/blog/ -> /journal/', '/blog/bar/ -> /journal/bar/' ], $lines );
+		$this->assertSame( '', $this->served_on_request( 'blog/foo' ) );
+		$this->assertSame( '/journal/bar/', $this->served_on_request( 'blog/bar' ) );
+	}
+
+	public function test_under_a_blog_front_an_old_url_a_category_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/blog/%postname%/' );
+		$blog = $this->page( 'blog' );
+		$this->page( 'news', $this->page( 'category', $blog ) );
+		$change = $this->rename( $blog, 'journal' );
+		$term   = self::factory()->category->create(
+			[
+				'slug' => 'news',
+				'name' => 'News',
+			]
+		);
+		$news   = $this->page( 'news' );
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertSame( '/blog/category/news/', Paths::relative( (string) get_term_link( $term ) ), 'The old URL of the page is the category\'s.' );
+		$this->assertSame( [ '/blog/ -> /journal/', '/blog/category/ -> /journal/category/' ], $lines );
+		$this->assertSame( '', $this->served_on_request( 'blog/category/news' ) );
+		$this->assertSame( [ '/news/ -> /updates/' ], $this->lines( $this->pairs->collect_change( $this->rename( $news, 'updates' ) ) ), 'Under this front the categories live under /blog/category/.' );
+		$this->assertSame( '/updates/', $this->served_on_request( 'news' ) );
+	}
+
+	/**
+	 * A hierarchical type at /docs/, its doc Guide renamed Handbook, and a page
+	 * Docs with a subpage Guide, Docs renamed Documentation in the change returned.
+	 *
+	 * @param bool $flush Whether the site's rewrite rules have the type's yet.
+	 * @return array<string,mixed> The change that renamed Docs.
+	 */
+	private function docs_beside_pages( bool $flush ): array {
+		global $wp_rewrite;
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'rewrite'      => [ 'slug' => 'docs' ],
+			]
+		);
+		Post_Types::reset();
+		if ( $flush ) {
+			$wp_rewrite->flush_rules();
+		}
+		$doc = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $doc,
+				'post_name' => 'handbook',
+			]
+		);
+		$docs = $this->page( 'docs' );
+		$this->page( 'guide', $docs );
+		return $this->rename( $docs, 'documentation' );
+	}
+
+	public function test_an_old_url_the_server_sends_to_a_type_with_that_prefix_first_is_not_listed(): void {
+		$lines = $this->lines( $this->pairs->collect_change( $this->docs_beside_pages( false ) ) );
+
+		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines );
+		$this->assertSame( '/docs/handbook/', $this->served_on_request( 'docs/guide' ), 'With no rule for the type yet the request is a 404, and the server tries the type whose prefix starts the path first.' );
+	}
+
+	public function test_an_old_url_a_type_s_rewrite_rule_takes_is_not_listed(): void {
+		$lines = $this->lines( $this->pairs->collect_change( $this->docs_beside_pages( true ) ) );
+
+		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines, 'WordPress hands /docs/guide/ to the type\'s rule, which the 404 model does not look into.' );
+		$this->assertSame( '/docs/handbook/', $this->served_on_request( 'docs/guide' ) );
+	}
+
+	public function test_past_the_fallbacks_a_path_two_pages_share_leads_to_no_pair(): void {
+		$company = $this->ids['company'];
+		for ( $i = 1; $i <= Batch_Resolver::FALLBACKS; $i++ ) {
+			$this->page( 'a' . $i, $company );
+			// A draft keeps its slug: two pages at one path, and core's own lookup says which it finds.
+			$this->page( 'a' . $i, $company, 'draft' );
+		}
+		$draft = $this->page( 'kid', 0, 'draft' );
+		$kid   = $this->page( 'kid', $company );
+		$this->rename( $kid, 'kid-moved' );
+		$this->page( 'kid', $company );
+		// company/kid then has two pages too: the draft, then the published one.
+		wp_update_post(
+			[
+				'ID'          => $draft,
+				'post_parent' => $company,
+			]
+		);
+		$change = $this->rename( $company, 'company-new' );
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertNotContains( '/company/kid/', array_map( static fn( string $line ): string => strtok( $line, ' ' ), $this->lines( $collected ) ), 'Core was asked about twenty paths before this one, so which page it finds there is not known.' );
+		$this->assertContains( '/company/about/ -> /company-new/about/', $this->lines( $collected ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_save_s_walk_stops_where_the_server_s_segment_cap_does(): void {
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 4 );
+		$shallow = $this->queries_to_collect_deep( 'shallow', 0 );
+		$deep    = $this->queries_to_collect_deep( 'deep', 8 );
+
+		$this->assertSame( $shallow, $deep, 'The pages below four segments can list nothing, so they are not read.' );
+	}
+
+	/**
+	 * Queries a cold collect costs for a renamed page with About › Team ›
+	 * Leadership below it and a chain of pages below that.
+	 *
+	 * @param string $slug  The page's old slug.
+	 * @param int    $below How many pages the chain below Leadership has.
+	 * @return int
+	 */
+	private function queries_to_collect_deep( string $slug, int $below ): int {
+		$root   = $this->page( $slug );
+		$parent = $this->page( 'leadership', $this->page( 'team', $this->page( 'about', $root ) ) );
+		for ( $i = 1; $i <= $below; $i++ ) {
+			$parent = $this->page( 'level-' . $i, $parent );
+		}
+		$change = $this->rename( $root, $slug . '-now' );
+		wp_cache_flush();
+
+		$queries   = get_num_queries();
+		$collected = $this->pairs->collect_change( $change );
+		$cost      = get_num_queries() - $queries;
+		$this->assertSame(
+			[
+				'/' . $slug . '/ -> /' . $slug . '-now/',
+				'/' . $slug . '/about/ -> /' . $slug . '-now/about/',
+				'/' . $slug . '/about/team/ -> /' . $slug . '-now/about/team/',
+				'/' . $slug . '/about/team/leadership/ -> /' . $slug . '-now/about/team/leadership/',
+			],
+			$this->lines( $collected )
+		);
+		return $cost;
 	}
 }

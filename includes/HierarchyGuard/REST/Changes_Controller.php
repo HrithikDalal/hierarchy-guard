@@ -1,6 +1,6 @@
 <?php
 /**
- * REST routes about the current user's last trash.
+ * REST routes about the current user's last change.
  *
  * @package HierarchyGuard
  */
@@ -19,9 +19,9 @@ use WP_REST_Response;
 use WP_REST_Server;
 
 /**
- * Backs the "View redirects" link of the outcome notice. A change is the
- * current user's own and lives for thirty minutes, so these routes read
- * nothing another user wrote.
+ * Backs the "View redirects" link of the outcome notice, after a trash or a
+ * save that changed URLs. A change is the current user's own and lives for
+ * thirty minutes, so these routes read nothing another user wrote.
  */
 final class Changes_Controller {
 

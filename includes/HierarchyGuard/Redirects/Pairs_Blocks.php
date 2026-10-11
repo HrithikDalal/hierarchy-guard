@@ -16,11 +16,64 @@ use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
- * The block sources: one per root of a trash change. A block names its old
- * path, its head, the page its new URLs start under, and the first-level
- * pages its walk starts from.
+ * The block sources: one per page a save moved or renamed, one per root of a
+ * trash change. A block names its old path, its head, the page its new URLs
+ * start under, and the first-level pages its walk starts from.
  */
 final class Pairs_Blocks {
+
+	/**
+	 * The blocks for a change: a save's, a trash's, or none for a restore.
+	 *
+	 * @param array<string,mixed> $change A change from Change_Log.
+	 * @return array<int,array<string,mixed>> Blocks.
+	 */
+	public static function change_blocks( array $change ): array {
+		switch ( $change['action'] ?? '' ) {
+			case 'save':
+				return self::save_blocks( $change );
+			case 'trash':
+				return self::trash_blocks( $change );
+		}
+		return [];
+	}
+
+	/**
+	 * The blocks for a save: each page it saved, at the path it had right
+	 * before the save, leads to the page, and its subtree is walked as it is
+	 * now, at current slugs. That is exact while the change is fresh; the
+	 * check against the server drops whatever it no longer serves. A page
+	 * deleted since has no block.
+	 *
+	 * @param array<string,mixed> $change A save change from Change_Log.
+	 * @return array<int,array<string,mixed>> Blocks.
+	 */
+	private static function save_blocks( array $change ): array {
+		$ids = array_map( 'intval', array_keys( (array) $change['roots'] ) );
+		Batch_Resolver::prime_with_ancestors( $ids );
+
+		$blocks = [];
+		foreach ( (array) $change['roots'] as $root ) {
+			$id   = (int) $root['root'];
+			$post = get_post( $id );
+			if ( ! $post instanceof WP_Post || '' === (string) ( $root['path'] ?? '' ) ) {
+				continue;
+			}
+			$blocks[] = [
+				'old'        => Paths::normalize( (string) $root['path'] ),
+				'head'       => $id,
+				'reason'     => '',
+				'base'       => Paths::uri( $post ),
+				'from'       => $id,
+				'children'   => [],
+				'incomplete' => false,
+				// The save recorded the old path on the page, so the resolver leads it there.
+				'target'     => $id,
+				'held'       => false,
+			];
+		}
+		return $blocks;
+	}
 
 	/**
 	 * The blocks for a trash change. A root restored since has no block,
@@ -37,14 +90,10 @@ final class Pairs_Blocks {
 	 * the resolver sees it, so a deleted root's old path leads anywhere only
 	 * while a live page holds it.
 	 *
-	 * @param array<string,mixed> $change A change from Change_Log.
+	 * @param array<string,mixed> $change A trash change from Change_Log.
 	 * @return array<int,array<string,mixed>> Blocks.
 	 */
-	public static function change_blocks( array $change ): array {
-		if ( 'trash' !== ( $change['action'] ?? '' ) ) {
-			return [];
-		}
-
+	private static function trash_blocks( array $change ): array {
 		$type  = (string) $change['post_type'];
 		$all   = [];
 		$roots = [];
