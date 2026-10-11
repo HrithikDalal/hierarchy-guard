@@ -3327,7 +3327,7 @@ git commit -m "feat: hierarchy REST route, page pairs and CSV downloads"
   - `policy` is the page's own `policy_for()`, and the top-level `policy` is the site default.
   - `fallback` is true when the page has more subpages than the cap, and null when its count was cut by the shared budget.
   - `denied` means the user can't `edit_post` a checked subpage, and `denied_trash` that they can't `delete_post` one.
-  - `example` uses the lowest-ID subpage, and `path` is empty without a URL form.
+  - `example` uses the lowest-ID checked subpage that is published with a slug (null when none is), and `path` is empty without a URL form.
 - Produces: `Admin\Trash_Choice` with `PARAM = 'hierarchy_guard_policy'`, `static chosen( int $post_id ): ?string`, and `filter()` on `hierarchy_guard_trash_policy` at priority 99, so an explicit choice wins over other filters. Bulk requests are read from `action` only, as core's list table does.
 
 - [ ] **Step 1: Write the failing tests**
