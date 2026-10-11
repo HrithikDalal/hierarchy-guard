@@ -18,6 +18,7 @@ use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Change_Log;
+use WP_Post;
 use WP_UnitTestCase;
 
 /**
@@ -66,7 +67,18 @@ final class PairsTest extends WP_UnitTestCase {
 	 * @return array<int,string> "old -> new" lines.
 	 */
 	private function about_lines( string $old_path = 'company/about-us' ): array {
-		return $this->lines( $this->pairs->collect_post( get_post( $this->ids['about'] ), $old_path ) );
+		return $this->lines( $this->pairs->collect_post( $this->about_us(), $old_path ) );
+	}
+
+	/**
+	 * About, with company/about-us recorded as a path it used to have, so the
+	 * resolver serves that old path and the pages below it.
+	 *
+	 * @return WP_Post
+	 */
+	private function about_us(): WP_Post {
+		( new Ledger() )->record( $this->ids['about'], 'company/about-us' );
+		return get_post( $this->ids['about'] );
 	}
 
 	/**
@@ -140,7 +152,7 @@ final class PairsTest extends WP_UnitTestCase {
 			]
 		);
 
-		$page = $this->pairs->page( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ), 1, 100 );
+		$page = $this->pairs->page( $this->pairs->collect_post( $this->about_us(), 'company/about-us' ), 1, 100 );
 
 		$this->assertSame(
 			[
@@ -155,7 +167,7 @@ final class PairsTest extends WP_UnitTestCase {
 	}
 
 	public function test_pairs_are_paged(): void {
-		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' );
+		$collected = $this->pairs->collect_post( $this->about_us(), 'company/about-us' );
 
 		$page = $this->pairs->page( $collected, 2, 3 );
 
@@ -169,7 +181,7 @@ final class PairsTest extends WP_UnitTestCase {
 	public function test_the_walk_stops_at_the_count_cap(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
 
-		$count = $this->pairs->count( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) );
+		$count = $this->pairs->count( $this->pairs->collect_post( $this->about_us(), 'company/about-us' ) );
 
 		$this->assertSame(
 			[
@@ -181,12 +193,12 @@ final class PairsTest extends WP_UnitTestCase {
 	}
 
 	public function test_the_walk_costs_two_queries_per_level_and_is_then_cached(): void {
-		$post    = get_post( $this->ids['about'] );
+		$post    = $this->about_us();
 		$queries = get_num_queries();
 
 		$this->pairs->collect_post( $post, 'company/about-us' );
 
-		$this->assertLessThanOrEqual( 9, get_num_queries() - $queries, 'A trash-holder check and one path lookup, an index read and a sort per level (about; team and history; leadership), then the old paths of the pages walked and the holders of the paths listed.' );
+		$this->assertLessThanOrEqual( 11, get_num_queries() - $queries, 'A trash-holder check and one path lookup, an index read and a sort per level (about; team and history; leadership), then the old paths of the pages walked, the ledger for the paths listed and their prefixes, the root list, and one path lookup for the resolver’s check of every pair.' );
 
 		$queries = get_num_queries();
 		$this->pairs->collect_post( $post, 'company/about-us' );
@@ -196,7 +208,7 @@ final class PairsTest extends WP_UnitTestCase {
 	public function test_without_pretty_permalinks_nothing_is_listed(): void {
 		$this->set_permalink_structure( '' );
 
-		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' );
+		$collected = $this->pairs->collect_post( $this->about_us(), 'company/about-us' );
 
 		$this->assertSame( [], $collected['pairs'], 'No URL ever held the path.' );
 		$this->assertSame( [], $collected['unresolved'] );
@@ -210,11 +222,20 @@ final class PairsTest extends WP_UnitTestCase {
 				'post_name' => 'about-us',
 			]
 		);
-		$this->page( 'about', $this->ids['company'] );
+		$about = $this->page( 'about', $this->ids['company'] );
+		$this->page( 'team', $about );
 
-		$page = $this->pairs->page( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' ), 1, 100 );
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+		$page      = $this->pairs->page( $collected, 1, 100 );
 
-		$this->assertSame( 0, $page['total'], 'A redirect plugin would hide the new page and its subpages.' );
+		$this->assertSame(
+			[
+				'/company/about/history/ -> /company/about-us/history/',
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
+			],
+			$this->lines( $collected ),
+			'The new page and its team are reached before any redirect; the old URLs no page uses still lead on.'
+		);
 		$this->assertSame(
 			[
 				[
@@ -224,6 +245,7 @@ final class PairsTest extends WP_UnitTestCase {
 			],
 			$page['unresolved']
 		);
+		$this->assert_the_resolver_agrees( $collected );
 	}
 
 	public function test_an_old_path_that_is_the_current_path_has_no_pairs(): void {
@@ -233,7 +255,7 @@ final class PairsTest extends WP_UnitTestCase {
 	public function test_a_page_in_the_trash_lists_no_pairs_under_it(): void {
 		$this->trash_raw( $this->ids['about'] );
 
-		$this->assertSame( [], $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' )['pairs'], 'Its subpages now sit under a __trashed URL.' );
+		$this->assertSame( [], $this->pairs->collect_post( $this->about_us(), 'company/about-us' )['pairs'], 'Its subpages now sit under a __trashed URL.' );
 	}
 
 	public function test_a_trash_lists_the_moved_subpages_under_the_old_path(): void {
@@ -364,7 +386,7 @@ final class PairsTest extends WP_UnitTestCase {
 	}
 
 	public function test_a_download_has_every_pair(): void {
-		$this->assertCount( 4, $this->pairs->all( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) ) );
+		$this->assertCount( 4, $this->pairs->all( $this->pairs->collect_post( $this->about_us(), 'company/about-us' ) ) );
 	}
 
 	public function test_after_a_delete_a_subpage_renamed_on_the_move_keeps_its_old_slug(): void {
@@ -517,7 +539,7 @@ final class PairsTest extends WP_UnitTestCase {
 		$fifty = $this->queries_to_collect( 'products', 50 );
 
 		$this->assertSame( $five, $fifty, 'Lookups are batched for every block and page, never one per subpage.' );
-		$this->assertLessThanOrEqual( 10, $fifty );
+		$this->assertLessThanOrEqual( 13, $fifty, 'Ten as before, plus the root list, one path lookup for the resolver’s check of every pair, and the pages it finds.' );
 	}
 
 	/**
@@ -653,11 +675,11 @@ final class PairsTest extends WP_UnitTestCase {
 	}
 
 	public function test_a_permalink_change_is_not_served_from_the_cache(): void {
-		$this->assertSame( 4, $this->pairs->count( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) )['count'] );
+		$this->assertSame( 4, $this->pairs->count( $this->pairs->collect_post( $this->about_us(), 'company/about-us' ) )['count'] );
 
 		$this->set_permalink_structure( '' );
 
-		$this->assertSame( 0, $this->pairs->count( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) )['count'], 'Without pretty permalinks no URL held the path.' );
+		$this->assertSame( 0, $this->pairs->count( $this->pairs->collect_post( $this->about_us(), 'company/about-us' ) )['count'], 'Without pretty permalinks no URL held the path.' );
 	}
 
 	public function test_after_a_delete_a_subpage_renamed_after_the_trash_keeps_its_original_slug(): void {
@@ -956,5 +978,370 @@ final class PairsTest extends WP_UnitTestCase {
 		$fifty = $this->queries_to_collect( 'products', 50, true );
 
 		$this->assertSame( $five, $fifty, 'The pages at the old subpage paths are looked up at once, never one per subpage.' );
+	}
+
+	public function test_an_old_path_whose_newest_holder_sits_under_the_trash_lists_nothing_below_it(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		// A newer page took the old path and moved under Archive, so it holds the path last.
+		$archive = $this->page( 'archive', $this->ids['company'] );
+		$other   = $this->page( 'about', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_parent' => $archive,
+			]
+		);
+		$this->trash_raw( $archive );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+
+		$this->assertSame( [], $this->lines( $collected ), 'The resolver passes over that page and finds no shorter old path.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'trash',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_once_the_trash_is_emptied_an_old_path_whose_newest_holder_sits_under_the_trash_lists_nothing(): void {
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		wp_delete_post( $this->ids['about'], true );
+		$archive = $this->page( 'archive', $this->ids['company'] );
+		$other   = $this->page( 'about', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_parent' => $archive,
+			]
+		);
+		$this->trash_raw( $archive );
+
+		$collected = $this->pairs->collect_change( $change );
+		$company   = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+
+		$this->assertSame( [], $this->lines( $collected ) );
+		$this->assertContains(
+			[
+				'old'    => '/company/about/',
+				'reason' => 'trash',
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assertSame( [], $this->lines( $company ), 'Company’s alias leads nowhere either.' );
+		$this->assert_the_resolver_agrees( $collected );
+		$this->assert_the_resolver_agrees( $company );
+	}
+
+	public function test_a_second_page_in_the_trash_at_an_alias_lists_its_subpage_at_the_url_it_had_until_that_trash(): void {
+		wp_trash_post( $this->ids['about'] );
+		Change_Log::reset_request();
+		// A new about takes the path; careers moves under it and is renamed jobs there.
+		$again   = $this->page( 'about', $this->ids['company'] );
+		$careers = $this->page( 'careers', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $careers,
+				'post_parent' => $again,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $careers,
+				'post_name' => 'jobs',
+			]
+		);
+		wp_trash_post( $again );
+
+		$company = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+
+		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $company ), 'The URL jobs had until the second trash.' );
+		$this->assertNotContains( '/company/about/careers/ -> /company/jobs/', $this->lines( $company ), 'Jobs’ own list has that older URL.' );
+		$this->assert_the_resolver_agrees( $company );
+	}
+
+	public function test_an_alias_written_before_its_only_page_in_the_trash_lists_the_subpage_at_the_url_it_had_until_the_trash(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		// An earlier about with a subpage is deleted for good, which writes Company’s alias first.
+		$earlier = $this->page( 'about', $this->ids['company'] );
+		$this->page( 'old', $earlier );
+		wp_delete_post( $earlier, true );
+		Change_Log::reset_request();
+		$again   = $this->page( 'about', $this->ids['company'] );
+		$careers = $this->page( 'careers', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $careers,
+				'post_parent' => $again,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $careers,
+				'post_name' => 'jobs',
+			]
+		);
+		wp_trash_post( $again );
+
+		$company = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+
+		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $company ), 'The URL jobs had until the trash.' );
+		$this->assertContains( '/company/about/old/ -> /company/old/', $this->lines( $company ), 'The subpage the delete moved up still left the path.' );
+		$this->assert_the_resolver_agrees( $company );
+	}
+
+	public function test_a_subpage_renamed_before_its_parent_was_renamed_is_listed_at_the_url_it_had_then(): void {
+		foreach ( [ [ 'about', 'about-us' ], [ 'leadership', 'lead' ], [ 'team', 'crew' ] ] as [ $page, $slug ] ) {
+			wp_update_post(
+				[
+					'ID'        => $this->ids[ $page ],
+					'post_name' => $slug,
+				]
+			);
+		}
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+
+		$this->assertContains( '/company/about/team/leadership/ -> /company/about-us/crew/lead/', $this->lines( $collected ), 'Leadership kept its slug until about had moved.' );
+		$this->assertNotContains( '/company/about/team/lead/ -> /company/about-us/crew/lead/', $this->lines( $collected ), 'That URL never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_page_in_the_trash_that_moved_subpages_here_without_the_alias_leaves_the_page_s_own_subpages_listed(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		// A new about with an FAQ moves under About and goes to the trash: FAQ moves up to About.
+		$other = $this->page( 'about', $this->ids['company'] );
+		$this->page( 'faq', $other );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_parent' => $this->ids['about'],
+			]
+		);
+		wp_trash_post( $other );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+
+		$this->assertSame(
+			[
+				'/company/about/faq/ -> /company/about-us/faq/',
+				'/company/about/history/ -> /company/about-us/history/',
+				'/company/about/team/ -> /company/about-us/team/',
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
+			],
+			$this->lines( $collected ),
+			'The page in the trash wrote another alias, so About’s own subpages still left this path.'
+		);
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_an_alias_whose_moved_subpages_are_gone_never_lists_the_new_parent_s_own_subpage(): void {
+		$this->page( 'careers', $this->ids['company'] );
+		wp_trash_post( $this->ids['about'] );
+		$this->trash_raw( $this->ids['team'] );
+		$this->trash_raw( $this->ids['history'] );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+
+		$this->assertSame( [], $this->lines( $collected ), '/company/about/careers/ never existed.' );
+	}
+
+	public function test_unrelated_moves_in_the_trash_leave_the_marker_budget_to_this_page(): void {
+		$archive = $this->page( 'archive', $this->ids['company'] );
+		// An older svc moves under Archive, so it holds company/svc, and takes four subpages up to Archive.
+		$older = $this->page( 'svc', $this->ids['company'] );
+		for ( $i = 1; $i <= 4; $i++ ) {
+			$this->page( 'x' . $i, $older );
+		}
+		wp_update_post(
+			[
+				'ID'          => $older,
+				'post_parent' => $archive,
+			]
+		);
+		wp_trash_post( $older );
+		Change_Log::reset_request();
+		$svc = $this->page( 'svc', $this->ids['company'] );
+		$this->page( 's1', $svc );
+		$this->page( 's2', $svc );
+		wp_trash_post( $svc );
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 3 );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/svc' );
+
+		$this->assertSame(
+			[
+				'/company/svc/s1/ -> /company/s1/',
+				'/company/svc/s2/ -> /company/s2/',
+			],
+			$this->lines( $collected )
+		);
+		$this->assertFalse( $collected['capped'] );
+	}
+
+	public function test_holders_of_listed_paths_cost_the_same_few_queries_for_fifty(): void {
+		$five  = $this->queries_to_collect_held( 'held-five', 5 );
+		$fifty = $this->queries_to_collect_held( 'held-fifty', 50 );
+
+		$this->assertSame( $five, $fifty, 'The holders’ ancestors are read a level at a time, never one holder at a time.' );
+	}
+
+	/**
+	 * Queries a cold collect costs when every old subpage path is held by
+	 * another page that moved from there to a top-level parent of its own.
+	 *
+	 * @param string $slug The page's old slug.
+	 * @param int    $held How many old subpage paths are held elsewhere.
+	 * @return int
+	 */
+	private function queries_to_collect_held( string $slug, int $held ): int {
+		$parent = $this->page( $slug, $this->ids['company'] );
+		for ( $i = 1; $i <= $held; $i++ ) {
+			$elsewhere = $this->page( $slug . '-top-' . $i );
+			$moved     = $this->page( 'c' . $i, $parent );
+			wp_update_post(
+				[
+					'ID'          => $moved,
+					'post_parent' => $elsewhere,
+				]
+			);
+			$this->page( 'c' . $i, $parent );
+		}
+		wp_update_post(
+			[
+				'ID'        => $parent,
+				'post_name' => $slug . '-now',
+			]
+		);
+		$post = get_post( $parent );
+		wp_cache_flush();
+
+		$queries   = get_num_queries();
+		$collected = $this->pairs->collect_post( $post, 'company/' . $slug );
+		$this->assertCount( 1, $collected['pairs'], 'Each old subpage path leads to the page that moved away from it.' );
+		return get_num_queries() - $queries;
+	}
+
+	public function test_a_long_chain_of_deleted_roots_costs_no_more_queries_than_a_short_one(): void {
+		$short = $this->queries_to_collect_chain( 'short', 4 );
+		$long  = $this->queries_to_collect_chain( 'long', 12 );
+
+		$this->assertSame( $short, $long, 'Each deleted root is followed once, without a read.' );
+	}
+
+	/**
+	 * Queries a cold collect costs for a chain of nested roots, trashed child
+	 * first in one bulk action and then all deleted for good.
+	 *
+	 * @param string $prefix Slug prefix.
+	 * @param int    $length How many roots.
+	 * @return int
+	 */
+	private function queries_to_collect_chain( string $prefix, int $length ): int {
+		Change_Log::reset_request();
+		$chain  = [];
+		$parent = $this->ids['company'];
+		for ( $i = 1; $i <= $length; $i++ ) {
+			$parent  = $this->page( $prefix . '-' . $i, $parent );
+			$chain[] = $parent;
+		}
+		$kid = $this->page( $prefix . '-kid', $parent );
+		$ids = array_reverse( $chain );
+		$this->start_core_bulk( 'trash', $ids );
+		foreach ( $ids as $id ) {
+			wp_trash_post( $id );
+		}
+		$this->end_core_bulk();
+		$change = $this->log->latest( $this->admin );
+		foreach ( $ids as $id ) {
+			wp_delete_post( $id, true );
+		}
+		wp_cache_flush();
+
+		$queries   = get_num_queries();
+		$collected = $this->pairs->collect_change( $change );
+		$cost      = get_num_queries() - $queries;
+		$this->assertContains( $kid, array_column( $collected['pairs'], 'id' ) );
+		$this->assert_the_resolver_agrees( $collected );
+		return $cost;
+	}
+
+	public function test_an_old_path_lists_the_subpages_a_later_trash_moved_up_at_the_urls_they_had_then(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['company'],
+				'post_name' => 'studio',
+			]
+		);
+		// The trash moves about's subpages up to Company after Company left company.
+		wp_trash_post( $this->ids['about'] );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company' );
+
+		$this->assertContains( '/company/about/team/ -> /studio/team/', $this->lines( $collected ), 'The URL team had when Company left the path.' );
+		$this->assertContains( '/company/about/team/leadership/ -> /studio/team/leadership/', $this->lines( $collected ) );
+		$this->assertNotContains( '/company/team/ -> /studio/team/', $this->lines( $collected ), 'That URL never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_trash_lists_a_deeper_subpage_renamed_since_at_the_url_it_had_until_the_trash(): void {
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['leadership'],
+				'post_name' => 'lead',
+			]
+		);
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertContains( '/company/about/team/leadership/ -> /company/team/lead/', $this->lines( $collected ), 'The URL leadership had until the trash.' );
+		$this->assertNotContains( '/company/about/team/lead/ -> /company/team/lead/', $this->lines( $collected ), 'That URL never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_an_old_url_the_resolver_no_longer_serves_is_not_listed(): void {
+		wp_trash_post( $this->ids['about'] );
+		// History moves on, and Company is renamed: the alias leads to studio/history, where nothing is.
+		$services = $this->page( 'services', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_parent' => $services,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['company'],
+				'post_name' => 'studio',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+
+		$this->assertNotContains( '/company/about/history/ -> /studio/services/history/', $this->lines( $collected ), 'The resolver sends that URL nowhere.' );
+		$this->assertContains( '/company/about/team/ -> /studio/team/', $this->lines( $collected ) );
+		$this->assert_the_resolver_agrees( $collected );
 	}
 }
