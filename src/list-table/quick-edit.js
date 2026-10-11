@@ -3,6 +3,7 @@
  * subpages changes, and the redirects after such a save.
  */
 import { speak } from '@wordpress/a11y';
+import { __ } from '@wordpress/i18n';
 import { fetchHierarchy, fetchPairs } from '../common/api';
 import config from '../common/config';
 import {
@@ -33,52 +34,84 @@ function makeDismissible() {
 }
 
 /**
+ * Prints and speaks a notice under the heading.
+ *
+ * @param {string}      status   Notice status: info, warning and so on.
+ * @param {string}      sentence What to say.
+ * @param {Object|null} source   Redirects source for the button, or null for none.
+ * @param {string}      label    The button's label.
+ */
+function printNotice( status, sentence, source, label ) {
+	const end = window.document.querySelector( '.wp-header-end' );
+	if ( ! end ) {
+		return;
+	}
+	const notice = window.document.createElement( 'div' );
+	notice.className = `notice notice-${ status } is-dismissible hierarchy-guard-urls`;
+	const text = window.document.createElement( 'p' );
+	text.textContent = sentence + ' ';
+	if ( source ) {
+		const button = window.document.createElement( 'button' );
+		button.type = 'button';
+		button.className = 'button-link';
+		button.setAttribute( 'aria-haspopup', 'dialog' );
+		button.textContent = label;
+		button.addEventListener( 'click', () => {
+			open( ( close ) => (
+				<RedirectsModal source={ source } onClose={ close } />
+			) );
+		} );
+		text.appendChild( button );
+	}
+	notice.appendChild( text );
+	end.parentNode.insertBefore( notice, end.nextSibling );
+	makeDismissible();
+	speak( sentence, 'polite' );
+}
+
+/**
+ * Says the save changed URLs but their redirects could not be loaded.
+ *
+ * @param {Object|null} source Redirects source for the button, or null.
+ */
+function printFailure( source ) {
+	printNotice(
+		'warning',
+		__(
+			'This save changed URLs, but their redirects couldn’t be loaded.',
+			'hierarchy-guard'
+		),
+		source,
+		__( 'View redirects', 'hierarchy-guard' )
+	);
+}
+
+/**
  * Prints and speaks a notice under the heading saying the save changed URLs.
  *
  * @param {number} postId Saved post.
  * @param {string} from   The old path the save recorded.
  */
 function announce( postId, from ) {
-	fetchPairs( { post: postId, from }, 1, 1 ).then( ( pairs ) => {
-		const end = window.document.querySelector( '.wp-header-end' );
-		if ( ! pairs.total || ! end ) {
-			return;
-		}
-		const sentence = changedSentence(
-			pairs.total,
-			pairs.capped,
-			config.serving,
-			config.provider
-		);
-		const notice = window.document.createElement( 'div' );
-		notice.className = `notice notice-${ changedStatus(
-			config.serving,
-			config.provider
-		) } is-dismissible hierarchy-guard-urls`;
-		const text = window.document.createElement( 'p' );
-		text.textContent = sentence + ' ';
-		if ( ! config.serving ) {
-			const button = window.document.createElement( 'button' );
-			button.type = 'button';
-			button.className = 'button-link';
-			button.setAttribute( 'aria-haspopup', 'dialog' );
-			button.textContent = viewRedirectsLabel(
-				pairs.total,
-				pairs.capped
+	const source = { post: postId, from };
+	fetchPairs( source, 1, 1 )
+		.then( ( pairs ) => {
+			if ( ! pairs.total ) {
+				return;
+			}
+			printNotice(
+				changedStatus( config.serving, config.provider ),
+				changedSentence(
+					pairs.total,
+					pairs.capped,
+					config.serving,
+					config.provider
+				),
+				config.serving ? null : source,
+				viewRedirectsLabel( pairs.total, pairs.capped )
 			);
-			button.addEventListener( 'click', () => {
-				const source = { post: postId, from };
-				open( ( close ) => (
-					<RedirectsModal source={ source } onClose={ close } />
-				) );
-			} );
-			text.appendChild( button );
-		}
-		notice.appendChild( text );
-		end.parentNode.insertBefore( notice, end.nextSibling );
-		makeDismissible();
-		speak( sentence, 'polite' );
-	} );
+		} )
+		.catch( () => printFailure( source ) );
 }
 
 /**
@@ -128,16 +161,20 @@ function attach( postId ) {
 		if ( edited && ! requested ) {
 			// Ask for the count the first time it is needed, not on every open.
 			requested = true;
-			fetchHierarchy( postId ).then( ( data ) => {
-				descendants = data.descendants;
-				const row = watched.get( postId );
-				if ( row ) {
-					row.newest = data.old_paths[ 0 ]
-						? data.old_paths[ 0 ].path
-						: null;
-				}
-				update();
-			} );
+			fetchHierarchy( postId )
+				.then( ( data ) => {
+					descendants = data.descendants;
+					const row = watched.get( postId );
+					if ( row ) {
+						row.newest = data.old_paths[ 0 ]
+							? data.old_paths[ 0 ].path
+							: null;
+					}
+					update();
+				} )
+				.catch( () => {
+					requested = false;
+				} );
 		}
 		const show = edited && !! descendants && descendants.count > 0;
 		box.hidden = ! show;
@@ -202,13 +239,15 @@ export default function bindQuickEdit() {
 		) {
 			return;
 		}
-		fetchHierarchy( postId ).then( ( data ) => {
-			const latest = data.old_paths[ 0 ]
-				? data.old_paths[ 0 ].path
-				: null;
-			if ( latest && latest !== before.newest ) {
-				announce( postId, latest );
-			}
-		} );
+		fetchHierarchy( postId )
+			.then( ( data ) => {
+				const latest = data.old_paths[ 0 ]
+					? data.old_paths[ 0 ].path
+					: null;
+				if ( latest && latest !== before.newest ) {
+					announce( postId, latest );
+				}
+			} )
+			.catch( () => printFailure( null ) );
 	} );
 }

@@ -119,7 +119,15 @@ export default function TrashDialog( {
 	if ( single ) {
 		sentence = trashSentence( single, policy, config.cap );
 	} else if ( preview ) {
-		sentence = bulkSentence( preview, policy, withChildren, config.cap );
+		sentence = bulkSentence(
+			{
+				...preview,
+				more: preview.more + Math.max( 0, withChildren - ids.length ),
+			},
+			policy,
+			withChildren,
+			config.cap
+		);
 	} else if ( 1 === selected ) {
 		sentence = initialSentence( title, children, policy );
 	} else {
