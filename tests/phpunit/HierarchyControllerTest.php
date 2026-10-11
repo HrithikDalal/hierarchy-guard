@@ -648,4 +648,80 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertNull( $page['example'] );
 	}
+
+	/**
+	 * The state of each old path of a page, by path.
+	 *
+	 * @param int $post_id Page.
+	 * @return array<string,string>
+	 */
+	private function states( int $post_id ): array {
+		$rows = $this->get( '/posts/' . $post_id . '/hierarchy' )->get_data()['old_paths'];
+		return array_combine( array_column( $rows, 'path' ), array_column( $rows, 'state' ) );
+	}
+
+	public function test_an_old_url_a_blog_post_uses_now_is_used(): void {
+		$news = $this->page( 'news' );
+		$this->rename( $news, 'updates' );
+		self::factory()->post->create(
+			[
+				'post_type'   => 'post',
+				'post_name'   => 'news',
+				'post_status' => 'publish',
+			]
+		);
+
+		$this->assertSame( [ 'news' => 'in_use' ], $this->states( $news ), 'WordPress shows the blog post at /news/.' );
+	}
+
+	public function test_an_old_url_the_resolver_follows_to_a_draft_twin_is_not_redirected(): void {
+		$this->rename( $this->ids['company'], 'company-new' );
+		// A draft keeps its slug, so it sits at Company's URL; get_page_by_path() finds it, the later of the two.
+		$this->page( 'company-new', 0, 'draft' );
+
+		$this->assertSame( [ 'company' => 'none' ], $this->states( $this->ids['company'] ) );
+	}
+
+	public function test_an_old_url_the_resolver_sends_here_past_a_newer_holder_under_the_trash_redirects_here(): void {
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
+		$studio  = $this->page( 'studio' );
+		$archive = $this->page( 'archive' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $studio,
+			]
+		);
+		$other = $this->page( 'team', $this->ids['about'] );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_parent' => $archive,
+			]
+		);
+		$this->rename( $this->ids['about'], 'about-us' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $this->ids['about'],
+			]
+		);
+		wp_trash_post( $archive );
+
+		$this->assertSame( 'ok', $this->states( $this->ids['team'] )['company/about/team'], 'The resolver passes over the page under the trash and rewrites through About.' );
+	}
+
+	public function test_an_old_url_whose_newer_holder_nobody_can_view_is_not_redirected(): void {
+		$this->rename( $this->ids['about'], 'about-us' );
+		$other = $this->page( 'about', $this->ids['company'] );
+		$this->rename( $other, 'about-y' );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_status' => 'draft',
+			]
+		);
+
+		$this->assertSame( [ 'company/about' => 'none' ], $this->states( $this->ids['about'] ) );
+	}
 }

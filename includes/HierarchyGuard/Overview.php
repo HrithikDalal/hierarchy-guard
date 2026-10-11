@@ -11,6 +11,7 @@ namespace HierarchyGuard;
 
 use HierarchyGuard\Admin\List_Table;
 use HierarchyGuard\Export\Csv;
+use HierarchyGuard\Redirects\Batch_Resolver;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
@@ -195,45 +196,42 @@ final class Overview {
 	 * home URL. A path the post is at again, as after a trash moved it back,
 	 * is its URL, not an old one.
 	 *
-	 * Each has a state: `in_use` when another live page is at the path or is
-	 * the newest live page to hold it, which the resolver sends it to; `none`
-	 * when that newest holder sits under the trash, which the resolver passes
-	 * over; `trash` when a page in the trash holds it; `none` when this page
-	 * is not viewable or sits under the trash so nothing can redirect here;
-	 * and `ok` otherwise.
+	 * Each has a state, from what the server does with a request for it, all
+	 * of them worked out at once: `ok` when it redirects here; `in_use` when
+	 * it redirects to another page, or WordPress shows a page, a blog post or
+	 * an attachment there; `trash` when it redirects nowhere and a page in the
+	 * trash holds it; `none` when it redirects nowhere.
 	 *
 	 * @param WP_Post $post Post.
 	 * @return array<int,array{path:string,url:string,state:string}>
 	 */
 	private function old_paths( WP_Post $post ): array {
-		$post_id   = (int) $post->ID;
-		$type      = (string) $post->post_type;
-		$current   = Paths::uri( $post );
-		$reachable = is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( $current );
-		$paths     = array_values( array_diff( array_reverse( $this->ledger->paths_for( $post_id ) ), [ $current ] ) );
+		$post_id = (int) $post->ID;
+		$type    = (string) $post->post_type;
+		$current = Paths::uri( $post );
+		$paths   = array_values( array_diff( array_reverse( $this->ledger->paths_for( $post_id ) ), [ $current ] ) );
 
-		$out = [];
+		$urls = [];
 		foreach ( array_slice( $paths, 0, self::MAX_OLD_PATHS ) as $path ) {
 			$url = Paths::url( $type, $path );
 			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
-			if ( '' === $url ) {
-				continue;
+			if ( '' !== $url ) {
+				$urls[ $path ] = $url;
 			}
-			$owner  = get_page_by_path( $path, OBJECT, $type );
-			$holder = $this->ledger->find( $type, $path );
-			$other  = null !== $holder && $holder > 0 && $holder !== $post_id ? get_post( $holder ) : null;
-			if ( $owner instanceof WP_Post && (int) $owner->ID !== $post_id && is_post_publicly_viewable( $owner ) ) {
-				// A live page at the old path is reached before any redirect.
-				$state = 'in_use';
-			} elseif ( $other instanceof WP_Post ) {
-				// The resolver follows the newest live page to hold the path, and passes over one under the trash.
-				$state = Paths::has_trashed_segment( Paths::uri( $other ) ) ? 'none' : 'in_use';
-			} elseif ( Ledger::held_in_trash( $type, $path ) ) {
-				$state = 'trash';
-			} elseif ( ! $reachable ) {
-				$state = 'none';
-			} else {
+		}
+		$facts  = [];
+		$served = Batch_Resolver::served( array_map( 'strval', array_keys( $urls ) ), $type, $facts, true );
+
+		$out = [];
+		foreach ( $urls as $path => $url ) {
+			$path   = (string) $path;
+			$target = $served[ $path ] ?? 0;
+			if ( $target === $post_id ) {
 				$state = 'ok';
+			} elseif ( 0 !== $target ) {
+				$state = 'in_use';
+			} else {
+				$state = ! empty( $facts[ $path ]['held'] ) ? 'trash' : 'none';
 			}
 			$out[] = [
 				'path'  => $path,

@@ -46,11 +46,19 @@ final class Prefetched_View implements Ledger_View {
 	private ?array $roots = null;
 
 	/**
-	 * The post at each path looked up as a request, 0 for none.
+	 * The post at each path looked up as a request, 0 for none, Batch_Resolver::UNKNOWN when core could not be asked.
 	 *
 	 * @var array<string,int>
 	 */
 	private array $requests = [];
+
+	/**
+	 * Whether anyone can view a post of a type with a slug, for the slugs the
+	 * post rules would look up for the request paths read.
+	 *
+	 * @var array<string,array<string,bool>>
+	 */
+	private array $named = [];
 
 	/**
 	 * The post at each rewritten path, 0 for none.
@@ -173,7 +181,21 @@ final class Prefetched_View implements Ledger_View {
 			return true;
 		}
 		$there = $this->requests[ $path ];
-		return ! ( $there > 0 && is_post_publicly_viewable( $there ) );
+		if ( $there < 0 ) {
+			// Core was not asked about a path two pages share: taken as served by one of them.
+			return false;
+		}
+		return Rules::is_404( $there > 0 ? $this->post( $there ) : null, $path, $this->post_type, fn( string $type, string $name ): bool => $this->named[ $type ][ $name ] ?? false );
+	}
+
+	/**
+	 * Whether a request path was looked up.
+	 *
+	 * @param string $path Normalized path.
+	 * @return bool
+	 */
+	public function knows( string $path ): bool {
+		return isset( $this->requests[ $path ] );
 	}
 
 	/**
@@ -218,17 +240,23 @@ final class Prefetched_View implements Ledger_View {
 	/**
 	 * Adds the posts looked up.
 	 *
-	 * @param string[]          $requests   Paths looked up as a request.
-	 * @param array<string,int> $at         The post found at each, by path; absent for none.
-	 * @param string[]          $candidates Rewritten paths looked up.
-	 * @param array<string,int> $there      The post found at each, by path; absent for none.
+	 * @param string[]                         $requests   Paths looked up as a request.
+	 * @param array<string,int>                $at         The post found at each, by path; absent for none.
+	 * @param string[]                         $candidates Rewritten paths looked up.
+	 * @param array<string,int>                $there      The post found at each, by path; absent for none.
+	 * @param array<string,array<string,bool>> $named      Whether anyone can view a post of a type with a slug, by type and slug.
 	 */
-	public function add_lookups( array $requests, array $at, array $candidates, array $there ): void {
+	public function add_lookups( array $requests, array $at, array $candidates, array $there, array $named = [] ): void {
 		foreach ( $requests as $path ) {
 			$this->requests[ $path ] = (int) ( $at[ $path ] ?? 0 );
 		}
 		foreach ( $candidates as $path ) {
 			$this->candidates[ $path ] = (int) ( $there[ $path ] ?? 0 );
+		}
+		foreach ( $named as $type => $names ) {
+			foreach ( $names as $name => $viewable ) {
+				$this->named[ (string) $type ][ (string) $name ] = ( $this->named[ (string) $type ][ (string) $name ] ?? false ) || $viewable;
+			}
 		}
 	}
 

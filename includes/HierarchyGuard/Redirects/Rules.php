@@ -148,4 +148,65 @@ final class Rules {
 			&& is_post_publicly_viewable( $target )
 			&& ! Paths::has_trashed_segment( $view->uri( $target ) );
 	}
+
+	/**
+	 * Whether WP's main query answers a request for a path with a 404: only
+	 * then does the resolver run. $at is the post the page rule finds,
+	 * get_page_by_path( $path, OBJECT, $post_type ), which serves the request
+	 * when anyone can view it. Under /%postname%/ the page rule only matches
+	 * a post whose status lets it, and the post rules come next: a blog post
+	 * named as a one-segment path, and an attachment named as the last segment
+	 * of a two-segment path, wherever it is attached, are served there. Other
+	 * rewrite rules are not looked at.
+	 *
+	 * @param WP_Post|null $at        The post at the path, as the page rule finds it.
+	 * @param string       $path      Normalized path.
+	 * @param string       $post_type Post type the request is for.
+	 * @param callable     $named     Whether anyone can view a post of a type with a slug: fn( string $type, string $name ): bool.
+	 * @return bool
+	 */
+	public static function is_404( ?WP_Post $at, string $path, string $post_type, callable $named ): bool {
+		$postname = 'page' === $post_type && self::posts_at_the_root();
+		if ( $at instanceof WP_Post && ( ! $postname || self::page_rule_matches( $at ) ) ) {
+			return ! is_post_publicly_viewable( $at );
+		}
+		if ( ! $postname ) {
+			return true;
+		}
+		$segments = explode( '/', $path );
+		if ( 1 === count( $segments ) ) {
+			return ! $named( 'post', $segments[0] );
+		}
+		if ( 2 === count( $segments ) ) {
+			return ! $named( 'attachment', $segments[1] );
+		}
+		return true;
+	}
+
+	/**
+	 * Whether blog posts live at the top level, /%postname%/, where a request
+	 * the page rule passes over goes to a post or an attachment.
+	 *
+	 * @return bool
+	 */
+	public static function posts_at_the_root(): bool {
+		$struct = trim( (string) get_option( 'permalink_structure' ), '/' );
+		if ( str_starts_with( $struct, 'index.php/' ) ) {
+			$struct = substr( $struct, strlen( 'index.php/' ) );
+		}
+		return '%postname%' === $struct;
+	}
+
+	/**
+	 * Whether the page rule matches a post found at the path: WP::parse_request()
+	 * passes over one whose status is neither public, protected nor private
+	 * and is left out of search, as a post in the trash.
+	 *
+	 * @param WP_Post $at The post found.
+	 * @return bool
+	 */
+	private static function page_rule_matches( WP_Post $at ): bool {
+		$status = get_post_status_object( (string) $at->post_status );
+		return ! ( null !== $status && ! $status->public && ! $status->protected && ! $status->private && $status->exclude_from_search );
+	}
 }

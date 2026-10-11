@@ -32,6 +32,13 @@ final class Change_Listener {
 	private Ledger $ledger;
 
 	/**
+	 * Posts being deleted that hold ledger entries, by ID: core deletes their meta before deleted_post.
+	 *
+	 * @var array<int,true>
+	 */
+	private array $deleting = [];
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Ledger $ledger Ledger.
@@ -46,6 +53,9 @@ final class Change_Listener {
 	public function register(): void {
 		add_action( 'post_updated', [ $this, 'on_post_updated' ], 10, 3 );
 		add_action( 'before_delete_post', [ $this, 'on_before_delete' ], 10, 2 );
+		add_action( 'trashed_post', [ $this, 'on_holder_changed' ] );
+		add_action( 'untrashed_post', [ $this, 'on_holder_changed' ] );
+		add_action( 'deleted_post', [ $this, 'on_deleted' ] );
 	}
 
 	/**
@@ -102,10 +112,13 @@ final class Change_Listener {
 	 * @param WP_Post $post    Post being deleted.
 	 */
 	public function on_before_delete( int $post_id, WP_Post $post ): void {
-		if ( self::$suspended ) {
+		if ( ! Post_Types::is_supported( (string) $post->post_type ) ) {
 			return;
 		}
-		if ( ! Post_Types::is_supported( (string) $post->post_type ) ) {
+		if ( Ledger::has_entries( $post_id ) ) {
+			$this->deleting[ $post_id ] = true;
+		}
+		if ( self::$suspended ) {
 			return;
 		}
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
@@ -131,6 +144,33 @@ final class Change_Listener {
 
 		foreach ( $paths as $path ) {
 			$this->ledger->record_alias( (string) $post->post_type, (int) $post->post_parent, $path );
+		}
+	}
+
+	/**
+	 * A post that holds ledger entries went to the trash or came back: the
+	 * ledger's cached lookups may name it, or a holder it hid, so they are
+	 * dropped. Trashing a page with no subpages writes nothing to the ledger.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	public function on_holder_changed( int $post_id ): void {
+		$type = get_post_type( $post_id );
+		if ( false === $type || ! Post_Types::is_supported( $type ) || ! Ledger::has_entries( $post_id ) ) {
+			return;
+		}
+		$this->ledger->invalidate();
+	}
+
+	/**
+	 * A post that held ledger entries is gone: the cached lookups that name it are dropped.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	public function on_deleted( int $post_id ): void {
+		if ( isset( $this->deleting[ $post_id ] ) ) {
+			unset( $this->deleting[ $post_id ] );
+			$this->ledger->invalidate();
 		}
 	}
 

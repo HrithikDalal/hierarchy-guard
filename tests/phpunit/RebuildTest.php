@@ -105,6 +105,32 @@ final class RebuildTest extends TestCase {
 				),
 				[ [ 'company/about/team', 3 ] ],
 			],
+			'a subpage moved and renamed in one save'     => [
+				self::block( 'company/about', 2, 'company/about-us' ),
+				self::tree( [ self::node( 4, 2, 'history' ) ], [ 4 => [ self::node( 3, 4, 'crew' ) ] ] ),
+				self::history(
+					[
+						1 => $company,
+						2 => self::place( 1, 'about-us' ),
+					],
+					[
+						2 => [ self::entry( 10, 'company/about' ) ],
+						// Team was at about-us/team when one save gave it History as parent and crew as slug.
+						3 => [ self::entry( 20, 'company/about-us/team' ) ],
+					]
+				),
+				[ [ 'company/about/history', 4 ], [ 'company/about/team', 3 ] ],
+			],
+			'an old path below the page\'s own path now'  => [
+				self::block( 'company/about', 2, 'company' ),
+				self::tree( [ self::node( 3, 2, 'team' ) ] ),
+				self::history(
+					[ 2 => self::place( 0, 'company' ) ],
+					// About was at company/about, and is the top-level company now.
+					[ 2 => [ self::entry( 10, 'company/about' ) ] ]
+				),
+				[ [ 'company/about/team', 3 ] ],
+			],
 		];
 	}
 
@@ -122,6 +148,105 @@ final class RebuildTest extends TestCase {
 		$above = static fn( int $parent_id ): string => 1 === $parent_id ? 'company' : '';
 
 		$this->assertSame( $listed, Rebuild::listed_then( $block, $tree, $history, $above ) );
+	}
+
+	/**
+	 * Tables with several dates: the post's own and those of pages in the trash
+	 * that left the path, some before their trash.
+	 *
+	 * @return array<string,array{0:array<string,mixed>,1:array<string,mixed>,2:array<string,mixed>}>
+	 */
+	public function dated(): array {
+		$out = [];
+		foreach ( $this->rows() as $name => [ $block, $tree, $history ] ) {
+			$out[ $name ] = [ $block, $tree, $history ];
+		}
+		$tops    = [ self::node( 3, 2, 'team' ) ];
+		$places  = [
+			1 => self::place( 0, 'company' ),
+			2 => self::place( 1, 'about-us' ),
+		];
+		$entries = [ 2 => [ self::entry( 5, 'company/about' ) ] ];
+		$markers = [];
+		$virtual = [];
+		for ( $i = 1; $i <= 6; $i++ ) {
+			$tops[]             = self::node( 50 + $i, 2, 'kid-' . ( $i % 3 ) ) + [ 'holder' => 20 + $i ];
+			$places[ 20 + $i ]  = self::place( 1, 0 === $i % 2 ? 'about' : 'about-' . $i );
+			$entries[ 20 + $i ] = [ self::entry( 10 * $i + ( 0 === $i % 3 ? -8 : 2 ), 'company/about' ) ];
+			$markers[ 50 + $i ] = [ self::marker( 10 * $i + 1, 20 + $i, 'kid-' . ( $i % 3 ) ) ];
+			$virtual[ 20 + $i ] = [ 'aliases' => [] ];
+			$entries[3][]       = self::entry( 10 * $i + 3, 'company/about-us/team-' . $i );
+		}
+		$out['six pages in the trash and the post, with renames between'] = [
+			self::block( 'company/about', 2, 'company/about-us' ),
+			self::tree( $tops ),
+			self::history( $places, $entries, $markers, $virtual ),
+		];
+		return $out;
+	}
+
+	/**
+	 * The sweep lists what one rewind per date lists, the first date to list a path keeping it.
+	 *
+	 * @dataProvider dated
+	 *
+	 * @param array<string,mixed> $block   Block.
+	 * @param array<string,mixed> $tree    Walk.
+	 * @param array<string,mixed> $history History.
+	 */
+	public function test_the_sweep_lists_what_a_rewind_per_date_lists( array $block, array $tree, array $history ): void {
+		$above             = static fn( int $parent_id ): string => 1 === $parent_id ? 'company' : '';
+		[ $nodes, $order ] = Rebuild::walked( $block, $tree );
+		$places            = Rebuild::places( $block, $nodes, $history, $above );
+		$old               = (string) $block['old'];
+		$expected          = [];
+		$seen              = [];
+		foreach ( Rebuild::passes( $block, $nodes, $history ) as [ $anchor, $date ] ) {
+			$then = Rebuild::rewind( $places, $history, $date, $anchor, $old );
+			foreach ( $order as $id ) {
+				$path = $then[ $id ] ?? '';
+				if ( 'publish' === $nodes[ $id ]['status'] && str_starts_with( $path, $old . '/' ) && ! isset( $seen[ $path ] ) ) {
+					$seen[ $path ] = true;
+					$expected[]    = [ $path, (int) $id ];
+				}
+			}
+		}
+
+		$this->assertNotSame( [], $expected );
+		$this->assertSame( $expected, Rebuild::listed_then( $block, $tree, $history, $above ) );
+	}
+
+	public function test_many_pages_in_the_trash_at_one_old_path_rebuild_in_linear_time(): void {
+		$holders = 1000;
+		$tops    = [];
+		$places  = [ 1 => self::place( 0, 'company' ) ];
+		$entries = [ 1 => [ self::entry( 1, 'company/about' ) ] ];
+		$markers = [];
+		$virtual = [];
+		$listed  = [];
+		for ( $i = 1; $i <= $holders; $i++ ) {
+			// Page 1000 + i held company/about, had subpage 5000 + i and went to the trash, which moved it up to Company.
+			$tops[]               = self::node( 5000 + $i, 1, 'kid-' . $i ) + [ 'holder' => 1000 + $i ];
+			$places[ 1000 + $i ]  = self::place( 1, 'about' );
+			$entries[ 1000 + $i ] = [ self::entry( 10 * $i + 2, 'company/about' ) ];
+			$markers[ 5000 + $i ] = [ self::marker( 10 * $i + 1, 1000 + $i, 'kid-' . $i ) ];
+			$virtual[ 1000 + $i ] = [
+				'aliases' => [
+					[
+						'to'   => 1,
+						'path' => 'company/about',
+					],
+				],
+			];
+			$listed[]             = [ 'company/about/kid-' . $i, 5000 + $i ];
+		}
+
+		$start  = microtime( true );
+		$result = Rebuild::listed_then( self::block( 'company/about', 1, 'company', 0 ), self::tree( $tops ), self::history( $places, $entries, $markers, $virtual ), static fn(): string => '' );
+		$took   = microtime( true ) - $start;
+
+		$this->assertSame( $listed, $result );
+		$this->assertLessThan( 1.0, $took, 'One pass per page in the trash, each over every event, took quadratic time.' );
 	}
 
 	/**

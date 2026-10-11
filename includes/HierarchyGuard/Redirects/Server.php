@@ -93,13 +93,7 @@ final class Server {
 			return null;
 		}
 
-		/**
-		 * Filters the maximum number of path segments a request may have to be resolved.
-		 *
-		 * @param int $max Segment cap.
-		 */
-		$max_segments = (int) apply_filters( 'hierarchy_guard_max_segments', self::MAX_SEGMENTS );
-		if ( substr_count( $request['path'], '/' ) + 1 > $max_segments ) {
+		if ( substr_count( $request['path'], '/' ) + 1 > self::max_segments() ) {
 			return null;
 		}
 
@@ -160,6 +154,44 @@ final class Server {
 			'url'    => $url,
 			'status' => $status,
 		];
+	}
+
+	/**
+	 * The most path segments a request may have to be resolved.
+	 *
+	 * @return int
+	 */
+	public static function max_segments(): int {
+		/**
+		 * Filters the maximum number of path segments a request may have to be resolved.
+		 *
+		 * @param int $max Segment cap.
+		 */
+		return (int) apply_filters( 'hierarchy_guard_max_segments', self::MAX_SEGMENTS );
+	}
+
+	/**
+	 * The rewrite prefix a post type's URLs start with, normalized: empty for
+	 * pages and for a type without a permastruct.
+	 *
+	 * @param string $type Post type name.
+	 * @return string
+	 */
+	public static function prefix( string $type ): string {
+		global $wp_rewrite;
+
+		if ( 'page' === $type || ! $wp_rewrite instanceof WP_Rewrite ) {
+			return '';
+		}
+		$struct = $wp_rewrite->get_extra_permastruct( $type );
+		if ( ! is_string( $struct ) || '' === $struct ) {
+			return '';
+		}
+		$prefix = trim( str_replace( '%' . $type . '%', '', $struct ), '/' );
+		if ( str_starts_with( $prefix, $wp_rewrite->index . '/' ) ) {
+			$prefix = substr( $prefix, strlen( $wp_rewrite->index ) + 1 );
+		}
+		return Paths::normalize( $prefix );
 	}
 
 	/**
@@ -230,15 +262,7 @@ final class Server {
 				if ( 'page' === $type ) {
 					continue;
 				}
-				$struct = $wp_rewrite->get_extra_permastruct( $type );
-				if ( ! is_string( $struct ) || '' === $struct ) {
-					continue;
-				}
-				$prefix = trim( str_replace( '%' . $type . '%', '', $struct ), '/' );
-				if ( str_starts_with( $prefix, $wp_rewrite->index . '/' ) ) {
-					$prefix = substr( $prefix, strlen( $wp_rewrite->index ) + 1 );
-				}
-				$prefix = Paths::normalize( $prefix );
+				$prefix = self::prefix( $type );
 				if ( '' !== $prefix && str_starts_with( $path, $prefix . '/' ) ) {
 					$typed[] = [ strlen( $prefix ), $type, substr( $path, strlen( $prefix ) + 1 ) ];
 				}

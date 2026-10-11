@@ -326,4 +326,62 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 
 		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
 	}
+
+	/**
+	 * Company › About, with About renamed to about-us and a newer page that
+	 * held company/about since renamed too: that page is the newest holder.
+	 *
+	 * @return int The newer page.
+	 */
+	private function newer_holder(): int {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-us',
+			]
+		);
+		$other = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $this->company,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $other,
+				'post_name' => 'x-now',
+			]
+		);
+		return $other;
+	}
+
+	public function test_trashing_a_holder_with_no_subpages_drops_the_cached_lookup(): void {
+		$other = $this->newer_holder();
+		$this->assertSame( $other, $this->ledger->find( 'page', 'company/about' ), 'Cached: the newer page holds the path.' );
+
+		wp_trash_post( $other );
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ), 'The live holder takes over at once.' );
+		$this->assertSame( $this->team, ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team' )->ID );
+	}
+
+	public function test_restoring_a_holder_drops_the_cached_lookup(): void {
+		$other = $this->newer_holder();
+		wp_trash_post( $other );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ) );
+
+		wp_untrash_post( $other );
+
+		$this->assertSame( $other, $this->ledger->find( 'page', 'company/about' ), 'The restored page holds the path again.' );
+	}
+
+	public function test_deleting_a_holder_drops_the_cached_lookup(): void {
+		$other = $this->newer_holder();
+		$this->assertSame( $other, $this->ledger->find( 'page', 'company/about' ) );
+
+		wp_delete_post( $other, true );
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'company/about' ) );
+	}
 }

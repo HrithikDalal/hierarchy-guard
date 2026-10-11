@@ -92,6 +92,20 @@ final class Live_View implements Ledger_View {
 	 */
 	public function is_404( string $path, string $post_type ): bool {
 		$there = get_page_by_path( $path, OBJECT, $post_type );
-		return ! ( $there instanceof WP_Post && is_post_publicly_viewable( $there ) );
+		return Rules::is_404(
+			$there instanceof WP_Post ? $there : null,
+			$path,
+			$post_type,
+			static function ( string $type, string $name ): bool {
+				global $wpdb;
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A point lookup on the post_name index, for a one- or two-segment path only.
+				foreach ( (array) $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_name = %s AND post_type = %s", $name, $type ) ) as $id ) {
+					if ( is_post_publicly_viewable( (int) $id ) ) {
+						return true;
+					}
+				}
+				return false;
+			}
+		);
 	}
 }

@@ -100,9 +100,9 @@ final class Pairs {
 	 * post's own list has them. A deleted root's old path leads to its target
 	 * only while that target holds it, so with no live holder it is
 	 * unresolved, while its subpages are still listed. When the newest live
-	 * holder of a block's own old path is not the page it leads to, or sits
-	 * under the trash, the whole block is unresolved. Last, each pair is
-	 * checked against what the resolver serves.
+	 * holder of a block's own old path is another page outside the trash, the
+	 * whole block is unresolved. Last, each pair is checked against what the
+	 * resolver serves.
 	 *
 	 * @param array<int,array<string,mixed>> $blocks    Blocks.
 	 * @param string                         $post_type Post type name.
@@ -114,19 +114,20 @@ final class Pairs {
 		$open       = self::open_blocks( $blocks, $post_type );
 		$in_use     = self::in_use( $open, $post_type, $unresolved );
 		$tree       = $this->walk( $open, $post_type, $cap );
-		$listing    = self::listing( $open, $in_use, $tree, self::history_of( $open, $tree, $post_type ), $cap, $unresolved );
+		$history    = self::history_of( $open, $tree, $post_type );
+		$listing    = self::listing( $open, $in_use, $tree, $history, $cap, $unresolved );
 
 		// The ledger as the resolver reads it, for every prefix of every path
 		// listed, in one query.
 		$olds  = array_merge( array_column( $listing['pairs'], 'old' ), array_map( static fn( array $block ): string => (string) $block['old'], $open ) );
 		$facts = Batch_Resolver::ledger_facts( Batch_Resolver::prefixes( $olds ), $post_type );
-		$gone  = self::dropped( $open, $listing, Batch_Resolver::holders( $olds, $facts ), $unresolved );
+		$gone  = self::dropped( $open, $listing, Batch_Resolver::holders( $olds, $facts ) );
 
 		return [
 			'post_type'  => $post_type,
-			'pairs'      => self::served_only( $listing, $gone, $post_type, $facts, $unresolved ),
+			'pairs'      => self::served_only( $open, $listing, $gone, $post_type, $facts, $unresolved ),
 			'unresolved' => $unresolved,
-			'capped'     => $listing['capped'] || $tree['capped'],
+			'capped'     => $listing['capped'] || $tree['capped'] || ! empty( $history['capped'] ),
 		];
 	}
 
@@ -297,30 +298,30 @@ final class Pairs {
 	 * The pairs the ledger gives to another post, with the pages listed below
 	 * them, and the deleted roots' old paths no live page holds.
 	 *
-	 * @param array<int,array<string,mixed>>             $open       Blocks by index.
-	 * @param array<string,mixed>                        $listing    From listing().
-	 * @param array<string,array{id:int,trashed:bool}>   $holders    From Batch_Resolver::holders().
-	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; one is added per block or path that leads nowhere here.
-	 * @return array{dropped:array<int,true>,unheld:array<int,true>} By pair index.
+	 * The resolver rewrites an old path through the newest live post that
+	 * holds its longest known prefix. When that post for a block's own old path
+	 * is another page outside the trash, the block leads there: it is void, and
+	 * that page's own list has what sits under it. When that post sits under
+	 * the trash the resolver passes over it to a shorter prefix, so the served
+	 * check decides, and an old path that leads nowhere is in the trash.
+	 *
+	 * @param array<int,array<string,mixed>>           $open    Blocks by index.
+	 * @param array<string,mixed>                      $listing From listing().
+	 * @param array<string,array{id:int,trashed:bool}> $holders From Batch_Resolver::holders().
+	 * @return array{void:array<int,true>,trashed:array<int,true>,dropped:array<int,true>,unheld:array<int,true>} Blocks by index, then pairs by index.
 	 */
-	private static function dropped( array $open, array $listing, array $holders, array &$unresolved ): array {
-		// The resolver rewrites an old path through the newest live post that
-		// holds its longest known prefix. When that post for a block's own old
-		// path is not the page the block leads to, or sits under the trash, so
-		// the resolver passes over it, nothing in the block leads where it says.
-		$void = [];
+	private static function dropped( array $open, array $listing, array $holders ): array {
+		$void    = [];
+		$trashed = [];
 		foreach ( $open as $index => $block ) {
 			$holder = $holders[ (string) $block['old'] ] ?? null;
-			$target = (int) ( $block['target'] ?? 0 );
-			if ( null === $holder || ( ! $holder['trashed'] && $holder['id'] === $target ) ) {
+			if ( null === $holder ) {
 				continue;
 			}
-			$void[ $index ] = true;
-			if ( ! isset( $listing['headless'][ $index ] ) ) {
-				$unresolved[] = [
-					'old'    => (string) $block['old'],
-					'reason' => $holder['trashed'] ? 'trash' : 'in_use',
-				];
+			if ( $holder['trashed'] ) {
+				$trashed[ $index ] = true;
+			} elseif ( (int) ( $block['target'] ?? 0 ) !== $holder['id'] ) {
+				$void[ $index ] = true;
 			}
 		}
 
@@ -337,40 +338,62 @@ final class Pairs {
 			} elseif ( isset( $listing['held'][ $i ] ) && 0 === $holder ) {
 				// No live page holds a deleted root's old path, so it leads nowhere; its subpages may still redirect.
 				$unheld[ $i ] = true;
-				$unresolved[] = [
-					'old'    => $pair['old'],
-					'reason' => 'none',
-				];
 			}
 		}
 
 		return [
+			'void'    => $void,
+			'trashed' => $trashed,
 			'dropped' => $dropped,
 			'unheld'  => $unheld,
 		];
 	}
 
 	/**
-	 * The pairs left that the server serves.
+	 * The pairs left that the server serves, and a row for each block's own
+	 * old path that has no new URL here.
 	 *
-	 * Each is checked the way the resolver serves it: a 404 at the old path,
-	 * rewritten round by round to that page. A published page at the old path,
-	 * as under a hidden page there now, is reached before any redirect. What
-	 * the resolver does not serve is not listed; a block's own old path it
-	 * serves nowhere, or elsewhere, has no new URL here.
+	 * Each pair is checked the way the resolver serves it: a 404 at the old
+	 * path, rewritten round by round to that page. A published page at the old
+	 * path, as under a hidden page there now, is reached before any redirect.
+	 * What the resolver does not serve is not listed; a block's own old path it
+	 * serves elsewhere, or that something else is shown at, is in use, and one
+	 * it serves nowhere leads nowhere, or is in the trash when the newest live
+	 * page that held it sits under the trash.
 	 *
+	 * @param array<int,array<string,mixed>>             $open       Blocks by index.
 	 * @param array<string,mixed>                        $listing    From listing().
-	 * @param array{dropped:array<int,true>,unheld:array<int,true>} $gone From dropped().
+	 * @param array<string,array<int,true>>              $gone       From dropped().
 	 * @param string                                     $post_type  Post type name.
 	 * @param array<string,array{live:int,held:bool}>    $facts      Ledger facts read so far, by path.
-	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; a head the server does not serve is added.
+	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; one is added per old path with no new URL.
 	 * @return array<int,array{old:string,id:int}>
 	 */
-	private static function served_only( array $listing, array $gone, string $post_type, array $facts, array &$unresolved ): array {
-		$pairs   = $listing['pairs'];
+	private static function served_only( array $open, array $listing, array $gone, string $post_type, array $facts, array &$unresolved ): array {
+		$pairs = $listing['pairs'];
+		$left  = array_diff_key( $pairs, $gone['dropped'], $gone['unheld'] );
+		$heads = [];
+		foreach ( array_keys( $gone['void'] ) as $index ) {
+			if ( ! isset( $listing['headless'][ $index ] ) ) {
+				$heads[ $index ] = (string) $open[ $index ]['old'];
+			}
+		}
+		$served = Batch_Resolver::served( array_values( array_unique( array_merge( array_column( $left, 'old' ), array_values( $heads ) ) ) ), $post_type, $facts );
+		$reason = static fn( int $target, bool $trashed ): string => 0 !== $target ? 'in_use' : ( $trashed ? 'trash' : 'none' );
+
+		foreach ( $heads as $old ) {
+			$unresolved[] = [
+				'old'    => $old,
+				'reason' => $reason( $served[ $old ] ?? 0, false ),
+			];
+		}
+		foreach ( array_keys( $gone['unheld'] ) as $i ) {
+			$unresolved[] = [
+				'old'    => $pairs[ $i ]['old'],
+				'reason' => isset( $gone['trashed'][ $listing['block_of'][ $i ] ?? -1 ] ) ? 'trash' : 'none',
+			];
+		}
 		$dropped = $gone['dropped'];
-		$left    = array_diff_key( $pairs, $dropped, $gone['unheld'] );
-		$served  = Batch_Resolver::served( array_values( array_unique( array_column( $left, 'old' ) ) ), $post_type, $facts );
 		foreach ( $left as $i => $pair ) {
 			$target = $served[ $pair['old'] ] ?? 0;
 			if ( $target === $pair['id'] ) {
@@ -380,7 +403,7 @@ final class Pairs {
 			if ( ! isset( $listing['lineage'][ $i ] ) ) {
 				$unresolved[] = [
 					'old'    => $pair['old'],
-					'reason' => $target > 0 ? 'in_use' : 'none',
+					'reason' => $reason( $target, isset( $gone['trashed'][ $listing['block_of'][ $i ] ?? -1 ] ) ),
 				];
 			}
 		}

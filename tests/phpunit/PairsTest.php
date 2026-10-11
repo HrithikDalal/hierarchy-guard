@@ -12,10 +12,12 @@ namespace HierarchyGuard\Tests;
 use HierarchyGuard\Admin\Notices;
 use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Redirects\Resolver;
+use HierarchyGuard\Redirects\Server;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Change_Log;
 use WP_Post;
@@ -1343,5 +1345,274 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertNotContains( '/company/about/history/ -> /studio/services/history/', $this->lines( $collected ), 'The resolver sends that URL nowhere.' );
 		$this->assertContains( '/company/about/team/ -> /studio/team/', $this->lines( $collected ) );
 		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	/**
+	 * Where a logged-out request for an old path is redirected, by the Server
+	 * on a real main query; an empty string when it is not.
+	 *
+	 * @param string $path Normalized path.
+	 * @return string
+	 */
+	private function served_on_request( string $path ): string {
+		$user = get_current_user_id();
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		wp_set_current_user( 0 );
+		$this->go_to( Paths::url( 'page', $path ) );
+		$target = ( new Server( new Resolver( new Ledger() ) ) )->target_for_current_request();
+		wp_set_current_user( $user );
+		return null === $target ? '' : Paths::relative( $target['url'] );
+	}
+
+	public function test_with_two_pages_at_one_path_the_pairs_follow_the_one_core_finds(): void {
+		$services = $this->page( 'services', $this->ids['company'] );
+		// Core leaves a draft's slug as it is, so the draft sits at the same path.
+		$this->page( 'services', $this->ids['company'], 'draft' );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['company'],
+				'post_name' => 'company-new',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company' );
+
+		$this->assertSame( 'company-new/services', Paths::uri( get_post( $services ) ) );
+		$this->assertNotContains( '/company/services/ -> /company-new/services/', $this->lines( $collected ), 'get_page_by_path() finds the draft there, the later of the two, which nobody can view.' );
+		$this->assertContains( '/company/about/ -> /company-new/about/', $this->lines( $collected ) );
+		$this->assertSame( '', $this->served_on_request( 'company/services' ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_an_old_url_a_blog_post_uses_now_is_not_listed(): void {
+		$news = $this->page( 'news' );
+		wp_update_post(
+			[
+				'ID'        => $news,
+				'post_name' => 'updates',
+			]
+		);
+		self::factory()->post->create(
+			[
+				'post_type'   => 'post',
+				'post_name'   => 'news',
+				'post_status' => 'publish',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $news ), 'news' );
+
+		$this->assertSame( [], $this->lines( $collected ), 'WordPress shows the blog post at /news/.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/news/',
+					'reason' => 'in_use',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assertSame( '', $this->served_on_request( 'news' ) );
+	}
+
+	public function test_an_old_url_an_attachment_uses_now_is_not_listed(): void {
+		$services = $this->page( 'services', $this->ids['company'] );
+		$gallery  = $this->page( 'gallery' );
+		wp_update_post(
+			[
+				'ID'        => $services,
+				'post_name' => 'offers',
+			]
+		);
+		// WordPress serves /anything/services/ as this attachment, wherever it is attached.
+		self::factory()->attachment->create(
+			[
+				'post_name'      => 'services',
+				'post_title'     => 'services',
+				'post_parent'    => $gallery,
+				'post_mime_type' => 'image/jpeg',
+				'file'           => 'services.jpg',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $services ), 'company/services' );
+
+		$this->assertSame( [], $this->lines( $collected ) );
+		$this->assertSame( '', $this->served_on_request( 'company/services' ) );
+	}
+
+	public function test_a_subpage_moved_and_renamed_in_one_save_is_listed_at_the_url_it_had(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		// One save, as Quick Edit makes it: a new parent and a new slug.
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $this->ids['history'],
+				'post_name'   => 'crew',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+
+		$this->assertContains( '/company/about/team/ -> /company/about-us/history/crew/', $this->lines( $collected ) );
+		$this->assertContains( '/company/about/team/leadership/ -> /company/about-us/history/crew/leadership/', $this->lines( $collected ) );
+		$this->assertSame( '/company/about-us/history/crew/', $this->served_on_request( 'company/about/team' ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_the_pages_in_the_trash_read_for_an_old_path_stop_at_the_cap(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 3 );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		// Five pages each take the old path, leave it and go to the trash: each holds it there.
+		for ( $i = 1; $i <= 5; $i++ ) {
+			$held = $this->page( 'about', $this->ids['company'] );
+			wp_update_post(
+				[
+					'ID'        => $held,
+					'post_name' => 'held-' . $i,
+				]
+			);
+			wp_trash_post( $held );
+		}
+
+		$this->assertTrue( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' )['capped'] );
+	}
+
+	public function test_an_old_url_deeper_than_the_server_s_segment_cap_is_not_listed(): void {
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 3 );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['company'],
+				'post_name' => 'company-new',
+			]
+		);
+
+		$lines = $this->lines( $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company' ) );
+
+		$this->assertContains( '/company/about/team/ -> /company-new/about/team/', $lines );
+		$this->assertNotContains( '/company/about/team/leadership/ -> /company-new/about/team/leadership/', $lines, 'The server refuses a request of four segments.' );
+		$this->assertSame( '', $this->served_on_request( 'company/about/team/leadership' ) );
+	}
+
+	public function test_the_history_read_for_a_rebuild_stops_at_the_cap(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		// Forty-one renames of history: more ledger entries than twenty per page the cap allows.
+		for ( $i = 1; $i <= 41; $i++ ) {
+			wp_update_post(
+				[
+					'ID'        => $this->ids['history'],
+					'post_name' => 'history-' . $i,
+				]
+			);
+		}
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $this->ids['company'],
+			]
+		);
+
+		$this->assertTrue( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' )['capped'] );
+	}
+
+	public function test_a_newer_holder_under_the_trash_leaves_the_old_urls_the_resolver_serves_here(): void {
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
+		$studio  = $this->page( 'studio' );
+		$archive = $this->page( 'archive' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $studio,
+			]
+		);
+		// A new page takes Team's old path and moves on: it holds that path last.
+		$other = $this->page( 'team', $this->ids['about'] );
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_parent' => $archive,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_parent' => $this->ids['about'],
+			]
+		);
+		// With the keep policy the other page stays where it is, under Archive in the trash.
+		wp_trash_post( $archive );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['team'] ), 'company/about/team' );
+
+		$this->assertSame( 'publish', get_post_status( $other ) );
+		$this->assertSame(
+			[
+				'/company/about/team/ -> /company/about-us/team/',
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
+			],
+			$this->lines( $collected ),
+			'The resolver passes over that page and rewrites the URLs through About to Team.'
+		);
+		$this->assertSame( '/company/about-us/team/', $this->served_on_request( 'company/about/team' ) );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_newer_holder_nobody_can_view_leaves_the_old_path_leading_nowhere(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		$other = $this->page( 'about', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'        => $other,
+				'post_name' => 'about-y',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $other,
+				'post_status' => 'draft',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+
+		$this->assertSame( [], $this->lines( $collected ) );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'none',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved'],
+			'The resolver follows the draft, which nobody can view, so the URL leads nowhere.'
+		);
+		$this->assertSame( '', $this->served_on_request( 'company/about' ) );
 	}
 }

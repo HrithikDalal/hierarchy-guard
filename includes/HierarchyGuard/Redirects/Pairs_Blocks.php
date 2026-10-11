@@ -32,7 +32,8 @@ final class Pairs_Blocks {
 	 * slugs from before the move, and so are those that subpages of theirs in
 	 * the trash since moved up here. The post's own subpages are too, unless
 	 * one of those pages wrote this old path on the post as its alias: then the
-	 * post never lived there.
+	 * post never lived there. No more pages in the trash are read than the
+	 * count cap; past it the block is incomplete.
 	 *
 	 * @param WP_Post $post     Post the old path is recorded on.
 	 * @param string  $old_path The old path, any form.
@@ -42,7 +43,10 @@ final class Pairs_Blocks {
 		$old                 = Paths::normalize( $old_path );
 		$type                = (string) $post->post_type;
 		$id                  = (int) $post->ID;
-		$holders             = Ledger::trash_holders( $type, $old );
+		$cap                 = Subtree::count_cap();
+		$holders             = Ledger::trash_holders( $type, $old, $cap + 1 );
+		$incomplete          = count( $holders ) > $cap;
+		$holders             = array_slice( $holders, 0, $cap );
 		[ $moved, $trashed ] = self::moved_tree( $holders, $type, $id );
 		$children            = [];
 		$virtual             = $holders;
@@ -63,7 +67,7 @@ final class Pairs_Blocks {
 			'skip'        => array_column( $children, 'id' ),
 			// Pages in the trash whose trash moved those subpages up here, where they lived before.
 			'virtual'     => array_values( array_unique( array_map( 'intval', $virtual ) ) ),
-			'incomplete'  => false,
+			'incomplete'  => $incomplete,
 			'recorded_on' => $id,
 			'rebuild'     => true,
 			'target'      => $id,
@@ -80,9 +84,16 @@ final class Pairs_Blocks {
 	 * @return bool
 	 */
 	private static function wrote_alias( array $holders, int $post_id, string $path ): bool {
-		update_meta_cache( 'post', $holders );
-		foreach ( $holders as $holder ) {
-			$aliases = get_post_meta( (int) $holder, Markers::ALIASES, true );
+		global $wpdb;
+
+		if ( [] === $holders ) {
+			return false;
+		}
+		$placeholders = implode( ',', array_fill( 0, count( $holders ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per page in the trash read, at most the count cap; only the aliases row of each, on the meta_key index.
+		$rows = $wpdb->get_col( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE meta_key = %s AND post_id IN ( {$placeholders} )", ...array_merge( [ Markers::ALIASES ], array_map( 'intval', $holders ) ) ) );
+		foreach ( (array) $rows as $row ) {
+			$aliases = maybe_unserialize( (string) $row );
 			foreach ( is_array( $aliases ) ? $aliases : [] as $alias ) {
 				$to  = (int) ( $alias['to'] ?? 0 );
 				$was = Paths::normalize( (string) ( $alias['path'] ?? '' ) );

@@ -222,6 +222,27 @@ final class Ledger {
 	}
 
 	/**
+	 * Drops every cached lookup, as a ledger write does: for a change to a
+	 * post that holds entries, which find() would otherwise keep answering for.
+	 */
+	public function invalidate(): void {
+		$this->bump();
+	}
+
+	/**
+	 * Whether a post holds any ledger entry.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return bool
+	 */
+	public static function has_entries( int $post_id ): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the post_id index that stops at the first entry; once per post trashed, restored or deleted.
+		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s LIMIT 1", $post_id, $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
+	}
+
+	/**
 	 * Old paths recorded on a post, for display.
 	 *
 	 * @param int $post_id Post ID.
@@ -333,11 +354,12 @@ final class Ledger {
 	 * left the path are among them; so is a page renamed away from it before
 	 * it went to the trash.
 	 *
-	 * @param string $post_type Post type name.
-	 * @param string $path      Path, any form; normalized here.
+	 * @param string   $post_type Post type name.
+	 * @param string   $path      Path, any form; normalized here.
+	 * @param int|null $limit     Most posts to read, or null for all.
 	 * @return int[] Post IDs; empty when no post in the trash holds the path.
 	 */
-	public static function trash_holders( string $post_type, string $path ): array {
+	public static function trash_holders( string $post_type, string $path, ?int $limit = null ): array {
 		global $wpdb;
 
 		$path = Paths::normalize( $path );
@@ -345,14 +367,14 @@ final class Ledger {
 			return [];
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Seek on the meta_key index, one row per page in the trash that held the path: a 404 on an exact old parent path, and at most one per old path listed or collected.
-		$ids = $wpdb->get_col(
-			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' ORDER BY pm.meta_id ASC",
-				self::key( $post_type, $path ),
-				$post_type
-			)
-		);
+		$sql  = "SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' ORDER BY pm.meta_id ASC";
+		$args = [ self::key( $post_type, $path ), $post_type ];
+		if ( null !== $limit ) {
+			$sql   .= ' LIMIT %d';
+			$args[] = max( 1, $limit );
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Seek on the meta_key index, one row per page in the trash that held the path, bounded by $limit when given; $sql holds placeholders only.
+		$ids = $wpdb->get_col( $wpdb->prepare( $sql, ...$args ) );
 
 		return array_map( 'intval', (array) $ids );
 	}
