@@ -244,7 +244,7 @@ final class Operations {
 			}
 
 			Markers::add( $child_id, Markers::moved_key( $root ), Markers::encode_moved( $to, $result['old_slug'], $result['slug'], $now ) );
-			if ( count( (array) $job['slugs'] ) < self::MAX_REMEMBERED ) {
+			if ( count( (array) ( $job['slugs'] ?? [] ) ) < self::MAX_REMEMBERED ) {
 				$job['slugs'][ $child_id ] = $result['old_slug'];
 			}
 			if ( $result['renamed'] ) {

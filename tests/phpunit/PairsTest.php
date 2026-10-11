@@ -243,6 +243,24 @@ final class PairsTest extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_the_parent_of_a_trashed_page_has_no_new_url_for_the_trashed_pages_own_path(): void {
+		wp_trash_post( $this->ids['about'] );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+
+		$this->assertNotContains( '/company/about/ -> /company/', $this->lines( $collected ) );
+		$this->assertContains( '/company/about/history/ -> /company/history/', $this->lines( $collected ), 'Its subpages are still served.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'trash',
+				],
+			],
+			$this->pairs->page( $collected, 1, 20 )['unresolved']
+		);
+	}
+
 	public function test_a_subpage_renamed_on_the_move_is_listed_at_its_old_slug(): void {
 		$this->page( 'team', $this->ids['company'] );
 

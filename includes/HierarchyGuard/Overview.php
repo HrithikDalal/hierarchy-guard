@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard;
 
 use HierarchyGuard\Admin\List_Table;
+use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
@@ -80,14 +81,14 @@ final class Overview {
 				'count'  => min( $descendants, $cap ),
 				'capped' => $descendants > $cap,
 			],
-			'old_paths'       => $this->old_paths( $id, $type ),
+			'old_paths'       => $this->old_paths( $post ),
 			'redirects'       => [
-				// The server redirects only to a page anyone can view.
-				'serving'  => Settings::serve_redirects() && is_post_publicly_viewable( $post ),
+				// The server redirects only to a page anyone can view, outside the trash.
+				'serving'  => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
 				'provider' => null === $provider ? null : [
 					'name' => (string) ( $provider['name'] ?? '' ),
-					'url'  => (string) ( $provider['url'] ?? '' ),
-					'csv'  => (string) ( $provider['csv'] ?? 'generic' ),
+					'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
+					'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
 				],
 			],
 			'trash_policy'    => $fallback ? Settings::POLICY_REPARENT : $policy,
@@ -189,24 +190,41 @@ final class Overview {
 	/**
 	 * Old paths recorded on the post, newest first, as URLs relative to the home URL.
 	 *
-	 * @param int    $post_id Post ID.
-	 * @param string $type    Post type name.
-	 * @return array<int,array{path:string,url:string,in_use:bool}>
+	 * Each has a state: `in_use` when another live page holds the path, `trash`
+	 * when a page in the trash holds it, `none` when this page is not viewable or
+	 * sits under the trash so nothing can redirect here, and `ok` otherwise.
+	 *
+	 * @param WP_Post $post Post.
+	 * @return array<int,array{path:string,url:string,state:string}>
 	 */
-	private function old_paths( int $post_id, string $type ): array {
+	private function old_paths( WP_Post $post ): array {
+		$post_id   = (int) $post->ID;
+		$type      = (string) $post->post_type;
+		$reachable = is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) );
+
 		$out = [];
 		foreach ( array_slice( array_reverse( $this->ledger->paths_for( $post_id ) ), 0, self::MAX_OLD_PATHS ) as $path ) {
 			$url = Paths::url( $type, $path );
 			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
-			if ( '' !== $url ) {
-				$owner = get_page_by_path( $path, OBJECT, $type );
-				$out[] = [
-					'path'   => $path,
-					'url'    => Paths::relative( $url ),
-					// A live page at the old path is reached before any redirect.
-					'in_use' => $owner instanceof WP_Post && (int) $owner->ID !== $post_id && is_post_publicly_viewable( $owner ),
-				];
+			if ( '' === $url ) {
+				continue;
 			}
+			$owner = get_page_by_path( $path, OBJECT, $type );
+			if ( $owner instanceof WP_Post && (int) $owner->ID !== $post_id && is_post_publicly_viewable( $owner ) ) {
+				// A live page at the old path is reached before any redirect.
+				$state = 'in_use';
+			} elseif ( Ledger::held_in_trash( $type, $path ) ) {
+				$state = 'trash';
+			} elseif ( ! $reachable ) {
+				$state = 'none';
+			} else {
+				$state = 'ok';
+			}
+			$out[] = [
+				'path'  => $path,
+				'url'   => Paths::relative( $url ),
+				'state' => $state,
+			];
 		}
 		return $out;
 	}

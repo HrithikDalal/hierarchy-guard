@@ -167,14 +167,55 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( '/company/about-us/', $data['old_paths'][0]['url'] );
 	}
 
-	public function test_an_old_path_a_published_page_now_owns_is_in_use(): void {
+	public function test_an_old_path_has_a_state(): void {
 		$this->rename( $this->ids['about'], 'about-us' );
 		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
-		$this->assertFalse( $this->get( $route )->get_data()['old_paths'][0]['in_use'] );
+		$this->assertSame( 'ok', $this->get( $route )->get_data()['old_paths'][0]['state'] );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['about'],
+				'post_status' => 'private',
+			]
+		);
+		$this->assertSame( 'none', $this->get( $route )->get_data()['old_paths'][0]['state'], 'A page nobody can view receives no redirect.' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['about'],
+				'post_status' => 'publish',
+			]
+		);
 
 		$this->page( 'about', $this->ids['company'] );
+		$this->assertSame( 'in_use', $this->get( $route )->get_data()['old_paths'][0]['state'] );
+	}
 
-		$this->assertTrue( $this->get( $route )->get_data()['old_paths'][0]['in_use'] );
+	public function test_an_old_path_under_a_trashed_ancestor_has_no_redirect(): void {
+		$this->rename( $this->ids['team'], 'crew' );
+		$this->trash_raw( $this->ids['about'] );
+
+		$data = $this->get( '/posts/' . $this->ids['team'] . '/hierarchy' )->get_data();
+
+		$this->assertSame( 'none', $data['old_paths'][0]['state'] );
+	}
+
+	public function test_an_old_path_held_by_a_page_in_the_trash_is_in_the_trash(): void {
+		wp_trash_post( $this->ids['about'] );
+
+		$data = $this->get( '/posts/' . $this->ids['company'] . '/hierarchy' )->get_data();
+
+		$this->assertSame( [ 'company/about' ], array_column( $data['old_paths'], 'path' ) );
+		$this->assertSame( 'trash', $data['old_paths'][0]['state'] );
+	}
+
+	public function test_a_page_under_a_trashed_ancestor_is_not_served_redirects(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$route = '/posts/' . $this->ids['team'] . '/hierarchy';
+		$this->assertTrue( $this->get( $route )->get_data()['redirects']['serving'] );
+
+		$this->trash_raw( $this->ids['about'] );
+
+		$this->assertFalse( $this->get( $route )->get_data()['redirects']['serving'] );
 	}
 
 	public function test_a_page_nobody_can_view_is_not_served_redirects(): void {

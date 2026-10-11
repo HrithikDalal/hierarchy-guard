@@ -106,7 +106,7 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$html = $this->html( $this->ids['about'] );
 		$this->assertStringContainsString( '<code>/company/about/</code> · Not redirected · <a href="', $html );
 		$this->assertStringContainsString( '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv', $html );
-		$this->assertStringContainsString( 'aria-label="Download the redirects for /company/about/ (CSV)" download>Download redirects (CSV)</a>', $html );
+		$this->assertStringContainsString( 'download>Download redirects (CSV)<span class="screen-reader-text"> for /company/about/</span></a>', $html );
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->assertStringContainsString( '<code>/company/about/</code> · Redirects here', $this->html( $this->ids['about'] ) );
@@ -160,6 +160,16 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$html = $this->html( $this->ids['about'] );
 		$this->assertStringContainsString( '<code>/company/about/</code> · Not redirected · <a href="', $html );
 		$this->assertStringNotContainsString( 'Redirects here', $html );
+	}
+
+	public function test_an_old_url_held_by_a_page_in_the_trash_says_so(): void {
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertStringContainsString( '<code>/company/about/</code> · In the Trash · <a href="', $this->html( $this->ids['company'] ) );
+	}
+
+	public function test_the_list_link_shows_when_subpages_outnumber_the_children_listed(): void {
+		$this->assertStringContainsString( 'View all 3 in the list', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_an_old_url_another_published_page_now_uses_is_marked_so(): void {

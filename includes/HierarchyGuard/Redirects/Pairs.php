@@ -61,17 +61,21 @@ final class Pairs {
 	}
 
 	/**
-	 * The block for an old path recorded on a post.
+	 * The block for an old path recorded on a post. When the page that held
+	 * the old path is only in the trash, the path has no new URL: the head is
+	 * none and the reason is `trash`, while its subpages still redirect.
 	 *
 	 * @param WP_Post $post     Post the old path is recorded on.
 	 * @param string  $old_path The old path, any form.
 	 * @return array<string,mixed> Block.
 	 */
 	public static function post_block( WP_Post $post, string $old_path ): array {
+		$old      = Paths::normalize( $old_path );
+		$in_trash = Ledger::held_in_trash( (string) $post->post_type, $old );
 		return [
-			'old'        => Paths::normalize( $old_path ),
-			'head'       => (int) $post->ID,
-			'reason'     => '',
+			'old'        => $old,
+			'head'       => $in_trash ? 0 : (int) $post->ID,
+			'reason'     => $in_trash ? 'trash' : '',
 			'base'       => Paths::uri( $post ),
 			'from'       => (int) $post->ID,
 			'children'   => [],
@@ -392,9 +396,10 @@ final class Pairs {
 	private static function statuses( array $ids ): array {
 		global $wpdb;
 
-		$in = implode( ',', array_map( 'intval', $ids ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, one per root of the change; a batch may have moved them since.
-		$rows = $wpdb->get_results( "SELECT ID, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} )", ARRAY_A );
+		$ids          = array_map( 'intval', $ids );
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per root of the change; a batch may have moved them since.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_status FROM {$wpdb->posts} WHERE ID IN ( {$placeholders} )", $ids ), ARRAY_A );
 
 		$out = [];
 		foreach ( (array) $rows as $row ) {

@@ -154,7 +154,7 @@ final class List_Table {
 			$name  = is_string( $link ) && '' !== $link ? sprintf( '<a href="%s">%s</a>', esc_url( $link ), $title ) : $title;
 			if ( 'trash' === $above->post_status ) {
 				/* translators: %s: title of a parent page that is in the trash. */
-				$name = sprintf( __( '%s (in the Trash)', 'hierarchy-guard' ), $name );
+				$name = sprintf( esc_html__( '%s (in the Trash)', 'hierarchy-guard' ), $name );
 			}
 			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent:', 'hierarchy-guard' ) . ' </span>' . $name;
 		}
@@ -196,7 +196,7 @@ final class List_Table {
 			'<a href="%1$s" aria-label="%2$s">%3$s</a>',
 			esc_url( self::filter_url( (string) $post->post_type, (int) $post->ID ) ),
 			/* translators: %s: page title. */
-			esc_attr( sprintf( __( 'View the subpages of “%s”', 'hierarchy-guard' ), _draft_or_post_title( $post ) ) ),
+			esc_attr( sprintf( __( 'View subpages of “%s”', 'hierarchy-guard' ), _draft_or_post_title( $post ) ) ),
 			esc_html__( 'View subpages', 'hierarchy-guard' )
 		);
 		return $actions;
@@ -264,16 +264,17 @@ final class List_Table {
 
 		printf( '<input type="hidden" name="%1$s" value="%2$d">', esc_attr( self::QUERY_VAR ), (int) $root );
 		echo '<span class="hierarchy-guard-under">';
-		/* translators: %s: the filtered page, after its ancestors, such as "Company › About". */
-		printf( esc_html__( 'Subpages of %s', 'hierarchy-guard' ), implode( '<span aria-hidden="true"> › </span>', $crumbs ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
+		$trail = implode( '<span aria-hidden="true"> › </span>', $crumbs );
 		if ( $walk['capped'] ) {
-			echo ' ' . esc_html(
-				sprintf(
-					/* translators: %s: the most subpages the filter lists, such as 1,000. */
-					__( '(the first %s)', 'hierarchy-guard' ),
-					number_format_i18n( Subtree::count_cap() )
-				)
+			printf(
+				/* translators: 1: the filtered page, after its ancestors, such as "Company › About", 2: the most subpages the filter lists, such as 1,000. */
+				esc_html__( 'Subpages of %1$s (the first %2$s)', 'hierarchy-guard' ),
+				$trail, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
+				esc_html( Subtree::format_count( count( $walk['ids'] ) ) )
 			);
+		} else {
+			/* translators: %s: the filtered page, after its ancestors, such as "Company › About". */
+			printf( esc_html__( 'Subpages of %s', 'hierarchy-guard' ), $trail ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
 		}
 		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Show all pages', 'hierarchy-guard' ) );
 		echo '</span>';

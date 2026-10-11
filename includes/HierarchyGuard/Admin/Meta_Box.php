@@ -115,7 +115,7 @@ final class Meta_Box {
 				);
 			}
 			echo '</ul>';
-			if ( $data['has_more'] ) {
+			if ( $data['has_more'] || $descendants > count( $data['children'] ) ) {
 				printf(
 					'<p><a href="%1$s">%2$s</a></p>',
 					esc_url( (string) $data['list_url'] ),
@@ -130,8 +130,12 @@ final class Meta_Box {
 			$provider = $data['redirects']['provider'];
 			$layout   = null !== $provider ? Csv::layout( (string) $provider['csv'] ) : 'generic';
 			foreach ( $data['old_paths'] as $old ) {
-				if ( $old['in_use'] ) {
+				if ( 'in_use' === $old['state'] ) {
 					$state = __( 'Used by another page', 'hierarchy-guard' );
+				} elseif ( 'trash' === $old['state'] ) {
+					$state = __( 'In the Trash', 'hierarchy-guard' );
+				} elseif ( 'none' === $old['state'] ) {
+					$state = __( 'Not redirected', 'hierarchy-guard' );
 				} elseif ( $data['redirects']['serving'] ) {
 					$state = __( 'Redirects here', 'hierarchy-guard' );
 				} elseif ( null !== $provider && '' !== $provider['name'] ) {
@@ -141,13 +145,13 @@ final class Meta_Box {
 					$state = __( 'Not redirected', 'hierarchy-guard' );
 				}
 				printf(
-					'<li><code>%1$s</code> · %2$s · <a href="%3$s" aria-label="%4$s" download>%5$s</a></li>',
+					'<li><code>%1$s</code> · %2$s · <a href="%3$s" download>%4$s<span class="screen-reader-text"> %5$s</span></a></li>',
 					esc_html( (string) $old['url'] ),
 					esc_html( $state ),
 					esc_url( self::csv_url( (int) $post->ID, (string) $old['path'], $layout ) ),
+					esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' ),
 					/* translators: %s: an old URL, such as /about-us/. */
-					esc_attr( sprintf( __( 'Download the redirects for %s (CSV)', 'hierarchy-guard' ), (string) $old['url'] ) ),
-					esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' )
+					esc_html( sprintf( __( 'for %s', 'hierarchy-guard' ), (string) $old['url'] ) )
 				);
 			}
 			echo '</ul>';

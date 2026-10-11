@@ -309,7 +309,7 @@ final class Ledger {
 	 * @param string $path      Path, any form; normalized here.
 	 * @return bool
 	 */
-	public function held_in_trash( string $post_type, string $path ): bool {
+	public static function held_in_trash( string $post_type, string $path ): bool {
 		global $wpdb;
 
 		$path = Paths::normalize( $path );

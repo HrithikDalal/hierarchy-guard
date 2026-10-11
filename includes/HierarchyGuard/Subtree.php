@@ -243,9 +243,10 @@ final class Subtree {
 			return [];
 		}
 
-		$in = implode( ',', array_map( 'intval', $ids ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds the integers read above, at most $limit of them.
-		return (array) $wpdb->get_results( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) ORDER BY menu_order ASC, post_title ASC, ID ASC", ARRAY_A );
+		$ids          = array_map( 'intval', $ids );
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per ID read above, at most $limit of them.
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$placeholders} ) ORDER BY menu_order ASC, post_title ASC, ID ASC", $ids ), ARRAY_A );
 	}
 
 	/**
