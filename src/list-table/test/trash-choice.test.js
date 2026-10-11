@@ -281,6 +281,94 @@ describe( 'a row title', () => {
 			delete globalThis.document;
 		}
 	} );
+
+	it( 'decodes only the references PHP decodes in the title', () => {
+		// A browser's textarea, for a few names: it decodes a legacy name with
+		// no semicolon too, HTML5 names, and &#128; as Windows-1252.
+		const legacy = {
+			amp: '&',
+			times: '×',
+			copy: '©',
+			not: '¬',
+			eacute: 'é',
+		};
+		const html5 = { apos: "'", check: '✓', lang: '⟨' };
+		globalThis.document = {
+			implementation: {
+				createHTMLDocument: () => ( {
+					createElement: () => {
+						const area = { textContent: '' };
+						Object.defineProperty( area, 'innerHTML', {
+							set( html ) {
+								area.textContent = html
+									.replace(
+										/&(apos|check|lang);/g,
+										( match, name ) => html5[ name ]
+									)
+									.replace(
+										/&(amp|times|copy|not|eacute);?/g,
+										( match, name ) => legacy[ name ]
+									)
+									.replace( /&#(\d+);/g, ( match, code ) =>
+										String.fromCodePoint(
+											{ 0: 0xfffd, 128: 0x20ac }[
+												code
+											] ?? Number( code )
+										)
+									);
+							},
+						} );
+						return area;
+					},
+				} ),
+			},
+		};
+		try {
+			const title = ( text ) =>
+				rowTitle(
+					{
+						querySelector: ( selector ) =>
+							'#inline_7 .post_title' === selector
+								? raw( [ text ] )
+								: null,
+					},
+					7
+				);
+			expect
+				.soft( title( '&timesheet;' ), 'No such name.' )
+				.toBe( '&timesheet;' );
+			expect
+				.soft( title( '&copyright; &notit;' ) )
+				.toBe( '&copyright; &notit;' );
+			expect
+				.soft(
+					title( '&check; &apos;q&apos; &AMP;' ),
+					'Names HTML 4.01 has not, or not in that case: PHP leaves them.'
+				)
+				.toBe( '&check; &apos;q&apos; &AMP;' );
+			expect
+				.soft(
+					title( '&#128; &#0; &#xD800;' ),
+					'Code points PHP does not decode.'
+				)
+				.toBe( '&#128; &#0; &#xD800;' );
+			expect
+				.soft( title( '&eacute; &#233; &#xE9; &Eacute;' ) )
+				.toBe( 'é é é É' );
+			expect.soft( title( '&#39;&#x27;&quot;' ) ).toBe( `''"` );
+			expect
+				.soft(
+					title( '&lang;x&rang;' ),
+					'As PHP reads HTML 4.01, not as HTML5 does.'
+				)
+				.toBe( '〈x〉' );
+			expect
+				.soft( title( 'Tom &amp;amp; Jerry' ) )
+				.toBe( 'Tom &amp; Jerry' );
+		} finally {
+			delete globalThis.document;
+		}
+	} );
 } );
 
 /**

@@ -2,9 +2,9 @@
  * What the trash dialog sends and shows, kept out of the component so it can
  * be tested.
  */
-import { decodeEntities } from '@wordpress/html-entities';
 import { __ } from '@wordpress/i18n';
 import config from '../common/config';
+import { decodeReferences } from '../common/entities';
 import { bulkSentence, initialSentence, trashSentence } from '../common/copy';
 
 /**
@@ -149,7 +149,7 @@ export function plainTitle( text ) {
 /**
  * A row's title. Core prints the raw title in the row's Quick Edit data for
  * anyone who may edit the page, escaped once more, so a stored entity reads
- * as text, and only a complete one; an emoji wp-emoji turned into an image
+ * as text, and only one PHP decodes; an emoji wp-emoji turned into an image
  * reads as its alt, as in core's Quick Edit. An empty raw title means the
  * page has none. Without the Quick Edit data the title link's text is read.
  *
@@ -164,13 +164,9 @@ export function rowTitle( doc, id ) {
 		node.querySelectorAll( 'img' ).forEach( ( img ) =>
 			img.replaceWith( img.alt )
 		);
-		// Only complete references, as PHP's html_entity_decode() reads them:
-		// a browser would also decode a legacy name with no semicolon.
-		const title = node.textContent
-			.trim()
-			.replace( /&(?:#\d+|#x[\da-f]+|[a-z][\da-z]*);/gi, ( ref ) =>
-				decodeEntities( ref )
-			);
+		// As the preview's titles are, by PHP's html_entity_decode(): a browser
+		// would also decode a legacy name with no semicolon, and HTML5's names.
+		const title = decodeReferences( node.textContent.trim() );
 		return '' !== title ? title : __( '(no title)', 'hierarchy-guard' );
 	}
 	const link = doc.querySelector( `#post-${ id } .row-title` );
