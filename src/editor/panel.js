@@ -296,8 +296,8 @@ export default function HierarchyPlugin() {
 				return;
 			}
 			newest.current = latest;
-			fetchPairs( { post: postId, from: latest }, 1, 1 ).then(
-				( pairs ) => {
+			fetchPairs( { post: postId, from: latest }, 1, 1 )
+				.then( ( pairs ) => {
 					if ( ! pairs.total ) {
 						return;
 					}
@@ -329,8 +329,33 @@ export default function HierarchyPlugin() {
 						),
 						{ id: NOTICE, isDismissible: true, actions }
 					);
-				}
-			);
+				} )
+				.catch( () => {
+					createNotice(
+						'warning',
+						__(
+							'This save changed URLs, but their redirects couldn’t be loaded.',
+							'hierarchy-guard'
+						),
+						{
+							id: NOTICE,
+							isDismissible: true,
+							actions: [
+								{
+									label: __(
+										'View redirects',
+										'hierarchy-guard'
+									),
+									onClick: () =>
+										setModal( {
+											post: postId,
+											from: latest,
+										} ),
+								},
+							],
+						}
+					);
+				} );
 		} );
 	}, [
 		saving,

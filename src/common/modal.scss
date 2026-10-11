@@ -3,10 +3,6 @@
 
 	.hierarchy-guard-pairs {
 		margin: 12px 0;
-
-		.hierarchy-guard-url {
-			overflow-wrap: anywhere;
-		}
 	}
 
 	&__pager,
@@ -23,7 +19,10 @@
 	}
 }
 
-// A slug never breaks; a long path breaks after a slash.
+// A slug that fits never breaks; a path breaks after a slash,
+// and only a slug longer than the line breaks inside.
 .hierarchy-guard-url__part {
-	white-space: nowrap;
+	display: inline-block;
+	max-width: 100%;
+	overflow-wrap: anywhere;
 }
