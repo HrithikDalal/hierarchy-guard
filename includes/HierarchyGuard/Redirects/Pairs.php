@@ -21,10 +21,13 @@ use WP_Post;
  * path leads to, or none. Below it come the published pages that lived under
  * the old path when it was left, each at the path it had then (Rebuild),
  * depth first in menu order. Every block of a change is walked together, one
- * query pair per level, and no walk goes past the count cap. Last, every pair
- * is checked the way the server serves it (Batch_Resolver), so only what the
- * site redirects is listed. Nothing is stored: the collected pairs are cached
- * for a few minutes, keyed on the posts' last change.
+ * query pair per level, and no walk goes past the count cap or the server's
+ * segment cap. Last, every pair is checked against a model of the server
+ * (Batch_Resolver): the request must be a 404 by the site's rewrite rules as
+ * Rules::is_404() reads them, and the resolver's rules must lead to the
+ * pair's page. A pair the model cannot vouch for is left out. Nothing is
+ * stored: the collected pairs are cached for a few minutes, keyed on the
+ * posts' last change.
  */
 final class Pairs {
 
@@ -334,9 +337,10 @@ final class Pairs {
 	 * The pairs left that the server serves, and a row for each block's own
 	 * old path that has no new URL here.
 	 *
-	 * Each pair is checked the way the resolver serves it: a 404 at the old
-	 * path, rewritten round by round to that page. A published page at the old
-	 * path, as under a hidden page there now, is reached before any redirect.
+	 * Each pair is checked by Batch_Resolver::served(): a 404 at the old path
+	 * by the 404 model, rewritten round by round to that page, with no type
+	 * the server tries first taking it. A published page at the old path, as
+	 * under a hidden page there now, is reached before any redirect.
 	 * What the resolver does not serve is not listed; a block's own old path it
 	 * serves elsewhere, or that something else is shown at, is in use, and one
 	 * it serves nowhere leads nowhere, or is in the trash when the newest live

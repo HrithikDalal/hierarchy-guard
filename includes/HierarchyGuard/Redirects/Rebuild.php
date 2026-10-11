@@ -708,9 +708,10 @@ final class Rebuild {
 	 * The ledger entries and trash markers of the given pages, of the pages
 	 * in the trash those markers name, and of the pages above them all, with
 	 * where each of those pages is now: one query for the pages, then one per
-	 * new set of pages in the trash and pages above them. No more rows are read
-	 * than twenty per page the count cap allows, the newest kept; past that
-	 * the history is capped.
+	 * new set of pages in the trash and pages above them. No more rows are
+	 * returned than twenty per page the count cap allows, the newest kept;
+	 * past that the history is capped. To find the newest, the database still
+	 * reads and sorts every row of those pages that matches.
 	 *
 	 * @param int[]  $walked    Pages walked, whose places the walk knows.
 	 * @param int[]  $others    Posts the blocks are recorded on, pages in the trash the blocks name, and the pages above them.

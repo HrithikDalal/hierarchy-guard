@@ -1,6 +1,6 @@
 <?php
 /**
- * What the server serves, for many old paths at once.
+ * What the server serves, for many old paths at once, as a model of it tells.
  *
  * @package HierarchyGuard
  */
@@ -19,13 +19,16 @@ use WP_Post;
  * Runs Rules for every path of a list of pairs on facts read ahead: the
  * ledger for every prefix in one query a round, get_page_by_path() for every
  * path in one query a round, and the posts found primed a level at a time.
- * No query grows with the number of paths.
+ * No query grows with the number of paths. What WordPress shows at a path is
+ * Rules::is_404()'s model of it, not a main query.
  */
 final class Batch_Resolver {
 
 	/**
-	 * What served() answers for a path a published page, a blog post or an
-	 * attachment uses now: WordPress shows it, so no redirect reaches it.
+	 * What served() answers for a path WordPress shows something at, by
+	 * Rules::is_404(): a published page, a blog post, an attachment, an
+	 * archive, or what a rule the model does not look into shows. No
+	 * redirect reaches it.
 	 */
 	public const NOT_404 = -1;
 

@@ -196,11 +196,13 @@ final class Overview {
 	 * home URL. A path the post is at again, as after a trash moved it back,
 	 * is its URL, not an old one.
 	 *
-	 * Each has a state, from what the server does with a request for it, all
-	 * of them worked out at once: `ok` when it redirects here; `in_use` when
-	 * it redirects to another page, or WordPress shows a page, a blog post or
-	 * an attachment there; `trash` when it redirects nowhere and a page in the
-	 * trash holds it; `none` when it redirects nowhere.
+	 * Each has a state, from what the server does with a request for it as
+	 * Batch_Resolver::served() models it, all of them worked out at once: `ok`
+	 * when it redirects here; `in_use` when it redirects to another post, or
+	 * WordPress shows something there, as a page, a blog post, an attachment
+	 * or an archive, or by a rewrite rule the model does not look into;
+	 * `trash` when it redirects nowhere and a page in the trash holds it;
+	 * `none` when it redirects nowhere, or the model cannot tell.
 	 *
 	 * @param WP_Post $post Post.
 	 * @return array<int,array{path:string,url:string,state:string}>
