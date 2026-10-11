@@ -147,4 +147,76 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about-us' ) );
 	}
+
+	public function test_record_alias_writes_on_the_new_parent_or_the_root_list(): void {
+		$this->assertTrue( $this->ledger->record_alias( 'page', $this->about, 'about/team-old' ) );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about/team-old' ) );
+
+		$this->assertTrue( $this->ledger->record_alias( 'page', 0, 'gone' ) );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'gone' ) );
+		$this->assertFalse( $this->ledger->record_alias( 'page', 0, 'gone' ), 'Already recorded.' );
+	}
+
+	public function test_forget_alias_removes_what_record_alias_wrote(): void {
+		$this->ledger->record_alias( 'page', $this->about, 'about/old' );
+		$this->ledger->record_alias( 'page', 0, 'gone' );
+		$this->ledger->record_root( 'page', 'kept' );
+
+		$this->assertTrue( $this->ledger->forget_alias( 'page', $this->about, '/About/Old/' ) );
+		$this->assertTrue( $this->ledger->forget_alias( 'page', 0, 'gone' ) );
+
+		$this->assertNull( $this->ledger->find( 'page', 'about/old' ) );
+		$this->assertNull( $this->ledger->find( 'page', 'gone' ) );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'kept' ), 'Other root entries stay.' );
+		$this->assertFalse( $this->ledger->forget_alias( 'page', 0, 'gone' ) );
+		$this->assertFalse( $this->ledger->forget( 999999, 'about/old' ) );
+	}
+
+	public function test_deferred_invalidates_cached_lookups_once_at_the_end(): void {
+		$this->assertNull( $this->ledger->find( 'page', 'one' ), 'Precondition: a cached miss.' );
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+		$inside = null;
+
+		Ledger::deferred(
+			function () use ( &$inside ): void {
+				$this->ledger->record( $this->about, 'one' );
+				$this->ledger->record( $this->about, 'two' );
+				$inside = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+			}
+		);
+
+		$this->assertSame( $before, $inside, 'No invalidation while deferred.' );
+		$this->assertNotSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'one' ), 'The cached miss is gone.' );
+	}
+
+	public function test_a_live_holder_answers_and_a_trashed_one_does_not(): void {
+		$other = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'other',
+			]
+		);
+		$this->ledger->record( $other, 'shared' );
+		$this->ledger->record( $this->about, 'shared' );
+		wp_trash_post( $this->about );
+
+		$this->assertSame( $other, $this->ledger->find( 'page', 'shared' ), 'The newer entry is on a page in the trash.' );
+		wp_trash_post( $other );
+		$this->ledger->record_root( 'page', 'shared' );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'shared' ), 'With every holder in the trash, the root list answers.' );
+		$this->assertTrue( $this->ledger->held_in_trash( 'page', '/Shared/' ) );
+		$this->assertFalse( $this->ledger->held_in_trash( 'page', 'elsewhere' ) );
+		$this->assertFalse( $this->ledger->held_in_trash( 'page', '' ) );
+	}
+
+	public function test_an_old_path_answers_again_once_its_page_leaves_the_trash(): void {
+		$this->ledger->record( $this->about, 'about-old' );
+		wp_trash_post( $this->about );
+		$this->assertNull( $this->ledger->find( 'page', 'about-old' ), 'Nothing answers while the page is in the trash.' );
+
+		wp_untrash_post( $this->about );
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about-old' ), 'No ledger write happened, so the cached answer must still be right.' );
+	}
 }

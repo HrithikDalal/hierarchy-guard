@@ -14,6 +14,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
+use HierarchyGuard\Trash\Markers;
 use WP_UnitTestCase;
 
 /**
@@ -36,6 +37,8 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		Post_Types::reset();
 		Change_Listener::suspend( false );
 		$this->set_permalink_structure( '/%postname%/' );
+		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
 
 		$this->ledger  = new Ledger();
 		$this->company = self::factory()->post->create(
@@ -284,5 +287,43 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 
 		$this->assertSame( $this->company, (int) get_post( $this->team )->post_parent, 'Precondition: core re-parents trashed children too.' );
 		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->company ) );
+	}
+
+	public function test_emptying_a_trashed_tree_keeps_paths_through_trashed_ancestors(): void {
+		$leadership = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'leadership',
+				'post_parent' => $this->team,
+			]
+		);
+
+		wp_trash_post( $this->about );
+		wp_trash_post( $this->team );
+		$this->assertSame( $this->about, (int) get_post( $this->team )->post_parent, 'Precondition: both ancestors are in the trash.' );
+
+		// The trash empties child-first: team, then about.
+		wp_delete_post( $this->team, true );
+		wp_delete_post( $this->about, true );
+
+		$this->assertSame( $this->company, (int) get_post( $leadership )->post_parent, 'Precondition: core moved leadership up twice.' );
+		$resolved = ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team/leadership' );
+		$this->assertNotNull( $resolved );
+		$this->assertSame( $leadership, $resolved->ID );
+	}
+
+	public function test_deleting_a_subpage_trashed_with_its_parent_records_nothing(): void {
+		self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'leadership',
+				'post_parent' => $this->team,
+			]
+		);
+		Markers::add( $this->team, Markers::trashed_key( $this->about ), '1' );
+
+		wp_delete_post( $this->team, true );
+
+		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
 	}
 }

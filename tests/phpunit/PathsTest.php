@@ -192,4 +192,40 @@ final class PathsTest extends WP_UnitTestCase {
 		$trashed->post_name = 'about__trashed';
 		$this->assertFalse( Paths::is_recordable( $trashed ) );
 	}
+
+	public function test_untrashed_uri_restores_trashed_segments(): void {
+		global $wpdb;
+
+		$company = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'company',
+			]
+		);
+		$about   = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $company,
+			]
+		);
+		$team    = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'team',
+				'post_parent' => $about,
+			]
+		);
+
+		// about trashed with core's desired-slug meta; team trashed second, numbered, without it.
+		add_post_meta( $about, '_wp_desired_post_slug', 'about' );
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'about__trashed' ], [ 'ID' => $about ] );
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'team__trashed-2' ], [ 'ID' => $team ] );
+		clean_post_cache( $about );
+		clean_post_cache( $team );
+
+		$this->assertSame( 'company/about__trashed/team__trashed-2', Paths::uri( get_post( $team ) ), 'Precondition: the live path runs through the trash.' );
+		$this->assertSame( 'company/about/team', Paths::untrashed_uri( get_post( $team ) ) );
+		$this->assertSame( 'company', Paths::untrashed_uri( get_post( $company ) ), 'Untrashed segments are unchanged.' );
+	}
 }

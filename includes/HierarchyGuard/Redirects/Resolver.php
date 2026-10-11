@@ -11,6 +11,7 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
 /**
@@ -39,13 +40,15 @@ final class Resolver {
 	/**
 	 * The publicly viewable post an old path now leads to, or null.
 	 *
-	 * @param string $post_type Post type the request was for.
-	 * @param string $path      Requested path, any form.
+	 * @param string    $post_type Post type the request was for.
+	 * @param string    $path      Requested path, any form.
+	 * @param bool|null $temporary Set to true when a restore from the trash could still undo the move the answer follows.
 	 * @return WP_Post|null
 	 */
-	public function resolve( string $post_type, string $path ): ?WP_Post {
-		$path = Paths::normalize( $path );
-		$seen = [];
+	public function resolve( string $post_type, string $path, ?bool &$temporary = null ): ?WP_Post {
+		$temporary = false;
+		$path      = Paths::normalize( $path );
+		$seen      = [];
 
 		for ( $round = 0; $round < self::MAX_ROUNDS; $round++ ) {
 			if ( '' === $path || isset( $seen[ $path ] ) ) {
@@ -53,7 +56,7 @@ final class Resolver {
 			}
 			$seen[ $path ] = true;
 
-			$candidate = $this->rewrite_once( $post_type, $path );
+			$candidate = $this->rewrite_once( $post_type, $path, $temporary );
 			if ( null === $candidate ) {
 				return null;
 			}
@@ -65,6 +68,10 @@ final class Resolver {
 				&& is_post_publicly_viewable( $target )
 				&& ! Paths::has_trashed_segment( Paths::uri( $target ) )
 			) {
+				// The target, or a page above it, sits where the trash flow moved it: a restore moves it back.
+				foreach ( array_merge( [ $target->ID ], get_post_ancestors( $target ) ) as $id ) {
+					$temporary = $temporary || Markers::has_moved_row( (int) $id );
+				}
 				return $target;
 			}
 
@@ -76,13 +83,17 @@ final class Resolver {
 
 	/**
 	 * Replaces the longest prefix the ledger knows with the location it now maps to.
-	 * Ledger hits on trashed posts are skipped so a shorter prefix can match.
+	 * Ledger hits on trashed posts, or on posts under a trashed ancestor, are
+	 * skipped so a shorter prefix can match. An exact old parent path whose page
+	 * is only in the trash resolves to nothing: a 301 to the grandparent would
+	 * stay in browsers after the page is restored.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
+	 * @param bool   $temporary Set to true when the prefix used is held by a page in the trash.
 	 * @return string|null The rewritten path, or null when no prefix matched.
 	 */
-	private function rewrite_once( string $post_type, string $path ): ?string {
+	private function rewrite_once( string $post_type, string $path, bool &$temporary ): ?string {
 		$segments = explode( '/', $path );
 
 		for ( $length = count( $segments ); $length >= 1; $length-- ) {
@@ -99,9 +110,19 @@ final class Resolver {
 					continue;
 				}
 				$base = Paths::uri( $post );
+				if ( Paths::has_trashed_segment( $base ) ) {
+					continue;
+				}
+				if ( count( $segments ) === $length && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
+					return null;
+				}
 			}
 
 			$remainder = implode( '/', array_slice( $segments, $length ) );
+
+			if ( ! $temporary && $this->ledger->held_in_trash( $post_type, $prefix ) ) {
+				$temporary = true;
+			}
 
 			return trim( $base . '/' . $remainder, '/' );
 		}

@@ -29,6 +29,20 @@ final class Ledger {
 	private const CACHE_TTL  = 12 * HOUR_IN_SECONDS;
 
 	/**
+	 * Nesting depth of deferred() calls.
+	 *
+	 * @var int
+	 */
+	private static int $defer_depth = 0;
+
+	/**
+	 * Whether a write happened inside deferred().
+	 *
+	 * @var bool
+	 */
+	private static bool $bump_pending = false;
+
+	/**
 	 * Meta key for a (post type, path) pair.
 	 *
 	 * @param string $post_type Post type name.
@@ -84,17 +98,18 @@ final class Ledger {
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $old_path  Old path, any form; normalized here.
+	 * @return bool True when a new entry was written.
 	 */
-	public function record_root( string $post_type, string $old_path ): void {
+	public function record_root( string $post_type, string $old_path ): bool {
 		$old_path = Paths::normalize( $old_path );
 		if ( '' === $old_path ) {
-			return;
+			return false;
 		}
 
 		$roots = $this->roots();
 		$list  = $roots[ $post_type ] ?? [];
 		if ( in_array( $old_path, $list, true ) ) {
-			return;
+			return false;
 		}
 
 		$list[] = $old_path;
@@ -105,6 +120,105 @@ final class Ledger {
 
 		update_option( self::ROOT_OPTION, $roots, false );
 		$this->bump();
+
+		return true;
+	}
+
+	/**
+	 * Records that children which lived under $old_path now live under a new
+	 * parent, or became top level when it is 0.
+	 *
+	 * @param string $post_type     Post type name.
+	 * @param int    $new_parent_id New parent ID, 0 for top level.
+	 * @param string $old_path      The old parent path, any form.
+	 * @return bool True when a new entry was written.
+	 */
+	public function record_alias( string $post_type, int $new_parent_id, string $old_path ): bool {
+		if ( $new_parent_id > 0 ) {
+			return $this->record( $new_parent_id, $old_path );
+		}
+		return $this->record_root( $post_type, $old_path );
+	}
+
+	/**
+	 * Removes an entry from a post.
+	 *
+	 * @param int    $post_id  Post the entry is on.
+	 * @param string $old_path Old path, any form.
+	 * @return bool True when an entry was removed.
+	 */
+	public function forget( int $post_id, string $old_path ): bool {
+		$post = get_post( $post_id );
+		if ( ! $post instanceof WP_Post ) {
+			return false;
+		}
+
+		$key = self::key( (string) $post->post_type, Paths::normalize( $old_path ) );
+		if ( ! metadata_exists( 'post', $post_id, $key ) ) {
+			return false;
+		}
+
+		delete_post_meta( $post_id, $key );
+		$this->bump();
+
+		return true;
+	}
+
+	/**
+	 * Removes a path from the root list.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $old_path  Old path, any form.
+	 * @return bool True when an entry was removed.
+	 */
+	public function forget_root( string $post_type, string $old_path ): bool {
+		$old_path = Paths::normalize( $old_path );
+		$roots    = $this->roots();
+		$list     = $roots[ $post_type ] ?? [];
+		if ( ! in_array( $old_path, $list, true ) ) {
+			return false;
+		}
+
+		$roots[ $post_type ] = array_values( array_diff( $list, [ $old_path ] ) );
+		update_option( self::ROOT_OPTION, $roots, false );
+		$this->bump();
+
+		return true;
+	}
+
+	/**
+	 * Removes what record_alias() wrote.
+	 *
+	 * @param string $post_type     Post type name.
+	 * @param int    $new_parent_id The parent the alias was recorded on, 0 for the root list.
+	 * @param string $old_path      The old parent path.
+	 * @return bool True when an entry was removed.
+	 */
+	public function forget_alias( string $post_type, int $new_parent_id, string $old_path ): bool {
+		if ( $new_parent_id > 0 ) {
+			return $this->forget( $new_parent_id, $old_path );
+		}
+		return $this->forget_root( $post_type, $old_path );
+	}
+
+	/**
+	 * Runs a callback with cache invalidation held back, then invalidates once.
+	 * Batches write many entries; each would otherwise drop every cached lookup.
+	 *
+	 * @param callable $callback Work that writes to the ledger.
+	 * @return mixed The callback's return value.
+	 */
+	public static function deferred( callable $callback ) {
+		++self::$defer_depth;
+		try {
+			return $callback();
+		} finally {
+			--self::$defer_depth;
+			if ( 0 === self::$defer_depth && self::$bump_pending ) {
+				self::$bump_pending = false;
+				wp_cache_set_last_changed( self::CACHE_GROUP );
+			}
+		}
 	}
 
 	/**
@@ -162,25 +276,63 @@ final class Ledger {
 		$cache_key = 'find:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
 		$cached    = wp_cache_get( $cache_key, self::CACHE_GROUP );
 		if ( false !== $cached ) {
-			return self::CACHE_MISS === (int) $cached ? null : (int) $cached;
-		}
-
-		$found = $this->seek( $post_type, $path );
-		if ( null === $found ) {
-			$roots = $this->roots();
-			if ( in_array( $path, $roots[ $post_type ] ?? [], true ) ) {
-				$found = 0;
+			$found = self::CACHE_MISS === (int) $cached ? null : (int) $cached;
+		} else {
+			$found = $this->seek( $post_type, $path );
+			if ( null === $found ) {
+				$roots = $this->roots();
+				if ( in_array( $path, $roots[ $post_type ] ?? [], true ) ) {
+					$found = 0;
+				}
 			}
+
+			// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
+			wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
 		}
 
-		// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
-		wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
+		// The cache keeps the holder; its status is read on every call, because
+		// trashing, restoring or deleting the holder does not touch the ledger.
+		if ( null !== $found && $found > 0 && in_array( get_post_status( $found ), [ false, 'trash' ], true ) ) {
+			$roots = $this->roots();
+			return in_array( $path, $roots[ $post_type ] ?? [], true ) ? 0 : null;
+		}
 
 		return $found;
 	}
 
 	/**
-	 * Single index seek on the hashed key, newest entry first.
+	 * Whether a post in the trash holds this path. The trash flow records a
+	 * trashed page's own paths on it, so a hit here means the page at an old
+	 * parent path is only in the trash.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return bool
+	 */
+	public function held_in_trash( string $post_type, string $path ): bool {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; only for a 404 on an exact old parent path.
+		$id = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
+
+		return null !== $id;
+	}
+
+	/**
+	 * Single index seek on the hashed key: a live holder first, newest entry first.
+	 * A post in the trash comes back only when no live post holds the key; find()
+	 * then answers as if it held nothing.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -191,7 +343,7 @@ final class Ledger {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; cached by the caller.
 		$id = $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT 1",
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC LIMIT 1",
 				self::key( $post_type, $path ),
 				$post_type
 			)
@@ -211,9 +363,13 @@ final class Ledger {
 	}
 
 	/**
-	 * Invalidates every cached lookup.
+	 * Invalidates every cached lookup, or notes that it is due inside deferred().
 	 */
 	private function bump(): void {
+		if ( self::$defer_depth > 0 ) {
+			self::$bump_pending = true;
+			return;
+		}
 		wp_cache_set_last_changed( self::CACHE_GROUP );
 	}
 }

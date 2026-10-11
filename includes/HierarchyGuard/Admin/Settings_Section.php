@@ -14,8 +14,6 @@ use HierarchyGuard\Settings;
 
 /**
  * Registers the plugin's settings as a section on the Writing settings page.
- *
- * The trash-policy field is added together with the trash handler that reads it.
  */
 final class Settings_Section {
 
@@ -69,6 +67,7 @@ final class Settings_Section {
 		add_settings_section( self::SECTION, __( 'Page hierarchy', 'hierarchy-guard' ), '__return_null', self::PAGE );
 
 		add_settings_field( 'hierarchy_guard_post_types', __( 'Post types', 'hierarchy-guard' ), [ $this, 'render_post_types' ], self::PAGE, self::SECTION );
+		add_settings_field( 'hierarchy_guard_trash_policy', __( 'Trashing a page with subpages', 'hierarchy-guard' ), [ $this, 'render_trash_policy' ], self::PAGE, self::SECTION );
 		add_settings_field( 'hierarchy_guard_serve_redirects', __( 'Redirects', 'hierarchy-guard' ), [ $this, 'render_serve_redirects' ], self::PAGE, self::SECTION );
 	}
 
@@ -103,6 +102,35 @@ final class Settings_Section {
 		echo '</fieldset>';
 	}
 
+	/**
+	 * Radio group for the trash policy.
+	 */
+	public function render_trash_policy(): void {
+		$current = (string) Settings::get( 'trash_policy' );
+		$options = [
+			Settings::POLICY_REPARENT       => __( 'Move subpages up one level', 'hierarchy-guard' ),
+			Settings::POLICY_TRASH_CHILDREN => __( 'Trash the subpages too', 'hierarchy-guard' ),
+			Settings::POLICY_KEEP           => __( 'Leave subpages where they are', 'hierarchy-guard' ),
+		];
+
+		echo '<fieldset><legend class="screen-reader-text"><span>' . esc_html__( 'Trashing a page with subpages', 'hierarchy-guard' ) . '</span></legend>';
+		foreach ( $options as $value => $label ) {
+			printf(
+				'<label><input type="radio" name="%1$s[trash_policy]" value="%2$s" %3$s> %4$s</label><br>',
+				esc_attr( Settings::OPTION ),
+				esc_attr( $value ),
+				checked( $current, $value, false ),
+				esc_html( $label )
+			);
+		}
+
+		$help = __( 'Applies whenever a page with subpages is moved to the trash, including from the editor, the REST API, and WP-CLI.', 'hierarchy-guard' );
+		if ( ! EMPTY_TRASH_DAYS ) {
+			$help .= ' ' . __( 'The trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
+		}
+		echo '<p class="description">' . esc_html( $help ) . '</p>';
+		echo '</fieldset>';
+	}
 
 	/**
 	 * Checkbox for the built-in redirect server, with provider-aware help text.

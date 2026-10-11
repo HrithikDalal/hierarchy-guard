@@ -14,6 +14,7 @@ use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Redirects\Server;
 use HierarchyGuard\Settings;
+use HierarchyGuard\Trash\Markers;
 use WP_UnitTestCase;
 
 /**
@@ -452,5 +453,25 @@ final class ServerTest extends WP_UnitTestCase {
 			}
 		}
 		$this->fail( 'No Server registered at template_redirect priority 9.' );
+	}
+
+	public function test_a_redirect_a_restore_can_undo_is_a_302(): void {
+		global $wpdb;
+
+		// What the trash flow leaves: about in the trash, team moved up with its marker, the alias, and about's own path.
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
+		wp_trash_post( $this->about );
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->company ], [ 'ID' => $this->team ] );
+		clean_post_cache( $this->team );
+		Markers::add( $this->team, Markers::moved_key( $this->about ), Markers::encode_moved( $this->company, 'team', 'team', time() ) );
+		$ledger = new Ledger();
+		$ledger->record_alias( 'page', $this->company, 'company/about' );
+		$ledger->record( $this->about, 'company/about' );
+
+		$this->go_to( '/company/about/team/' );
+		$target = $this->server->target_for_current_request();
+
+		$this->assertSame( get_permalink( $this->team ), $target['url'] );
+		$this->assertSame( 302, $target['status'], 'Browsers must not keep it: a restore moves team back.' );
 	}
 }
