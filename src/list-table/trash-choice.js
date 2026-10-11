@@ -149,9 +149,9 @@ export function plainTitle( text ) {
 /**
  * A row's title. Core prints the raw title in the row's Quick Edit data for
  * anyone who may edit the page, escaped once more, so a stored entity reads
- * as text; an emoji wp-emoji turned into an image reads as its alt, as in
- * core's Quick Edit. An empty raw title means the page has none. Without the
- * Quick Edit data the title link's text is read.
+ * as text, and only a complete one; an emoji wp-emoji turned into an image
+ * reads as its alt, as in core's Quick Edit. An empty raw title means the
+ * page has none. Without the Quick Edit data the title link's text is read.
  *
  * @param {Document} doc The document.
  * @param {number}   id  Post ID.
@@ -164,7 +164,13 @@ export function rowTitle( doc, id ) {
 		node.querySelectorAll( 'img' ).forEach( ( img ) =>
 			img.replaceWith( img.alt )
 		);
-		const title = decodeEntities( node.textContent.trim() );
+		// Only complete references, as PHP's html_entity_decode() reads them:
+		// a browser would also decode a legacy name with no semicolon.
+		const title = node.textContent
+			.trim()
+			.replace( /&(?:#\d+|#x[\da-f]+|[a-z][\da-z]*);/gi, ( ref ) =>
+				decodeEntities( ref )
+			);
 		return '' !== title ? title : __( '(no title)', 'hierarchy-guard' );
 	}
 	const link = doc.querySelector( `#post-${ id } .row-title` );

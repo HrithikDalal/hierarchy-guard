@@ -240,7 +240,9 @@ describe( 'a row title', () => {
 
 	it( 'reads the raw title as text, with its emoji', () => {
 		// The raw title is printed escaped, so a stored entity shows as text.
-		const entities = { '&amp;': '&', '&lt;': '<', '&gt;': '>' };
+		// Like a browser's textarea, the stand-in also decodes a legacy name
+		// with no semicolon, as `&times` before a digit.
+		const entities = { amp: '&', lt: '<', gt: '>', times: '×' };
 		globalThis.document = {
 			implementation: {
 				createHTMLDocument: () => ( {
@@ -249,8 +251,8 @@ describe( 'a row title', () => {
 						Object.defineProperty( area, 'innerHTML', {
 							set( html ) {
 								area.textContent = html.replace(
-									/&(?:amp|lt|gt);/g,
-									( match ) => entities[ match ]
+									/&(amp|lt|gt|times);?/g,
+									( match, name ) => entities[ name ]
 								);
 							},
 						} );
@@ -267,6 +269,10 @@ describe( 'a row title', () => {
 			expect( rowTitle( doc( [ 'Tom &amp; Jerry' ] ), 7 ) ).toBe(
 				'Tom & Jerry'
 			);
+			expect(
+				rowTitle( doc( [ 'Price&times2 &amp;times;' ] ), 7 ),
+				'Only a complete reference is decoded, as core and the preview read the title.'
+			).toBe( 'Price&times2 &times;' );
 			expect(
 				rowTitle( doc( [ { alt: '🇩🇪' }, ' Germany' ] ), 7 ),
 				'An emoji wp-emoji turned into an image reads as its alt.'
