@@ -265,4 +265,32 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( [], $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['old_paths'] );
 	}
+
+	public function test_titles_carry_no_private_or_protected_prefix(): void {
+		self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_parent' => $this->ids['about'],
+				'post_status' => 'private',
+				'post_title'  => 'Secret Page',
+			]
+		);
+		self::factory()->post->create(
+			[
+				'post_type'     => 'page',
+				'post_parent'   => $this->ids['about'],
+				'post_status'   => 'publish',
+				'post_title'    => 'Guarded Page',
+				'post_password' => 'secret',
+			]
+		);
+
+		$data   = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data();
+		$titles = array_column( $data['children'], 'title' );
+		sort( $titles );
+
+		$this->assertSame( [ 'Guarded Page', 'History', 'Secret Page', 'Team' ], $titles );
+		$this->assertFalse( has_filter( 'private_title_format' ) );
+		$this->assertFalse( has_filter( 'protected_title_format' ) );
+	}
 }

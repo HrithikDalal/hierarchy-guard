@@ -97,13 +97,19 @@ final class Overview {
 	}
 
 	/**
-	 * A post's title as plain text, never empty.
+	 * A post's title as plain text, never empty, with no "Private:" or "Protected:" prefix.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return string
 	 */
 	public static function title( int $post_id ): string {
+		// No "Private:" or "Protected:" prefix outside wp-admin; the status travels on its own.
+		$plain = static fn(): string => '%s';
+		add_filter( 'private_title_format', $plain );
+		add_filter( 'protected_title_format', $plain );
 		$title = wp_strip_all_tags( html_entity_decode( get_the_title( $post_id ), ENT_QUOTES, 'UTF-8' ) );
+		remove_filter( 'private_title_format', $plain );
+		remove_filter( 'protected_title_format', $plain );
 		return '' !== $title ? $title : __( '(no title)', 'hierarchy-guard' );
 	}
 
