@@ -34,6 +34,7 @@ import {
 } from '../common/copy';
 import RedirectsModal from '../common/redirects-modal';
 import Url from '../common/url';
+import { decodePath } from '../common/url-parts';
 
 const PANEL = 'hierarchy-guard/hierarchy-guard';
 const NOTICE = 'hierarchy-guard-urls-changed';
@@ -157,18 +158,20 @@ function Overview( { data, onView } ) {
 										variant="link"
 										onClick={ () => onView( old.path ) }
 									>
-										{ __(
-											'View redirects',
-											'hierarchy-guard'
-										) }
-										<VisuallyHidden>
+										<span aria-hidden="true">
+											{ __(
+												'View redirects',
+												'hierarchy-guard'
+											) }
+										</span>
+										<VisuallyHidden as="span">
 											{ sprintf(
-												/* translators: %s: an old URL. */
+												/* translators: %s: an old URL, such as /about-us/. Starts with the visible button text "View redirects". */
 												__(
-													'for %s',
+													'View redirects for %s',
 													'hierarchy-guard'
 												),
-												old.url
+												decodePath( old.url )
 											) }
 										</VisuallyHidden>
 									</Button>

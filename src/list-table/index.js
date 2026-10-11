@@ -8,6 +8,7 @@ import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
 import bindQuickEdit from './quick-edit';
 import TrashDialog, { MAX_PREVIEW } from './trash-dialog';
+import { plainTitle } from './trash-choice';
 import '../common/modal.scss';
 import './list-table.scss';
 
@@ -34,7 +35,7 @@ function childCount( id ) {
  */
 function rowTitle( id ) {
 	const link = window.document.querySelector( `#post-${ id } .row-title` );
-	return link ? link.textContent.trim() : '';
+	return link ? plainTitle( link.textContent ) : '';
 }
 
 /**

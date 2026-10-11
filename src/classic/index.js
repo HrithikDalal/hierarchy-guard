@@ -3,7 +3,6 @@
  * changed slug or parent on a published page with subpages.
  */
 import domReady from '@wordpress/dom-ready';
-import config from '../common/config';
 import { classicConfirm } from '../common/copy';
 
 domReady( () => {
@@ -37,10 +36,11 @@ domReady( () => {
 		if ( ! edited ) {
 			return;
 		}
+		// Whether this page is redirected to, not only whether redirects are on.
 		const message = classicConfirm(
 			count,
 			'1' === box.dataset.capped,
-			config.serving
+			'1' === box.dataset.serving
 		);
 		// eslint-disable-next-line no-alert
 		if ( ! window.confirm( message ) ) {

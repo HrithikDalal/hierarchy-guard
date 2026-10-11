@@ -25,6 +25,7 @@ import {
 	trashSentence,
 } from '../common/copy';
 import Url from '../common/url';
+import { confirmedPolicy, showsDenied } from './trash-choice';
 
 export const MAX_PREVIEW = 50;
 
@@ -134,15 +135,11 @@ export default function TrashDialog( {
 		sentence = '';
 	}
 
-	const denied = preview
-		? preview.pages.some( ( page ) =>
-				'trash_children' === policy ? page.denied_trash : page.denied
-			)
-		: false;
+	const denied = showsDenied( preview, policy );
 
 	const confirm = () => {
 		setBusy( true );
-		onConfirm( policy !== initial ? policy : null );
+		onConfirm( confirmedPolicy( preview, single, policy, initial ) );
 	};
 
 	return (
@@ -156,7 +153,7 @@ export default function TrashDialog( {
 			size="medium"
 			aria={ { describedby: 'hierarchy-guard-trash-sentence' } }
 		>
-			<div id="hierarchy-guard-trash-sentence">
+			<div id="hierarchy-guard-trash-sentence" aria-live="polite">
 				{ sentence && <p>{ sentence }</p> }
 				{ denied && <p>{ deniedSentence( policy ) }</p> }
 			</div>

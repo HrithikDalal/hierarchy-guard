@@ -57,7 +57,24 @@ describe( 'counts', () => {
 	it( 'labels subpages in the singular and the plural', () => {
 		expect( subpagesLabel( 1 ) ).toBe( '1 subpage' );
 		expect( subpagesLabel( 1000, true ) ).toBe( '1,000+ subpages' );
-		expect( viewAllLabel( 12, false ) ).toBe( 'View all 12 in the list' );
+		expect( viewAllLabel( 12, false ) ).toBe(
+			'View all 12 subpages in the list'
+		);
+		expect( viewAllLabel( 1, false ) ).toBe(
+			'View all 1 subpage in the list'
+		);
+	} );
+
+	it( 'groups thousands in every locale, as PHP does', () => {
+		try {
+			config.locale = 'es-ES';
+			expect( formatCount( 1000 ) ).toBe( '1.000' );
+			// Not a valid BCP 47 tag: the language and region still apply.
+			config.locale = 'es-ES-ao90';
+			expect( formatCount( 1000 ) ).toBe( '1.000' );
+		} finally {
+			config.locale = 'en-US';
+		}
 	} );
 
 	it( 'says how many subpages sit directly below and at every level', () => {
@@ -146,6 +163,16 @@ describe( 'the trash dialog', () => {
 
 	it( 'shows the URL a kept subpage gets', () => {
 		expect( keptUrl( team ) ).toBe( '/studio/team__trashed/ada/' );
+		expect(
+			keptUrl( {
+				...team,
+				path: '/studio/team',
+				example: { from: '/studio/team/ada', to: '/studio/ada' },
+			} )
+		).toBe( '/studio/team__trashed/ada' );
+		expect(
+			keptUrl( { ...team, example: { from: '/elsewhere/ada/' } } )
+		).toBe( '' );
 		expect( optionDescription( 'keep', team, 1000 ) ).toBe(
 			'Their URLs change until you move them, for example <from /> becomes <to />.'
 		);

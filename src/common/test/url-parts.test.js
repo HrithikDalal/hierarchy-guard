@@ -27,6 +27,26 @@ describe( 'urlParts', () => {
 		expect( urlParts( '/a/' ) ).toEqual( [ { head: '/', end: 'a/' } ] );
 	} );
 
+	it( 'shows a percent-encoded slug decoded, the way core shows permalinks', () => {
+		expect( urlParts( '/company/%e6%97%a5%e6%9c%ac/' ) ).toEqual( [
+			{ head: '/compan', end: 'y/' },
+			{ head: '日', end: '本/' },
+		] );
+	} );
+
+	it( 'keeps a character outside the basic plane whole', () => {
+		expect( urlParts( '/%f0%9f%98%80/' ) ).toEqual( [
+			{ head: '/', end: '😀/' },
+		] );
+	} );
+
+	it( 'leaves a segment that is not valid percent-encoding as it is', () => {
+		expect( urlParts( '/a/%e0%a4%a/' ) ).toEqual( [
+			{ head: '/', end: 'a/' },
+			{ head: '%e0%a4%', end: 'a/' },
+		] );
+	} );
+
 	it( 'reproduces the input when joined', () => {
 		[
 			'/about/team/',

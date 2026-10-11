@@ -7,19 +7,31 @@ import config from './config';
 export const POLICIES = [ 'reparent', 'trash_children', 'keep' ];
 
 /**
- * A number in the user's locale, as PHP's number_format_i18n() writes it.
+ * A number in the user's locale, as PHP's number_format_i18n() writes it:
+ * thousands always grouped, even where the locale's own rule leaves 1000
+ * alone. A WordPress locale that is not a valid language tag, such as
+ * pt-PT-ao90, falls back to its language and region, then to the default.
  *
  * @param {number} count Number.
  * @return {string} Formatted number.
  */
 function formatNumber( count ) {
-	try {
-		return new Intl.NumberFormat( config.locale || undefined ).format(
-			count
-		);
-	} catch {
-		return new Intl.NumberFormat().format( count );
+	const locale = config.locale || undefined;
+	const tags = locale
+		? [ locale, locale.split( '-' ).slice( 0, 2 ).join( '-' ) ]
+		: [];
+	for ( const tag of tags ) {
+		try {
+			return new Intl.NumberFormat( tag, { useGrouping: true } ).format(
+				count
+			);
+		} catch {
+			// Not a tag Intl accepts: try the next one.
+		}
 	}
+	return new Intl.NumberFormat( undefined, { useGrouping: true } ).format(
+		count
+	);
 }
 
 /**
@@ -71,7 +83,7 @@ export function countsLine( data ) {
 }
 
 /**
- * "View all 12 in the list".
+ * "View all 12 subpages in the list".
  *
  * @param {number}  count  Subpages at every level.
  * @param {boolean} capped Whether more exist.
@@ -81,8 +93,8 @@ export function viewAllLabel( count, capped ) {
 	return sprintf(
 		/* translators: %s: number of subpages in all, such as 12 or 1,000+. */
 		_n(
-			'View all %s in the list',
-			'View all %s in the list',
+			'View all %s subpage in the list',
+			'View all %s subpages in the list',
 			count,
 			'hierarchy-guard'
 		),
@@ -100,10 +112,11 @@ export function keptUrl( page ) {
 	if ( ! page.example || ! page.path ) {
 		return '';
 	}
-	return page.example.from.replace(
-		page.path,
-		page.path.replace( /\/$/, '' ) + '__trashed/'
-	);
+	// With or without a trailing slash, as the permalink structure has it.
+	const base = page.path.replace( /\/$/, '' );
+	return page.example.from.startsWith( base + '/' )
+		? base + '__trashed' + page.example.from.slice( base.length )
+		: '';
 }
 
 /**

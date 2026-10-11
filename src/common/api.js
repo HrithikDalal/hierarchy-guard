@@ -76,7 +76,9 @@ export function csvUrl( source, format ) {
 	return addQueryArgs( root, {
 		...args,
 		format,
-		_wpnonce: config.restNonce,
+		// apiFetch renews its nonce when it expires; the one printed at page load does not.
+		_wpnonce:
+			globalThis.wp?.apiFetch?.nonceMiddleware?.nonce || config.restNonce,
 	} );
 }
 

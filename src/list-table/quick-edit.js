@@ -34,14 +34,25 @@ function makeDismissible() {
 }
 
 /**
+ * What handles redirects for the site, used when the page's own answer could
+ * not be loaded.
+ *
+ * @return {{serving: boolean, provider: Object|null}} Redirects.
+ */
+function siteRedirects() {
+	return { serving: config.serving, provider: config.provider };
+}
+
+/**
  * Prints and speaks a notice under the heading.
  *
- * @param {string}      status   Notice status: info, warning and so on.
- * @param {string}      sentence What to say.
- * @param {Object|null} source   Redirects source for the button, or null for none.
- * @param {string}      label    The button's label.
+ * @param {string}      status    Notice status: info, warning and so on.
+ * @param {string}      sentence  What to say.
+ * @param {Object|null} source    Redirects source for the button, or null for none.
+ * @param {string}      label     The button's label.
+ * @param {Object}      redirects Whether the page is redirected to, and the redirect plugin.
  */
-function printNotice( status, sentence, source, label ) {
+function printNotice( status, sentence, source, label, redirects ) {
 	const end = window.document.querySelector( '.wp-header-end' );
 	if ( ! end ) {
 		return;
@@ -62,7 +73,11 @@ function printNotice( status, sentence, source, label ) {
 			) );
 		} );
 		text.appendChild( button );
-		if ( ! config.serving && ! config.provider && config.settingsUrl ) {
+		if (
+			! redirects.serving &&
+			! redirects.provider &&
+			config.settingsUrl
+		) {
 			// Set apart the way the server notice sets its link apart.
 			const divider = window.document.createElement( 'span' );
 			divider.setAttribute( 'aria-hidden', 'true' );
@@ -84,9 +99,10 @@ function printNotice( status, sentence, source, label ) {
 /**
  * Says the save changed URLs but their redirects could not be loaded.
  *
- * @param {Object|null} source Redirects source for the button, or null.
+ * @param {Object|null} source    Redirects source for the button, or null.
+ * @param {Object}      redirects The page's redirects, or the site's when the page's failed to load.
  */
-function printFailure( source ) {
+function printFailure( source, redirects = siteRedirects() ) {
 	printNotice(
 		'warning',
 		__(
@@ -94,36 +110,35 @@ function printFailure( source ) {
 			'hierarchy-guard'
 		),
 		source,
-		__( 'View redirects', 'hierarchy-guard' )
+		__( 'View redirects', 'hierarchy-guard' ),
+		redirects
 	);
 }
 
 /**
  * Prints and speaks a notice under the heading saying the save changed URLs.
  *
- * @param {number} postId Saved post.
- * @param {string} from   The old path the save recorded.
+ * @param {number} postId    Saved post.
+ * @param {string} from      The old path the save recorded.
+ * @param {Object} redirects The page's redirects, from its hierarchy.
  */
-function announce( postId, from ) {
+function announce( postId, from, redirects ) {
 	const source = { post: postId, from };
+	const { serving, provider } = redirects;
 	fetchPairs( source, 1, 1 )
 		.then( ( pairs ) => {
 			if ( ! pairs.total ) {
 				return;
 			}
 			printNotice(
-				changedStatus( config.serving, config.provider ),
-				changedSentence(
-					pairs.total,
-					pairs.capped,
-					config.serving,
-					config.provider
-				),
-				config.serving ? null : source,
-				viewRedirectsLabel( pairs.total, pairs.capped )
+				changedStatus( serving, provider ),
+				changedSentence( pairs.total, pairs.capped, serving, provider ),
+				serving ? null : source,
+				viewRedirectsLabel( pairs.total, pairs.capped ),
+				redirects
 			);
 		} )
-		.catch( () => printFailure( source ) );
+		.catch( () => printFailure( source, redirects ) );
 }
 
 /**
@@ -257,7 +272,11 @@ export default function bindQuickEdit() {
 					? data.old_paths[ 0 ].path
 					: null;
 				if ( latest && latest !== before.newest ) {
-					announce( postId, latest );
+					announce(
+						postId,
+						latest,
+						data.redirects || siteRedirects()
+					);
 				}
 			} )
 			.catch( () => printFailure( null ) );
