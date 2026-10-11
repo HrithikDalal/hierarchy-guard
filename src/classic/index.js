@@ -3,8 +3,8 @@
  * changed slug or parent on a published page with subpages.
  */
 import domReady from '@wordpress/dom-ready';
-import { __, _n, sprintf } from '@wordpress/i18n';
-import { formatCount } from '../common/copy';
+import config from '../common/config';
+import { classicConfirm } from '../common/copy';
 
 domReady( () => {
 	const box = window.document.querySelector( '.hierarchy-guard-box' );
@@ -27,29 +27,21 @@ domReady( () => {
 	// A jQuery handler: core re-binds its own submit handler on every click of
 	// a submit button, so it always runs after this one and sees the cancel.
 	$( '#post' ).on( 'submit.hierarchy-guard', ( event ) => {
+		// Preview Changes submits the form too, and saves nothing.
+		if ( 'dopreview' === $( '#wp-preview' ).val() ) {
+			return;
+		}
 		const edited =
 			( slug ? slug.value : '' ) !== initial.slug ||
 			( parent ? parent.value : '' ) !== initial.parent;
 		if ( ! edited ) {
 			return;
 		}
-		const message = [
-			sprintf(
-				/* translators: %s: number of subpages, such as 12 or 1,000+. */
-				_n(
-					'Saving changes this page’s URL and the URL of %s subpage.',
-					'Saving changes this page’s URL and the URLs of %s subpages.',
-					count,
-					'hierarchy-guard'
-				),
-				formatCount( count, '1' === box.dataset.capped )
-			),
-			__(
-				'You’ll get the redirects to add in the Hierarchy box after saving.',
-				'hierarchy-guard'
-			),
-			__( 'Continue?', 'hierarchy-guard' ),
-		].join( ' ' );
+		const message = classicConfirm(
+			count,
+			'1' === box.dataset.capped,
+			config.serving
+		);
 		// eslint-disable-next-line no-alert
 		if ( ! window.confirm( message ) ) {
 			event.preventDefault();

@@ -170,7 +170,10 @@ export function initialSentence( title, children, policy ) {
 				'hierarchy-guard'
 			),
 			title,
-			formatCount( children )
+			formatCount(
+				Math.min( children, config.cap ),
+				children > config.cap
+			)
 		) +
 		' ' +
 		genericTail( policy )
@@ -211,7 +214,7 @@ export function trashSentence( page, policy, cap ) {
 						'hierarchy-guard'
 					),
 					page.title,
-					formatCount( children )
+					formatCount( children, page.descendants.capped )
 				);
 
 	let tail;
@@ -470,6 +473,22 @@ export function saveWarning( count, capped, serving ) {
 					'You’ll get the redirects to add after saving.',
 					'hierarchy-guard'
 				) )
+	);
+}
+
+/**
+ * The classic editor's confirmation before a save changes subpage URLs.
+ *
+ * @param {number}  count   Subpages at every level.
+ * @param {boolean} capped  Whether more exist.
+ * @param {boolean} serving Whether built-in redirects are on.
+ * @return {string} Sentence ending in a question.
+ */
+export function classicConfirm( count, capped, serving ) {
+	return (
+		saveWarning( count, capped, serving ) +
+		' ' +
+		__( 'Continue?', 'hierarchy-guard' )
 	);
 }
 

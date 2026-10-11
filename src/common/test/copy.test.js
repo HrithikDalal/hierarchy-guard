@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	bulkSentence,
+	classicConfirm,
 	changedSentence,
 	changedStatus,
 	copiedSentence,
@@ -118,6 +119,25 @@ describe( 'the trash dialog', () => {
 		);
 	} );
 
+	it( 'shows a capped direct count with a plus', () => {
+		expect(
+			initialSentence( 'Team', 1001, 'reparent' ).startsWith(
+				'“Team” has 1,000+ subpages.'
+			)
+		).toBe( true );
+		expect(
+			trashSentence(
+				{
+					...team,
+					children: 1000,
+					descendants: { count: 1000, capped: true },
+				},
+				'reparent',
+				1000
+			)
+		).toContain( '“Team” has 1,000+ subpages.' );
+	} );
+
 	it( 'shows the URL a kept subpage gets', () => {
 		expect( keptUrl( team ) ).toBe( '/studio/team__trashed/ada/' );
 		expect( optionDescription( 'keep', team, 1000 ) ).toBe(
@@ -201,6 +221,15 @@ describe( 'warnings and outcomes', () => {
 		);
 		expect( quickEditWarning( 5, false ) ).toBe(
 			'Saving changes this page’s URL and the URLs of 5 subpages.'
+		);
+	} );
+
+	it( 'composes the classic confirmation from the save warning', () => {
+		expect( classicConfirm( 12, false, false ) ).toBe(
+			'Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving. Continue?'
+		);
+		expect( classicConfirm( 1, false, true ) ).toBe(
+			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones. Continue?'
 		);
 	} );
 
