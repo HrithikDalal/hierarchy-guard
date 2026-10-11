@@ -32,7 +32,7 @@ final class Batch_Resolver {
 	 * What lookup() answers for a request path several posts share when core
 	 * could not be asked any more: taken as one of them showing there.
 	 */
-	public const UNKNOWN = -1;
+	public const UNKNOWN = -2;
 
 	/**
 	 * Most paths several posts share that core's own get_page_by_path() is asked about, per batch.
@@ -41,7 +41,7 @@ final class Batch_Resolver {
 
 	/**
 	 * The page the server redirects each path to, for every path at once:
-	 * Rules::serves() on facts read ahead. Each run of the rules that asks for
+	 * Rules::resolve() on a 404, on facts read ahead. Each run of the rules that asks for
 	 * a fact not read yet stops; the facts every run asked for are read in one
 	 * query, ledger facts or path lookups, and the runs start again. The paths
 	 * go round by round together, so each round costs one ledger query, one
@@ -99,11 +99,13 @@ final class Batch_Resolver {
 
 			$next = [];
 			foreach ( array_keys( $pending ) as $start ) {
-				$start = (string) $start;
-				$trace = [];
+				$start     = (string) $start;
+				$trace     = [];
+				$temporary = false;
 				$view->begin();
 				try {
-					$target = Rules::serves( $view, $post_type, $start, $trace );
+					// Only a 404 reaches the resolver.
+					$target = $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace ) : null;
 					if ( null !== $target && ! $view->guessed() ) {
 						$out[ $start ] = (int) $target->ID;
 						continue;

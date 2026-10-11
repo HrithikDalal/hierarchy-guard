@@ -11,6 +11,7 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use InvalidArgumentException;
 use OutOfBoundsException;
 use WP_Post;
 
@@ -110,6 +111,7 @@ final class Prefetched_View implements Ledger_View {
 	 * @param string $prefix    Normalized path.
 	 */
 	public function find( string $post_type, string $prefix ): ?int {
+		$this->own( $post_type );
 		$fact = $this->fact( $prefix );
 		if ( $fact['live'] > 0 ) {
 			return $fact['live'];
@@ -128,6 +130,7 @@ final class Prefetched_View implements Ledger_View {
 	 * @param string $prefix    Normalized path.
 	 */
 	public function held_in_trash( string $post_type, string $prefix ): bool {
+		$this->own( $post_type );
 		return $this->fact( $prefix )['held'];
 	}
 
@@ -162,6 +165,7 @@ final class Prefetched_View implements Ledger_View {
 	 * @throws OutOfBoundsException When the path was not looked up yet.
 	 */
 	public function page_by_path( string $candidate, string $post_type ): ?WP_Post {
+		$this->own( $post_type );
 		if ( ! isset( $this->candidates[ $candidate ] ) ) {
 			$this->needs['candidates'][ $candidate ] = true;
 			throw new OutOfBoundsException( 'Not looked up yet.' );
@@ -170,18 +174,22 @@ final class Prefetched_View implements Ledger_View {
 	}
 
 	/**
-	 * {@inheritDoc}
+	 * Whether a request for a path of the type is a 404, by Rules::is_404()
+	 * on the request lookups read. One not read yet is answered as a 404 and
+	 * noted, for the batch to read next.
 	 *
 	 * @param string $path      Normalized path.
 	 * @param string $post_type Post type name.
+	 * @return bool
 	 */
 	public function is_404( string $path, string $post_type ): bool {
+		$this->own( $post_type );
 		if ( ! isset( $this->requests[ $path ] ) ) {
 			$this->asked[ $path ] = true;
 			return true;
 		}
 		$there = $this->requests[ $path ];
-		if ( $there < 0 ) {
+		if ( Batch_Resolver::UNKNOWN === $there ) {
 			// Core was not asked about a path two pages share: taken as served by one of them.
 			return false;
 		}
@@ -257,6 +265,18 @@ final class Prefetched_View implements Ledger_View {
 			foreach ( $names as $name => $viewable ) {
 				$this->named[ (string) $type ][ (string) $name ] = ( $this->named[ (string) $type ][ (string) $name ] ?? false ) || $viewable;
 			}
+		}
+	}
+
+	/**
+	 * Refuses a post type other than the view's: its facts are of that type only.
+	 *
+	 * @param string $post_type Post type name.
+	 * @throws InvalidArgumentException For another type.
+	 */
+	private function own( string $post_type ): void {
+		if ( $post_type !== $this->post_type ) {
+			throw new InvalidArgumentException( 'The facts read are of another post type.' );
 		}
 	}
 

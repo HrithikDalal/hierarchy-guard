@@ -12,9 +12,9 @@ namespace HierarchyGuard\Redirects;
 use WP_Post;
 
 /**
- * The facts Rules asks for: the ledger, posts, core's path lookups and the
- * main query's 404. The server reads them live; a list of pairs reads them
- * ahead for every path at once.
+ * The facts Rules::resolve() asks for: the ledger, posts and core's path
+ * lookups. The resolver the server runs reads them live (Live_View); a list
+ * of pairs reads them ahead for every path at once (Prefetched_View).
  */
 interface Ledger_View {
 
@@ -61,14 +61,4 @@ interface Ledger_View {
 	 * @return WP_Post|null
 	 */
 	public function page_by_path( string $candidate, string $post_type ): ?WP_Post;
-
-	/**
-	 * Whether a request for a path of the type is a 404, as WP's main query
-	 * answers it: the resolver only ever runs on one.
-	 *
-	 * @param string $path      Normalized path.
-	 * @param string $post_type Post type name.
-	 * @return bool
-	 */
-	public function is_404( string $path, string $post_type ): bool;
 }

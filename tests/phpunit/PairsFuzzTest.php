@@ -928,7 +928,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 
 	/**
 	 * The page a request for a path is redirected to: none when WordPress
-	 * shows something there, as Rules::is_404() tells it on the live ledger,
+	 * shows something there, as Rules::is_404() tells it on live lookups,
 	 * since only a 404 reaches the resolver.
 	 *
 	 * @param Resolver $resolver Resolver.
@@ -936,7 +936,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 * @return int Page ID, 0 for none.
 	 */
 	private function served( Resolver $resolver, string $path ): int {
-		if ( ! ( new Live_View( new Ledger() ) )->is_404( $path, 'page' ) ) {
+		if ( ! Live_Model::is_404( $path ) ) {
 			return 0;
 		}
 		return $this->resolved( $resolver, $path );

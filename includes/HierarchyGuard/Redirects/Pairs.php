@@ -62,27 +62,6 @@ final class Pairs {
 	}
 
 	/**
-	 * The block for an old path recorded on a post; see Pairs_Blocks::post_block().
-	 *
-	 * @param WP_Post $post     Post the old path is recorded on.
-	 * @param string  $old_path The old path, any form.
-	 * @return array<string,mixed> Block.
-	 */
-	public static function post_block( WP_Post $post, string $old_path ): array {
-		return Pairs_Blocks::post_block( $post, $old_path );
-	}
-
-	/**
-	 * The blocks for a trash change; see Pairs_Blocks::change_blocks().
-	 *
-	 * @param array<string,mixed> $change A change from Change_Log.
-	 * @return array<int,array<string,mixed>> Blocks.
-	 */
-	public static function change_blocks( array $change ): array {
-		return Pairs_Blocks::change_blocks( $change );
-	}
-
-	/**
 	 * Every pair of the blocks, up to the count cap.
 	 *
 	 * A block is skipped when its old path has no URL (plain permalinks, or a

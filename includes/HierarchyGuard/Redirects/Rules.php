@@ -15,7 +15,9 @@ use WP_Post;
 /**
  * Longest-prefix rewriting with a bounded number of rounds, and the test a
  * page must pass to be redirected to. The one copy of these rules: the
- * server reads its facts live, a list of pairs reads them ahead.
+ * server's resolver reads its facts live, a list of pairs reads them ahead.
+ * Also a model of whether WordPress answers a request with a 404, which only
+ * a list of pairs uses: the server asks WordPress itself.
  */
 final class Rules {
 
@@ -25,25 +27,6 @@ final class Rules {
 	 * What Ledger_View::find() answers for a path in the root list.
 	 */
 	public const ROOT = 0;
-
-	/**
-	 * The page a request for an old path is redirected to: only a 404 reaches
-	 * the resolver.
-	 *
-	 * @param Ledger_View                                 $view      Facts.
-	 * @param string                                      $post_type Post type the request is for.
-	 * @param string                                      $path      Normalized path.
-	 * @param array<int,array{0:string,1:int,2:string}>|null $trace  Set to each round's prefix, holder and rewritten path.
-	 * @return WP_Post|null
-	 */
-	public static function serves( Ledger_View $view, string $post_type, string $path, ?array &$trace = null ): ?WP_Post {
-		$trace = [];
-		if ( ! $view->is_404( $path, $post_type ) ) {
-			return null;
-		}
-		$temporary = false;
-		return self::resolve( $view, $post_type, $path, $temporary, $trace );
-	}
 
 	/**
 	 * The publicly viewable post an old path now leads to, or null.

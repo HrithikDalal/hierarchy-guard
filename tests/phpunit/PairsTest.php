@@ -15,6 +15,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Pairs;
+use HierarchyGuard\Redirects\Pairs_Blocks;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Redirects\Server;
@@ -358,16 +359,16 @@ final class PairsTest extends WP_UnitTestCase {
 		$change = $this->log->latest( $this->admin );
 		wp_untrash_post( $this->ids['about'] );
 
-		$this->assertSame( [], Pairs::change_blocks( $change ) );
+		$this->assertSame( [], Pairs_Blocks::change_blocks( $change ) );
 	}
 
 	public function test_only_a_trash_that_moved_subpages_up_has_pairs(): void {
 		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
 		wp_trash_post( $this->ids['about'] );
 
-		$this->assertSame( [], Pairs::change_blocks( $this->log->latest( $this->admin ) ) );
+		$this->assertSame( [], Pairs_Blocks::change_blocks( $this->log->latest( $this->admin ) ) );
 
-		$this->assertSame( [], Pairs::change_blocks( [ 'action' => 'restore' ] ) );
+		$this->assertSame( [], Pairs_Blocks::change_blocks( [ 'action' => 'restore' ] ) );
 	}
 
 	public function test_the_blocks_of_a_bulk_trash_cost_the_same_few_queries(): void {
@@ -382,7 +383,7 @@ final class PairsTest extends WP_UnitTestCase {
 		$change = $this->log->latest( $this->admin );
 
 		$queries = get_num_queries();
-		Pairs::change_blocks( $change );
+		Pairs_Blocks::change_blocks( $change );
 
 		$this->assertLessThanOrEqual( 4, get_num_queries() - $queries, 'Statuses, markers and moved pages in one query each, whatever the number of roots.' );
 	}
