@@ -63,7 +63,7 @@ final class Change_Log {
 	 * @param int                 $user_id   User whose change it is. Nothing is stored for 0.
 	 * @param string              $action    What happened: trash or restore.
 	 * @param string              $post_type Post type of the root.
-	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, ids, urls, job.
+	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, ids, slugs, urls, job.
 	 * @param int[]               $ids       Affected post IDs.
 	 * @return string The change ID, or an empty string when nothing was stored.
 	 */
@@ -111,9 +111,10 @@ final class Change_Log {
 	 * @param array<string,int>  $counts    The job's counts so far.
 	 * @param int[]              $kept_ids  The job's kept IDs.
 	 * @param int[]              $ids       The job's affected IDs.
+	 * @param array<int,string>  $slugs     Each moved subpage's slug before the move.
 	 * @param bool               $running   Whether the job still has work left.
 	 */
-	public function update( int $user_id, string $change_id, int $root_id, array $counts, array $kept_ids, array $ids, bool $running ): void {
+	public function update( int $user_id, string $change_id, int $root_id, array $counts, array $kept_ids, array $ids, array $slugs, bool $running ): void {
 		if ( $user_id <= 0 || '' === $change_id ) {
 			return;
 		}
@@ -129,6 +130,7 @@ final class Change_Log {
 					'counts'   => $counts,
 					'kept_ids' => $kept_ids,
 					'ids'      => $ids,
+					'slugs'    => $slugs,
 					'job'      => $running,
 				]
 			)
@@ -216,11 +218,27 @@ final class Change_Log {
 			'kept_ids' => array_slice( array_map( 'intval', (array) ( $entry['kept_ids'] ?? [] ) ), 0, self::MAX_KEPT ),
 			// This root's own affected IDs, so its redirects can be listed after it is deleted for good.
 			'ids'      => array_slice( array_map( 'intval', (array) ( $entry['ids'] ?? [] ) ), 0, self::MAX_IDS ),
+			// Each moved subpage's slug before the move, so its old URL survives a delete for good.
+			'slugs'    => self::slugs( (array) ( $entry['slugs'] ?? [] ) ),
 			'urls'     => [
 				'count'  => (int) ( $urls['count'] ?? 0 ),
 				'capped' => (bool) ( $urls['capped'] ?? false ),
 			],
 			'job'      => (bool) ( $entry['job'] ?? false ),
 		];
+	}
+
+	/**
+	 * Cleans a map of slugs by post ID, keeping at most MAX_IDS.
+	 *
+	 * @param array<int|string,mixed> $slugs Slugs by post ID.
+	 * @return array<int,string>
+	 */
+	private static function slugs( array $slugs ): array {
+		$out = [];
+		foreach ( array_slice( $slugs, 0, self::MAX_IDS, true ) as $id => $slug ) {
+			$out[ (int) $id ] = (string) $slug;
+		}
+		return $out;
 	}
 }

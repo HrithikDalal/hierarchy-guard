@@ -94,7 +94,7 @@ final class ChangeLogTest extends WP_UnitTestCase {
 	public function test_update_refreshes_a_root_while_the_change_lasts(): void {
 		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 200 ], true ), [ 1 ] );
 
-		$this->log->update( $this->admin, $id, 12, [ 'moved' => 1200 ], [ 9 ], [ 2 ], false );
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 1200 ], [ 9 ], [ 2 ], [ 5 => 'old' ], false );
 
 		$change = $this->log->latest( $this->admin );
 		$this->assertSame( 1200, $change['roots'][12]['counts']['moved'] );
@@ -103,19 +103,22 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( [ 9 ], $change['roots'][12]['kept_ids'] );
 		$this->assertSame( 7, $change['roots'][12]['to'], 'Fields the batch does not own are kept.' );
 		$this->assertSame( [ 1, 2 ], $change['ids'] );
+		$this->assertSame( [ 5 => 'old' ], $change['roots'][12]['slugs'] );
 
-		$this->log->update( $this->admin, 'another-change', 12, [ 'moved' => 5 ], [], [], false );
+		$this->log->update( $this->admin, 'another-change', 12, [ 'moved' => 5 ], [], [], [], false );
 		$this->assertSame( 1200, $this->log->latest( $this->admin )['counts']['moved'], 'A replaced change is left alone.' );
 	}
 
 	public function test_ids_and_kept_ids_are_capped(): void {
 		$entry             = $this->entry( 12, [] );
 		$entry['kept_ids'] = range( 1, 50 );
+		$entry['slugs']    = array_fill_keys( range( 1, 250 ), 'slug' );
 		$this->log->record( $this->admin, 'trash', 'page', $entry, range( 1, 250 ) );
 
 		$change = $this->log->latest( $this->admin );
 		$this->assertCount( Change_Log::MAX_IDS, $change['ids'] );
 		$this->assertCount( Change_Log::MAX_KEPT, $change['roots'][12]['kept_ids'] );
+		$this->assertCount( Change_Log::MAX_IDS, $change['roots'][12]['slugs'] );
 	}
 
 	public function test_nothing_is_stored_without_a_user(): void {

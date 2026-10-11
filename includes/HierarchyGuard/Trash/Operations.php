@@ -127,6 +127,7 @@ final class Operations {
 			'counts'    => Change_Log::empty_counts(),
 			'kept_ids'  => [],
 			'ids'       => [],
+			'slugs'     => [],
 			'work'      => [
 				'moves' => 0,
 				'calls' => 0,
@@ -243,6 +244,9 @@ final class Operations {
 			}
 
 			Markers::add( $child_id, Markers::moved_key( $root ), Markers::encode_moved( $to, $result['old_slug'], $result['slug'], $now ) );
+			if ( count( (array) $job['slugs'] ) < self::MAX_REMEMBERED ) {
+				$job['slugs'][ $child_id ] = $result['old_slug'];
+			}
 			if ( $result['renamed'] ) {
 				++$job['counts']['renamed'];
 				if ( $result['recordable'] && $this->recording() ) {

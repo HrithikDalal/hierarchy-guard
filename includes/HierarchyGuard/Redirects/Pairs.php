@@ -85,7 +85,7 @@ final class Pairs {
 	 * leads nowhere and its first-level pages are the moved markers, at their
 	 * original slugs. Once it is deleted for good its old path leads to the
 	 * page its subpages moved under, and its first-level pages are the IDs its
-	 * change entry kept that still live there.
+	 * change entry kept that still live there, at their slugs from before the move.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
 	 * @return array<int,array<string,mixed>> Blocks.
@@ -466,7 +466,8 @@ final class Pairs {
 		foreach ( self::rows( array_keys( $owner ), $type ) as $row ) {
 			$root_id = $owner[ (int) $row['ID'] ];
 			if ( (int) $row['post_parent'] === (int) $roots[ $root_id ]['to'] ) {
-				$out[ $root_id ][] = self::node( $row, (string) $row['post_name'] );
+				$slug              = $roots[ $root_id ]['slugs'][ (int) $row['ID'] ] ?? '';
+				$out[ $root_id ][] = self::node( $row, is_string( $slug ) && '' !== $slug ? $slug : (string) $row['post_name'] );
 			}
 		}
 		return $out;

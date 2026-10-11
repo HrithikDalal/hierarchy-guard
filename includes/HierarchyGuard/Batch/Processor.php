@@ -117,7 +117,7 @@ final class Processor {
 					break;
 				}
 				$done = ! empty( $job['finished'] );
-				$this->log->update( (int) $job['user'], (string) $job['change'], $root_id, $job['counts'], $job['kept_ids'], $job['ids'], ! $done );
+				$this->log->update( (int) $job['user'], (string) $job['change'], $root_id, $job['counts'], $job['kept_ids'], $job['ids'], (array) ( $job['slugs'] ?? [] ), ! $done );
 
 				if ( $done ) {
 					$this->queue->delete( $root_id );
@@ -246,7 +246,7 @@ final class Processor {
 
 		$replaced = $current ?? $this->queue->load( $root_id );
 		if ( null !== $replaced ) {
-			$this->log->update( (int) $replaced['user'], (string) $replaced['change'], $root_id, $replaced['counts'], $replaced['kept_ids'], $replaced['ids'], false );
+			$this->log->update( (int) $replaced['user'], (string) $replaced['change'], $root_id, $replaced['counts'], $replaced['kept_ids'], $replaced['ids'], (array) ( $replaced['slugs'] ?? [] ), false );
 		}
 		$this->queue->save( $offer );
 		return $offer;

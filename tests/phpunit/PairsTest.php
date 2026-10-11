@@ -331,4 +331,35 @@ final class PairsTest extends WP_UnitTestCase {
 	public function test_a_download_has_every_pair(): void {
 		$this->assertCount( 4, $this->pairs->all( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) ) );
 	}
+
+	public function test_after_a_delete_a_subpage_renamed_on_the_move_keeps_its_old_slug(): void {
+		$this->page( 'team', $this->ids['company'] );
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		wp_delete_post( $this->ids['about'], true );
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertContains( '/company/about/team/ -> /company/team-2/', $lines );
+		$this->assertContains( '/company/about/team/leadership/ -> /company/team-2/leadership/', $lines );
+		foreach ( $lines as $line ) {
+			$this->assertStringNotContainsString( 'about/team-2', explode( ' -> ', $line )[0] );
+		}
+	}
+
+	public function test_after_a_delete_a_subpage_renamed_after_the_trash_keeps_its_original_slug(): void {
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['history'],
+				'post_name' => 'story',
+			]
+		);
+		wp_delete_post( $this->ids['about'], true );
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertContains( '/company/about/history/ -> /company/story/', $lines );
+	}
 }

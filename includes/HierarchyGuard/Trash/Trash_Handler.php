@@ -499,7 +499,7 @@ final class Trash_Handler {
 	private function supersede( int $root_id ): void {
 		foreach ( [ $this->queue->load( $root_id ), $this->queue->take_offer( $root_id ) ] as $old ) {
 			if ( null !== $old ) {
-				$this->log->update( (int) $old['user'], (string) $old['change'], $root_id, (array) $old['counts'], (array) $old['kept_ids'], (array) $old['ids'], false );
+				$this->log->update( (int) $old['user'], (string) $old['change'], $root_id, (array) $old['counts'], (array) $old['kept_ids'], (array) $old['ids'], (array) ( $old['slugs'] ?? [] ), false );
 			}
 		}
 	}
@@ -530,6 +530,7 @@ final class Trash_Handler {
 				'counts'   => (array) $job['counts'],
 				'kept_ids' => (array) $job['kept_ids'],
 				'ids'      => (array) $job['ids'],
+				'slugs'    => (array) ( $job['slugs'] ?? [] ),
 				'urls'     => (array) $job['urls'],
 				'job'      => $running,
 			],
