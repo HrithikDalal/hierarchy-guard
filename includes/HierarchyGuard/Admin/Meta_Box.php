@@ -78,10 +78,11 @@ final class Meta_Box {
 		$descendants = (int) $data['descendants']['count'];
 
 		printf(
-			'<div class="hierarchy-guard-box" data-descendants="%1$d" data-capped="%2$d" data-status="%3$s">',
+			'<div class="hierarchy-guard-box" data-descendants="%1$d" data-capped="%2$d" data-status="%3$s" data-serving="%4$d">',
 			(int) $descendants,
 			$data['descendants']['capped'] ? 1 : 0,
-			esc_attr( (string) $data['status'] )
+			esc_attr( (string) $data['status'] ),
+			$data['redirects']['serving'] ? 1 : 0
 		);
 
 		echo '<p><strong>' . esc_html__( 'Parent pages', 'hierarchy-guard' ) . '</strong><br>';
@@ -91,7 +92,7 @@ final class Meta_Box {
 			esc_html_e( 'This is a top-level page.', 'hierarchy-guard' );
 		} else {
 			$crumbs = array_map( [ self::class, 'link' ], $data['ancestors'] );
-			echo implode( ' › ', $crumbs ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Each crumb is escaped by link().
+			echo implode( '<span aria-hidden="true"> › </span>', $crumbs ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Each crumb is escaped by link().
 		}
 		echo '</p>';
 
@@ -110,17 +111,17 @@ final class Meta_Box {
 				printf(
 					'<li>%1$s%2$s%3$s</li>',
 					self::link( $child ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped by link().
-					'' !== $state ? ' — ' . esc_html( $state ) : '',
-					'' !== $note ? ' · ' . esc_html( $note ) : ''
+					'' !== $state ? '<span aria-hidden="true"> — </span>' . esc_html( $state ) : '',
+					'' !== $note ? '<span aria-hidden="true"> · </span>' . esc_html( $note ) : ''
 				);
 			}
 			echo '</ul>';
-			if ( $data['has_more'] || $descendants > count( $data['children'] ) ) {
+			if ( $data['has_more'] || $descendants > count( $data['children'] ) || ! empty( $data['descendants']['capped'] ) ) {
 				printf(
 					'<p><a href="%1$s">%2$s</a></p>',
 					esc_url( (string) $data['list_url'] ),
 					/* translators: %s: number of subpages in all, such as 12 or 1,000+. */
-					esc_html( sprintf( _n( 'View all %s in the list', 'View all %s in the list', $descendants, 'hierarchy-guard' ), Subtree::format_count( $descendants, (bool) $data['descendants']['capped'] ) ) )
+					esc_html( sprintf( _n( 'View all %s subpage in the list', 'View all %s subpages in the list', $descendants, 'hierarchy-guard' ), Subtree::format_count( $descendants, (bool) $data['descendants']['capped'] ) ) )
 				);
 			}
 		}
@@ -144,14 +145,16 @@ final class Meta_Box {
 				} else {
 					$state = __( 'Not redirected', 'hierarchy-guard' );
 				}
+				// Shown decoded, as core shows permalinks; the download keeps the stored path.
+				$shown = rawurldecode( (string) $old['url'] );
 				printf(
-					'<li><code>%1$s</code> · %2$s · <a href="%3$s" download>%4$s<span class="screen-reader-text"> %5$s</span></a></li>',
-					esc_html( (string) $old['url'] ),
+					'<li><code>%1$s</code><span aria-hidden="true"> · </span>%2$s<span aria-hidden="true"> · </span><a href="%3$s" download><span aria-hidden="true">%4$s</span><span class="screen-reader-text">%5$s</span></a></li>',
+					esc_html( $shown ),
 					esc_html( $state ),
 					esc_url( self::csv_url( (int) $post->ID, (string) $old['path'], $layout ) ),
 					esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' ),
-					/* translators: %s: an old URL, such as /about-us/. */
-					esc_html( sprintf( __( 'for %s', 'hierarchy-guard' ), (string) $old['url'] ) )
+					/* translators: %s: an old URL, such as /about-us/. Starts with the visible link text "Download redirects (CSV)". */
+					esc_html( sprintf( __( 'Download redirects (CSV) for %s', 'hierarchy-guard' ), $shown ) )
 				);
 			}
 			echo '</ul>';
@@ -229,13 +232,17 @@ final class Meta_Box {
 	}
 
 	/**
-	 * A post's title, linked to its editor when the user may edit it.
+	 * A post's title, linked to its editor when the user may edit it and core
+	 * would open it: never for a page in the Trash.
 	 *
 	 * @param array<string,mixed> $ref Post reference from Overview.
 	 * @return string HTML.
 	 */
 	private static function link( array $ref ): string {
 		$title = esc_html( (string) $ref['title'] );
-		return null !== $ref['edit_link'] ? sprintf( '<a href="%1$s">%2$s</a>', esc_url( (string) $ref['edit_link'] ), $title ) : $title;
+		if ( null === $ref['edit_link'] || 'trash' === get_post_status( (int) $ref['id'] ) ) {
+			return $title;
+		}
+		return sprintf( '<a href="%1$s">%2$s</a>', esc_url( (string) $ref['edit_link'] ), $title );
 	}
 }

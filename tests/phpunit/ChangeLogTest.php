@@ -42,6 +42,7 @@ final class ChangeLogTest extends WP_UnitTestCase {
 			'to'       => 7,
 			'policy'   => 'reparent',
 			'fallback' => false,
+			'path'     => 'company/about',
 			'counts'   => $counts,
 			'kept_ids' => [],
 			'urls'     => [
@@ -94,7 +95,7 @@ final class ChangeLogTest extends WP_UnitTestCase {
 	public function test_update_refreshes_a_root_while_the_change_lasts(): void {
 		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 200 ], true ), [ 1 ] );
 
-		$this->log->update( $this->admin, $id, 12, [ 'moved' => 1200 ], [ 9 ], [ 2 ], [ 5 => 'old' ], false );
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 1200 ], [ 9 ], [ 2 ], [ 2 => 'old' ], false );
 
 		$change = $this->log->latest( $this->admin );
 		$this->assertSame( 1200, $change['roots'][12]['counts']['moved'] );
@@ -103,7 +104,9 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( [ 9 ], $change['roots'][12]['kept_ids'] );
 		$this->assertSame( 7, $change['roots'][12]['to'], 'Fields the batch does not own are kept.' );
 		$this->assertSame( [ 1, 2 ], $change['ids'] );
-		$this->assertSame( [ 5 => 'old' ], $change['roots'][12]['slugs'] );
+		$this->assertSame( [ 2 ], $change['roots'][12]['ids'], 'The root’s own IDs are the batch’s, so its pairs survive a delete.' );
+		$this->assertSame( 'company/about', $change['roots'][12]['path'], 'The old path the pairs are rebuilt from is kept.' );
+		$this->assertSame( [ 2 => 'old' ], $change['roots'][12]['slugs'] );
 
 		$this->log->update( $this->admin, 'another-change', 12, [ 'moved' => 5 ], [], [], [], false );
 		$this->assertSame( 1200, $this->log->latest( $this->admin )['counts']['moved'], 'A replaced change is left alone.' );
@@ -112,13 +115,43 @@ final class ChangeLogTest extends WP_UnitTestCase {
 	public function test_ids_and_kept_ids_are_capped(): void {
 		$entry             = $this->entry( 12, [] );
 		$entry['kept_ids'] = range( 1, 50 );
+		$entry['ids']      = range( 1, 250 );
 		$entry['slugs']    = array_fill_keys( range( 1, 250 ), 'slug' );
 		$this->log->record( $this->admin, 'trash', 'page', $entry, range( 1, 250 ) );
 
 		$change = $this->log->latest( $this->admin );
 		$this->assertCount( Change_Log::MAX_IDS, $change['ids'] );
 		$this->assertCount( Change_Log::MAX_KEPT, $change['roots'][12]['kept_ids'] );
+		$this->assertCount( Change_Log::MAX_IDS, $change['roots'][12]['ids'] );
 		$this->assertCount( Change_Log::MAX_IDS, $change['roots'][12]['slugs'] );
+	}
+
+	public function test_the_ids_of_every_root_together_stay_within_the_count_cap(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 5 );
+		$first           = $this->entry( 12, [ 'moved' => 4 ] );
+		$first['ids']    = [ 1, 2, 3, 4 ];
+		$first['slugs']  = [
+			1 => 'a',
+			2 => 'b',
+			3 => 'c',
+			4 => 'd',
+		];
+		$second          = $this->entry( 20, [ 'moved' => 3 ] );
+		$second['ids']   = [ 5, 6, 7 ];
+		$second['slugs'] = [
+			5 => 'e',
+			6 => 'f',
+			7 => 'g',
+		];
+
+		$this->log->record( $this->admin, 'trash', 'page', $first );
+		$this->log->record( $this->admin, 'trash', 'page', $second );
+
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( [ 1, 2, 3, 4 ], $change['roots'][12]['ids'], 'The first root keeps its IDs.' );
+		$this->assertSame( [ 5 ], $change['roots'][20]['ids'], 'A later root is trimmed first.' );
+		$this->assertSame( [ 5 => 'e' ], $change['roots'][20]['slugs'], 'Slugs follow the IDs kept.' );
+		$this->assertSame( 3, $change['roots'][20]['counts']['moved'], 'The count still says how many moved, so its pairs are marked incomplete.' );
 	}
 
 	public function test_nothing_is_stored_without_a_user(): void {

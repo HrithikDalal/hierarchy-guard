@@ -322,7 +322,28 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$data = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data();
 
 		$this->assertSame( [ '(private page)' ], array_column( $data['ancestors'], 'title' ) );
+		$this->assertArrayNotHasKey( 'status', $data['ancestors'][0], 'Nothing reads it, and the user may not read the ancestor.' );
 		$this->assertSame( '(private page)', $data['trash_to']['title'] );
+	}
+
+	public function test_a_fields_parameter_on_the_csv_route_still_gives_the_csv(): void {
+		$this->rename( $this->ids['about'], 'about-us' );
+		$request = new WP_REST_Request( 'GET', '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv' );
+		$request->set_query_params(
+			[
+				'from'    => 'company/about',
+				'format'  => 'redirection',
+				'_fields' => 'source',
+			]
+		);
+
+		// What the REST server runs on the response before serving it; core's
+		// filter is attached on rest_api_init, which earlier tests may have run.
+		add_filter( 'rest_post_dispatch', 'rest_filter_response_fields', 10, 3 );
+		$response = apply_filters( 'rest_post_dispatch', rest_ensure_response( rest_do_request( $request ) ), rest_get_server(), $request ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's hook, run the way the REST server runs it.
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/,/company/about-us/,0,301\r\n", $response->get_data() );
 	}
 
 	public function test_old_paths_without_a_url_are_left_out(): void {
@@ -465,6 +486,11 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( 2, $data['more'] );
 		$this->assertTrue( $data['total']['capped'] );
+	}
+
+	public function test_the_trash_preview_takes_at_most_a_thousand_ids(): void {
+		$this->assertSame( 200, $this->get( '/trash-preview', [ 'ids' => range( 1, 1000 ) ] )->get_status() );
+		$this->assertSame( 400, $this->get( '/trash-preview', [ 'ids' => range( 1, 1001 ) ] )->get_status() );
 	}
 
 	public function test_a_page_counted_past_the_shared_budget_has_an_unknown_fallback(): void {

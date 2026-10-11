@@ -135,7 +135,7 @@ final class Overview {
 	 * Ancestors, top level first.
 	 *
 	 * @param WP_Post $post Post.
-	 * @return array<int,array<string,mixed>>
+	 * @return array<int,array{id:int,title:string,edit_link:string|null}>
 	 */
 	private function ancestors( WP_Post $post ): array {
 		$ids = array_reverse( array_map( 'intval', get_post_ancestors( $post ) ) );
@@ -143,7 +143,7 @@ final class Overview {
 
 		$out = [];
 		foreach ( $ids as $ancestor_id ) {
-			$out[] = self::ref( $ancestor_id ) + [ 'status' => (string) get_post_status( $ancestor_id ) ];
+			$out[] = self::ref( $ancestor_id );
 		}
 		return $out;
 	}

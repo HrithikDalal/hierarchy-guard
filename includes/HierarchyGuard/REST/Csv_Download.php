@@ -24,10 +24,29 @@ final class Csv_Download {
 	public const FLAG = 'X-Hierarchy-Guard-Csv';
 
 	/**
-	 * Hooks into core, after core's own CORS headers at priority 10.
+	 * Hooks into core: before core's `_fields` filter, which runs at priority
+	 * 10 of rest_post_dispatch, and after core's own CORS headers, which run at
+	 * priority 10 of rest_pre_serve_request.
 	 */
 	public function register(): void {
+		add_filter( 'rest_post_dispatch', [ $this, 'drop_fields' ], 9, 3 );
 		add_filter( 'rest_pre_serve_request', [ $this, 'serve' ], 11, 3 );
+	}
+
+	/**
+	 * Ignores `_fields` on a CSV response: core would filter the body as an
+	 * array of fields, and the body is a string.
+	 *
+	 * @param mixed $result  The response.
+	 * @param mixed $server  The REST server.
+	 * @param mixed $request The request.
+	 * @return mixed The response, unchanged.
+	 */
+	public function drop_fields( $result, $server, $request ) {
+		if ( $result instanceof WP_HTTP_Response && $request instanceof WP_REST_Request && ! empty( $result->get_headers()[ self::FLAG ] ) ) {
+			unset( $request['_fields'] );
+		}
+		return $result;
 	}
 
 	/**

@@ -199,13 +199,13 @@ final class Notices {
 		}
 
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
-		$message = esc_html( sprintf( _n( '%s old URL now shows “Page not found”.', '%s old URLs now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) );
+		$message = esc_html( sprintf( _n( '%s old URL now shows “Page not found”.', '%s old URLs now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) ) . ' ' . $view;
 		if ( current_user_can( 'manage_options' ) ) {
-			$message .= sprintf( ' <a href="%1$s">%2$s</a><span aria-hidden="true"> ·</span>', esc_url( Settings_Section::redirects_url() ), esc_html__( 'Set up redirects', 'hierarchy-guard' ) );
+			$message .= sprintf( '<span aria-hidden="true"> ·</span> <a href="%1$s">%2$s</a>', esc_url( Settings_Section::redirects_url() ), esc_html__( 'Set up redirects', 'hierarchy-guard' ) );
 		}
 		return [
 			'type'    => 'warning',
-			'message' => $message . ' ' . $view,
+			'message' => $message,
 		];
 	}
 

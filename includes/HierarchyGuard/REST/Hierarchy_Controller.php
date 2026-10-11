@@ -168,6 +168,8 @@ final class Hierarchy_Controller {
 							'type'    => 'integer',
 							'minimum' => 1,
 						],
+						// A list screen shows at most 999 rows; the preview reads the first 50.
+						'maxItems' => 1000,
 						'required' => true,
 					],
 				],

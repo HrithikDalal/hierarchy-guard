@@ -178,7 +178,9 @@ final class Pairs {
 	 * type without a permastruct), when it leads where it already is, or when
 	 * its pages now sit under the trash. A block whose old path a live page
 	 * uses now is unresolved: redirect plugins redirect before WordPress
-	 * looks, so listing it would hide that page.
+	 * looks, so listing it would hide that page. When the page there now is
+	 * hidden, an old subpage path one of its published subpages uses is
+	 * dropped for the same reason.
 	 *
 	 * A page renamed under its parent is listed at the slug it had there, read
 	 * from its own old paths. An old path the ledger gives to another live post
@@ -193,7 +195,9 @@ final class Pairs {
 		$cap        = Subtree::count_cap();
 		$unresolved = [];
 		$capped     = false;
+		$open       = [];
 		$live       = [];
+		$hidden     = [];
 
 		foreach ( $blocks as $index => $block ) {
 			$old  = (string) $block['old'];
@@ -201,13 +205,23 @@ final class Pairs {
 			if ( '' === $old || '' === Paths::url( $post_type, $old ) || $old === $base || Paths::has_trashed_segment( $base ) ) {
 				continue;
 			}
-			$owner = get_page_by_path( $old, OBJECT, $post_type );
-			if ( $owner instanceof WP_Post && (int) $owner->ID !== (int) $block['head'] && is_post_publicly_viewable( $owner ) ) {
-				$unresolved[] = [
-					'old'    => $old,
-					'reason' => 'in_use',
-				];
-				continue;
+			$open[ $index ] = $block;
+		}
+
+		$owners = self::owners( array_map( static fn( array $block ): string => (string) $block['old'], $open ), $post_type );
+		foreach ( $open as $index => $block ) {
+			$old   = (string) $block['old'];
+			$owner = $owners[ $old ] ?? 0;
+			if ( $owner > 0 && $owner !== (int) $block['head'] ) {
+				if ( is_post_publicly_viewable( $owner ) ) {
+					$unresolved[] = [
+						'old'    => $old,
+						'reason' => 'in_use',
+					];
+					continue;
+				}
+				// The page there now is hidden, but a published subpage of it may use an old subpage path.
+				$hidden[ $index ] = true;
 			}
 			$live[ $index ] = $block;
 			$capped         = $capped || ! empty( $block['incomplete'] );
@@ -216,15 +230,18 @@ final class Pairs {
 		$tree   = $this->walk( $live, $post_type, $cap );
 		$former = self::ledger_paths( $tree['ids'] );
 
-		$pairs   = [];
-		$lineage = [];
+		$pairs    = [];
+		$lineage  = [];
+		$block_of = [];
 		foreach ( $live as $index => $block ) {
 			$old  = (string) $block['old'];
 			$head = (int) $block['head'];
+			$post = $head > 0 ? get_post( $head ) : null;
 			$top  = [];
-			if ( $head > 0 && is_post_publicly_viewable( $head ) ) {
-				$top     = [ count( $pairs ) ];
-				$pairs[] = [
+			if ( $post instanceof WP_Post && is_post_publicly_viewable( $post ) ) {
+				$top                         = [ count( $pairs ) ];
+				$block_of[ count( $pairs ) ] = $index;
+				$pairs[]                     = [
 					'old' => $old,
 					'id'  => $head,
 				];
@@ -232,7 +249,8 @@ final class Pairs {
 				$reason       = (string) $block['reason'];
 				$unresolved[] = [
 					'old'    => $old,
-					'reason' => '' !== $reason ? $reason : ( $head > 0 ? 'unpublished' : 'none' ),
+					// A target deleted since is no page at all, not an unpublished one.
+					'reason' => '' !== $reason ? $reason : ( $post instanceof WP_Post ? 'unpublished' : 'none' ),
 				];
 			}
 
@@ -255,9 +273,10 @@ final class Pairs {
 				$path    = '' !== $segment ? $old_parent . '/' . $segment : $old_parent;
 				$current = '' !== $node['slug'] ? ltrim( $current_parent . '/' . $node['slug'], '/' ) : $current_parent;
 				if ( 'publish' === $node['status'] ) {
-					$lineage[ count( $pairs ) ] = $above;
-					$above[]                    = count( $pairs );
-					$pairs[]                    = [
+					$lineage[ count( $pairs ) ]  = $above;
+					$block_of[ count( $pairs ) ] = $index;
+					$above[]                     = count( $pairs );
+					$pairs[]                     = [
 						'old' => $path,
 						'id'  => $node['id'],
 					];
@@ -275,6 +294,16 @@ final class Pairs {
 		foreach ( $pairs as $i => $pair ) {
 			$holder = $holders[ $pair['old'] ] ?? 0;
 			if ( ( $holder > 0 && $holder !== $pair['id'] ) || [] !== array_intersect_key( array_flip( $lineage[ $i ] ?? [] ), $dropped ) ) {
+				$dropped[ $i ] = true;
+			}
+		}
+		// Under a page that is there but hidden, a published subpage of it can use an old subpage path.
+		foreach ( $pairs as $i => $pair ) {
+			if ( isset( $dropped[ $i ] ) || ! isset( $hidden[ $block_of[ $i ] ?? -1 ] ) ) {
+				continue;
+			}
+			$there = get_page_by_path( $pair['old'], OBJECT, $post_type );
+			if ( $there instanceof WP_Post && (int) $there->ID !== $pair['id'] && is_post_publicly_viewable( $there ) ) {
 				$dropped[ $i ] = true;
 			}
 		}
@@ -356,7 +385,8 @@ final class Pairs {
 	 * @return array<string,mixed>
 	 */
 	private function cached( string $key, callable $build ): array {
-		$key = 'pairs:' . $key . ':' . wp_cache_get_last_changed( 'posts' );
+		// The pairs depend on the permalink structure, which a change of it does not bump.
+		$key = 'pairs:' . $key . ':' . md5( (string) get_option( 'permalink_structure' ) ) . ':' . wp_cache_get_last_changed( 'posts' );
 		$hit = wp_cache_get( $key, Ledger::CACHE_GROUP );
 		if ( is_array( $hit ) ) {
 			return $hit;
@@ -550,6 +580,8 @@ final class Pairs {
 		if ( [] === $owner ) {
 			return [];
 		}
+		// The walk reads no more than the cap, whatever an older change stored.
+		$owner = array_slice( $owner, 0, Subtree::count_cap() + 1, true );
 
 		$out = [];
 		foreach ( self::rows( array_keys( $owner ), $type ) as $row ) {
@@ -622,6 +654,73 @@ final class Pairs {
 			}
 		}
 		return (string) $node['segment'];
+	}
+
+	/**
+	 * The post at each path now, the way get_page_by_path() finds it, for every
+	 * path in one query: rows whose slug is one of the path's segments, matched
+	 * from the last segment up through their parents to the top level, a post
+	 * of the type winning over an attachment. The posts found are primed.
+	 *
+	 * @param string[] $paths     Normalized paths.
+	 * @param string   $post_type Post type name.
+	 * @return array<string,int> Post ID by path; a path no post uses now is absent.
+	 */
+	private static function owners( array $paths, string $post_type ): array {
+		global $wpdb;
+
+		$parts = [];
+		$names = [];
+		foreach ( array_unique( array_map( 'strval', $paths ) ) as $path ) {
+			$parts[ $path ] = explode( '/', $path );
+			foreach ( $parts[ $path ] as $name ) {
+				$names[ $name ] = true;
+			}
+		}
+		if ( [] === $names ) {
+			return [];
+		}
+
+		$names        = array_map( 'strval', array_keys( $names ) );
+		$placeholders = implode( ',', array_fill( 0, count( $names ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per segment of the blocks' old paths; core's get_page_by_path() query for every block at once, on the post_name index.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name, post_parent, post_type FROM {$wpdb->posts} WHERE post_name IN ( {$placeholders} ) AND post_type IN ( %s, 'attachment' )", ...array_merge( $names, [ $post_type ] ) ), OBJECT_K );
+
+		$out = [];
+		foreach ( $parts as $path => $segments ) {
+			$pages    = array_filter( (array) $rows, static fn( object $row ): bool => in_array( (string) $row->post_name, $segments, true ) );
+			$reversed = array_reverse( $segments );
+			$found    = 0;
+			foreach ( $pages as $page ) {
+				if ( (string) $page->post_name !== $reversed[0] ) {
+					continue;
+				}
+				$count = 0;
+				$up    = $page;
+				while ( 0 !== (int) $up->post_parent && isset( $pages[ (int) $up->post_parent ] ) ) {
+					++$count;
+					$parent = $pages[ (int) $up->post_parent ];
+					if ( ! isset( $reversed[ $count ] ) || (string) $parent->post_name !== $reversed[ $count ] ) {
+						break;
+					}
+					$up = $parent;
+				}
+				if ( 0 === (int) $up->post_parent && count( $reversed ) === $count + 1 && (string) $up->post_name === $reversed[ $count ] ) {
+					$found = (int) $page->ID;
+					if ( $post_type === (string) $page->post_type ) {
+						break;
+					}
+				}
+			}
+			if ( $found > 0 ) {
+				$out[ (string) $path ] = $found;
+			}
+		}
+
+		if ( [] !== $out ) {
+			_prime_post_caches( array_values( $out ), false, false );
+		}
+		return $out;
 	}
 
 	/**

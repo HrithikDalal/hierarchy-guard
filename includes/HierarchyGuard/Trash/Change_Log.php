@@ -9,6 +9,8 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+use HierarchyGuard\Subtree;
+
 /**
  * Feeds the outcome notice and Undo. One change per request, so a bulk trash
  * of three parents is one change with three roots. Background batches keep
@@ -175,7 +177,15 @@ final class Change_Log {
 	}
 
 	/**
-	 * Sums the roots, merges the IDs and saves.
+	 * Sums the roots, keeps the roots' own IDs within one budget, merges the IDs and saves.
+	 *
+	 * The roots' IDs and slugs together stay within the count cap, later roots
+	 * trimmed first, so a bulk trash of many parents stays a small transient.
+	 * A trimmed root keeps its counts, so its pairs show as incomplete.
+	 *
+	 * set_transient() returns false both when the save fails and when nothing
+	 * changed, so its result says nothing reliable here. Nothing depends on it:
+	 * a change that was not saved is simply not shown.
 	 *
 	 * @param int                 $user_id User ID.
 	 * @param array<string,mixed> $change  Change.
@@ -183,10 +193,16 @@ final class Change_Log {
 	 */
 	private function store( int $user_id, array $change, array $ids ): void {
 		$counts = self::empty_counts();
-		foreach ( $change['roots'] as $root ) {
+		$budget = Subtree::count_cap();
+		foreach ( $change['roots'] as $root_id => $root ) {
 			foreach ( self::COUNT_KEYS as $key ) {
 				$counts[ $key ] += (int) ( $root['counts'][ $key ] ?? 0 );
 			}
+			$own     = array_slice( (array) ( $root['ids'] ?? [] ), 0, max( 0, $budget ) );
+			$budget -= count( $own );
+
+			$change['roots'][ $root_id ]['ids']   = $own;
+			$change['roots'][ $root_id ]['slugs'] = array_intersect_key( (array) ( $root['slugs'] ?? [] ), array_flip( $own ) );
 		}
 		$change['counts']  = $counts;
 		$change['ids']     = array_slice( array_values( array_unique( array_merge( array_map( 'intval', (array) $change['ids'] ), array_map( 'intval', $ids ) ) ) ), 0, self::MAX_IDS );

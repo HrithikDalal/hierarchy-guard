@@ -185,7 +185,7 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'A redirect plugin is active and can handle these.', $html );
 	}
 
-	public function test_the_redirects_checkbox_is_the_target_of_turn_on_redirects_links(): void {
+	public function test_the_redirects_checkbox_is_the_target_of_set_up_redirects_links(): void {
 		ob_start();
 		$this->section->render_serve_redirects();
 		$html = (string) ob_get_clean();

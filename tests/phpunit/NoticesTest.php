@@ -450,7 +450,9 @@ final class NoticesTest extends WP_UnitTestCase {
 		$notice = $this->urls_notice();
 
 		$this->assertSame( 'warning', $notice['type'] );
-		$this->assertStringStartsWith( '3 old URLs now show “Page not found”. <a href="' . esc_url( admin_url( 'options-writing.php#hierarchy-guard-redirects' ) ) . '">Set up redirects</a><span aria-hidden="true"> ·</span> <a href="', $notice['message'] );
+		$this->assertStringStartsWith( '3 old URLs now show “Page not found”. <a href="', $notice['message'] );
+		$this->assertStringContainsString( 'class="hierarchy-guard-view-redirects"', $notice['message'] );
+		$this->assertStringEndsWith( 'download>Download redirects (CSV)</a><span aria-hidden="true"> ·</span> <a href="' . esc_url( admin_url( 'options-writing.php#hierarchy-guard-redirects' ) ) . '">Set up redirects</a>', $notice['message'], 'View comes first, as in the other two notices.' );
 		$this->assertStringContainsString( 'format=generic', $notice['message'] );
 	}
 

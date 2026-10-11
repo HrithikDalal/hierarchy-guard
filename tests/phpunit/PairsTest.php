@@ -521,6 +521,79 @@ final class PairsTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_an_old_path_whose_target_was_deleted_leads_nowhere(): void {
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		wp_delete_post( $this->ids['about'], true );
+		wp_delete_post( $this->ids['company'], true );
+
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'none',
+				],
+			],
+			$this->pairs->page( $this->pairs->collect_change( $change ), 1, 100 )['unresolved'],
+			'No page is there to be published.'
+		);
+	}
+
+	public function test_an_old_subpage_url_a_live_page_uses_under_a_hidden_page_is_not_listed(): void {
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		// A new draft about, with a published team under it: /company/about/team/ works again.
+		$draft = $this->page( 'about', $this->ids['company'], 'draft' );
+		$this->page( 'team', $draft );
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertNotContains( '/company/about/team/ -> /company/team/', $lines, 'A redirect plugin would hide the live page.' );
+		$this->assertContains( '/company/about/history/ -> /company/history/', $lines );
+		$this->assertContains( '/company/about/team/leadership/ -> /company/team/leadership/', $lines, 'No live page uses that one.' );
+	}
+
+	public function test_collecting_a_bulk_trash_costs_the_same_queries_for_two_roots_or_six(): void {
+		$two = $this->queries_to_collect_bulk( 'two', 2 );
+		$six = $this->queries_to_collect_bulk( 'six', 6 );
+
+		$this->assertSame( $two, $six, 'The pages at the old paths are looked up for every block at once.' );
+	}
+
+	/**
+	 * Queries a cold collect of a bulk trash costs, for roots that each have a subpage.
+	 *
+	 * @param string $prefix Slug prefix.
+	 * @param int    $roots  How many roots.
+	 * @return int
+	 */
+	private function queries_to_collect_bulk( string $prefix, int $roots ): int {
+		Change_Log::reset_request();
+		$ids = [];
+		for ( $i = 1; $i <= $roots; $i++ ) {
+			$ids[] = $this->page( $prefix . '-' . $i, $this->ids['company'] );
+			$this->page( $prefix . '-kid-' . $i, end( $ids ) );
+		}
+		foreach ( $ids as $id ) {
+			wp_trash_post( $id );
+		}
+		$change = $this->log->latest( $this->admin );
+		wp_cache_flush();
+
+		$queries   = get_num_queries();
+		$collected = $this->pairs->collect_change( $change );
+		$this->assertCount( $roots, $collected['pairs'] );
+		return get_num_queries() - $queries;
+	}
+
+	public function test_a_permalink_change_is_not_served_from_the_cache(): void {
+		$this->assertSame( 4, $this->pairs->count( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) )['count'] );
+
+		$this->set_permalink_structure( '' );
+
+		$this->assertSame( 0, $this->pairs->count( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) )['count'], 'Without pretty permalinks no URL held the path.' );
+	}
+
 	public function test_after_a_delete_a_subpage_renamed_after_the_trash_keeps_its_original_slug(): void {
 		wp_trash_post( $this->ids['about'] );
 		$change = $this->log->latest( $this->admin );

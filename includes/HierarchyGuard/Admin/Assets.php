@@ -22,7 +22,7 @@ use WP_Screen;
  * .asset.php file lists, its translations, and the plugin's settings. A
  * bundle that was never built is skipped, so a checkout without npm still runs.
  * The list-screen bundle loads only when the screen prints something it acts
- * on, so a Pages list without parents never loads React or the components.
+ * on: a row with subpages, the breadcrumb, a URLs notice or the nudge.
  */
 final class Assets {
 

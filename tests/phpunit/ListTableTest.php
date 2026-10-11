@@ -141,7 +141,10 @@ final class ListTableTest extends WP_UnitTestCase {
 	public function test_a_parent_in_the_trash_is_marked(): void {
 		$this->trash_raw( $this->ids['team'] );
 
-		$this->assertStringContainsString( 'Team</a> (in the Trash)', $this->cell( $this->ids['leadership'] ) );
+		$cell = $this->cell( $this->ids['leadership'] );
+
+		$this->assertStringContainsString( 'Parent: </span>Team (in the Trash)', $cell, 'Core refuses to edit a page in the Trash, so it is not linked.' );
+		$this->assertStringNotContainsString( 'post=' . $this->ids['team'] . '&amp;action=edit', $cell );
 	}
 
 	public function test_counts_above_the_cap_show_a_plus(): void {

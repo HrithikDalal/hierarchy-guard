@@ -78,13 +78,71 @@ final class MetaBoxTest extends WP_UnitTestCase {
 	public function test_the_box_shows_parents_children_and_the_trash_policy(): void {
 		$html = $this->html( $this->ids['about'] );
 
+		$this->assertStringContainsString( 'data-serving="0"', $html, 'The classic confirmation reads whether this page is redirected to.' );
+
 		$this->assertStringContainsString( 'data-descendants="3"', $html );
 		$this->assertStringContainsString( 'data-status="publish"', $html );
 		$this->assertStringContainsString( '>Company</a>', $html );
 		$this->assertStringContainsString( '<strong>Subpages</strong>', $html );
 		$this->assertStringContainsString( '2 direct · 3 in total', $html );
-		$this->assertStringContainsString( '>Team</a> · 1 subpage</li>', $html );
+		$this->assertStringContainsString( '>Team</a><span aria-hidden="true"> · </span>1 subpage</li>', $html );
 		$this->assertStringContainsString( 'Trashing this page moves its 2 subpages under “Company”.', $html );
+	}
+
+	public function test_separators_are_not_read_aloud(): void {
+		$html = $this->html( $this->ids['leadership'] );
+
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span><a ', $html );
+		$this->assertStringNotContainsString( '</a> › ', $html );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_status' => 'draft',
+			]
+		);
+		$this->assertStringContainsString( '>History</a><span aria-hidden="true"> — </span>Draft</li>', $this->html( $this->ids['about'] ) );
+	}
+
+	public function test_a_parent_in_the_trash_is_not_linked(): void {
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
+		wp_trash_post( $this->ids['team'] );
+
+		$html = $this->html( $this->ids['leadership'] );
+
+		$this->assertStringContainsString( '<span aria-hidden="true"> › </span>Team</p>', $html, 'Core refuses to edit a page in the Trash.' );
+		$this->assertStringContainsString( '>About</a>', $html );
+	}
+
+	public function test_the_box_says_whether_the_page_is_redirected_to(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+
+		$this->assertStringContainsString( 'data-serving="1"', $this->html( $this->ids['about'] ) );
+	}
+
+	public function test_an_old_url_with_a_non_ascii_slug_is_shown_decoded(): void {
+		$japan = $this->page( '日本', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'        => $japan,
+				'post_name' => 'japan',
+			]
+		);
+
+		$html = $this->html( $japan );
+
+		$this->assertStringContainsString( '<code>/company/日本/</code>', $html );
+		$this->assertStringContainsString( 'Download redirects (CSV) for /company/日本/</span>', $html );
+		$this->assertStringContainsString( 'from=company%2F%25e6%2597%25a5%25e6%259c%25ac', $html, 'The download keeps the stored path.' );
+	}
+
+	public function test_a_capped_count_links_to_the_list(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
+
+		$html = $this->html( $this->ids['about'] );
+
+		remove_all_filters( 'hierarchy_guard_count_cap' );
+		$this->assertStringContainsString( 'View all 2+ subpages in the list', $html );
 	}
 
 	public function test_a_top_level_page_without_subpages(): void {
@@ -104,12 +162,12 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		);
 
 		$html = $this->html( $this->ids['about'] );
-		$this->assertStringContainsString( '<code>/company/about/</code> · Not redirected · <a href="', $html );
+		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Not redirected<span aria-hidden="true"> · </span><a href="', $html );
 		$this->assertStringContainsString( '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv', $html );
-		$this->assertStringContainsString( 'download>Download redirects (CSV)<span class="screen-reader-text"> for /company/about/</span></a>', $html );
+		$this->assertStringContainsString( 'download><span aria-hidden="true">Download redirects (CSV)</span><span class="screen-reader-text">Download redirects (CSV) for /company/about/</span></a>', $html, 'The link’s name is one string.' );
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->assertStringContainsString( '<code>/company/about/</code> · Redirects here', $this->html( $this->ids['about'] ) );
+		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Redirects here', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_the_trash_sentence_follows_the_policy(): void {
@@ -132,7 +190,7 @@ final class MetaBoxTest extends WP_UnitTestCase {
 			$this->page( 'extra-' . $i, $this->ids['about'] );
 		}
 
-		$this->assertStringContainsString( 'View all 13 in the list', $this->html( $this->ids['about'] ) );
+		$this->assertStringContainsString( 'View all 13 subpages in the list', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_a_capped_count_in_the_trash_sentence_is_a_lower_bound(): void {
@@ -158,18 +216,18 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		);
 
 		$html = $this->html( $this->ids['about'] );
-		$this->assertStringContainsString( '<code>/company/about/</code> · Not redirected · <a href="', $html );
+		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Not redirected<span aria-hidden="true"> · </span><a href="', $html );
 		$this->assertStringNotContainsString( 'Redirects here', $html );
 	}
 
 	public function test_an_old_url_held_by_a_page_in_the_trash_says_so(): void {
 		wp_trash_post( $this->ids['about'] );
 
-		$this->assertStringContainsString( '<code>/company/about/</code> · In the Trash · <a href="', $this->html( $this->ids['company'] ) );
+		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>In the Trash<span aria-hidden="true"> · </span><a href="', $this->html( $this->ids['company'] ) );
 	}
 
 	public function test_the_list_link_shows_when_subpages_outnumber_the_children_listed(): void {
-		$this->assertStringContainsString( 'View all 3 in the list', $this->html( $this->ids['about'] ) );
+		$this->assertStringContainsString( 'View all 3 subpages in the list', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_an_old_url_another_published_page_now_uses_is_marked_so(): void {
@@ -181,7 +239,7 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		);
 		$this->page( 'about', $this->ids['company'] );
 
-		$this->assertStringContainsString( '<code>/company/about/</code> · Used by another page · <a href="', $this->html( $this->ids['about'] ) );
+		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Used by another page<span aria-hidden="true"> · </span><a href="', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_an_old_url_names_the_redirect_plugin_that_can_add_it(): void {
@@ -207,6 +265,6 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$html = $this->html( $this->ids['about'] );
 
 		remove_all_filters( 'hierarchy_guard_redirect_providers' );
-		$this->assertStringContainsString( '<code>/company/about/</code> · Add in Custom Redirects · <a href="', $html );
+		$this->assertStringContainsString( '<code>/company/about/</code><span aria-hidden="true"> · </span>Add in Custom Redirects<span aria-hidden="true"> · </span><a href="', $html );
 	}
 }

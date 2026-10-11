@@ -150,8 +150,9 @@ final class List_Table {
 
 		if ( $above instanceof WP_Post ) {
 			$title = _draft_or_post_title( $parent );
-			$link  = get_edit_post_link( $parent );
-			$name  = is_string( $link ) && '' !== $link ? sprintf( '<a href="%s">%s</a>', esc_url( $link ), $title ) : $title;
+			// Core refuses to edit a page in the Trash.
+			$link = 'trash' !== $above->post_status ? get_edit_post_link( $parent ) : null;
+			$name = is_string( $link ) && '' !== $link ? sprintf( '<a href="%s">%s</a>', esc_url( $link ), $title ) : $title;
 			if ( 'trash' === $above->post_status ) {
 				/* translators: %s: title of a parent page that is in the trash. */
 				$name = sprintf( esc_html__( '%s (in the Trash)', 'hierarchy-guard' ), $name );
