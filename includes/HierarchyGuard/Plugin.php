@@ -56,10 +56,11 @@ final class Plugin {
 		add_action( 'delete_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 		add_action( 'switch_blog', [ Post_Types::class, 'reset' ] );
 
-		$ledger = new Ledger();
+		$ledger    = new Ledger();
+		$providers = new Redirects\Providers();
 		( new Change_Listener( $ledger ) )->register();
 		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
-		( new Admin\Settings_Section( new Redirects\Providers() ) )->register();
+		( new Admin\Settings_Section( $providers ) )->register();
 		( new Trash\Markers() )->register();
 
 		$log        = new Trash\Change_Log();
@@ -68,8 +69,13 @@ final class Plugin {
 		$processor  = new Batch\Processor( $queue, $operations, $log );
 		$processor->register();
 		( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
+
+		$pairs    = new Redirects\Pairs();
+		$overview = new Overview( $ledger, $providers );
 		( new Admin\Trash_Notice( $log ) )->register();
 		( new Admin\List_Table() )->register();
+		( new REST\Hierarchy_Controller( $overview, $ledger, $pairs ) )->register();
+		( new REST\Csv_Download() )->register();
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'hierarchy-guard', new Batch\CLI_Command( $queue, $processor ) );
