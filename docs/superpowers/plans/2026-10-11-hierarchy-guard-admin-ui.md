@@ -6081,7 +6081,7 @@ git commit -m "feat: Hierarchy box in the classic editor"
   - `want_list_table()` on `hierarchy_guard_list_script`, and `enqueue_list_table()` on `admin_footer`: bundle `list-table` with `jquery` and `inline-edit-post`, only when the screen asked for it. Footer scripts and late styles enqueued there still print.
   - `config(): array` with `namespace`, `serving`, `provider{name,url,csv}|null`, `settingsUrl`, `policyUrl` (both empty without `manage_options`), `policy`, `postTypes`, `cap`, `locale` (the user locale with a hyphen), `restNonce`, `restUrl`.
 - Produces: `src/common/config.js`: the settings merged over defaults, read from `globalThis.hierarchyGuard`.
-- Produces: `src/common/copy.js`: every sentence the scripts show. Counts are formatted in the user's locale through `Intl.NumberFormat`, as PHP formats them, and the capped "%s+" is translatable. It exports `POLICIES`, `formatCount`, `subpagesLabel`, `countsLine`, `viewAllLabel`, `keptUrl`, `dialogTitle`, `initialSentence`, `trashSentence`, `bulkSentence`, `optionLabel`, `optionDescription` (a description with URLs is a template with `<from />` and `<to />`), `deniedSentence`, `previewError`, `saveWarning`, `quickEditWarning`, `changedStatus`, `changedSentence`, `viewRedirectsLabel`, `oldUrlState`, `trashNote`, `unresolvedSentence`, `copiedSentence` and `pairsText`.
+- Produces: `src/common/copy.js`: every sentence the scripts show. Counts are formatted in the user's locale through `Intl.NumberFormat`, as PHP formats them, and the capped "%s+" is translatable. It exports `POLICIES`, `formatCount`, `subpagesLabel`, `countsLine`, `viewAllLabel`, `keptUrl`, `dialogTitle`, `initialSentence`, `trashSentence`, `bulkSentence`, `optionLabel`, `optionDescription` (a description with URLs is a template with `<from />` and `<to />`), `deniedSentence`, `previewError`, `saveWarning`, `quickEditWarning`, `changedStatus`, `changedSentence`, `viewRedirectsLabel`, `oldUrlState`, `trashNote`, `unresolvedSentence`, `copiedSentence`, `pairsText` and `classicConfirm`.
 - Produces: `src/common/api.js`: `fetchHierarchy`, `sourceRoute`, `fetchPairs`, `csvUrl`, `trashPreview`, and `dismissNudge` (core's `dismiss-wp-pointer` Ajax action). A pairs source is `{ change }` or `{ post, from }`. Tasks 11 and 12 import these.
 - Produces: npm scripts `build`, `start`, `lint:js`, `lint:style`, `test:js`; a `JavaScript` CI job.
 
@@ -6190,6 +6190,7 @@ Create `src/common/test/copy.test.js`:
 import { describe, expect, it } from 'vitest';
 import {
 	bulkSentence,
+	classicConfirm,
 	changedSentence,
 	changedStatus,
 	copiedSentence,
@@ -6304,6 +6305,25 @@ describe( 'the trash dialog', () => {
 		);
 	} );
 
+	it( 'shows a capped direct count with a plus', () => {
+		expect(
+			initialSentence( 'Team', 1001, 'reparent' ).startsWith(
+				'“Team” has 1,000+ subpages.'
+			)
+		).toBe( true );
+		expect(
+			trashSentence(
+				{
+					...team,
+					children: 1000,
+					descendants: { count: 1000, capped: true },
+				},
+				'reparent',
+				1000
+			)
+		).toContain( '“Team” has 1,000+ subpages.' );
+	} );
+
 	it( 'shows the URL a kept subpage gets', () => {
 		expect( keptUrl( team ) ).toBe( '/studio/team__trashed/ada/' );
 		expect( optionDescription( 'keep', team, 1000 ) ).toBe(
@@ -6390,6 +6410,15 @@ describe( 'warnings and outcomes', () => {
 		);
 	} );
 
+	it( 'composes the classic confirmation from the save warning', () => {
+		expect( classicConfirm( 12, false, false ) ).toBe(
+			'Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving. Continue?'
+		);
+		expect( classicConfirm( 1, false, true ) ).toBe(
+			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones. Continue?'
+		);
+	} );
+
 	it( 'says what handles the changed URLs, with a status to match', () => {
 		expect( changedSentence( 12, false, true, null ) ).toBe(
 			'12 old URLs now redirect to their new pages.'
@@ -6452,7 +6481,9 @@ describe( 'warnings and outcomes', () => {
 				children_capped: true,
 				trash_policy: 'keep',
 			} )
-		).toBe( 'Trashing this page leaves its 1,000+ subpages where they are.' );
+		).toBe(
+			'Trashing this page leaves its 1,000+ subpages where they are.'
+		);
 	} );
 
 	it( 'explains an old URL without a new one', () => {
@@ -6870,7 +6901,10 @@ export function initialSentence( title, children, policy ) {
 				'hierarchy-guard'
 			),
 			title,
-			formatCount( children )
+			formatCount(
+				Math.min( children, config.cap ),
+				children > config.cap
+			)
 		) +
 		' ' +
 		genericTail( policy )
@@ -6911,7 +6945,7 @@ export function trashSentence( page, policy, cap ) {
 						'hierarchy-guard'
 					),
 					page.title,
-					formatCount( children )
+					formatCount( children, page.descendants.capped )
 				);
 
 	let tail;
@@ -7116,7 +7150,9 @@ export function deniedSentence( policy ) {
 		'trash_children' === policy
 			? __( 'You can’t delete some of the subpages.', 'hierarchy-guard' )
 			: __( 'You can’t edit some of the subpages.', 'hierarchy-guard' );
-	return first + ' ' + __( 'They’ll stay where they are.', 'hierarchy-guard' );
+	return (
+		first + ' ' + __( 'They’ll stay where they are.', 'hierarchy-guard' )
+	);
 }
 
 /**
@@ -7168,6 +7204,22 @@ export function saveWarning( count, capped, serving ) {
 					'You’ll get the redirects to add after saving.',
 					'hierarchy-guard'
 				) )
+	);
+}
+
+/**
+ * The classic editor's confirmation before a save changes subpage URLs.
+ *
+ * @param {number}  count   Subpages at every level.
+ * @param {boolean} capped  Whether more exist.
+ * @param {boolean} serving Whether built-in redirects are on.
+ * @return {string} Sentence ending in a question.
+ */
+export function classicConfirm( count, capped, serving ) {
+	return (
+		saveWarning( count, capped, serving ) +
+		' ' +
+		__( 'Continue?', 'hierarchy-guard' )
 	);
 }
 
@@ -7231,7 +7283,12 @@ export function changedSentence( count, capped, serving, provider ) {
 	if ( provider ) {
 		const changed = sprintf(
 			/* translators: %s: number of URLs, such as 12 or 1,000+. */
-			_n( '%s URL changed.', '%s URLs changed.', count, 'hierarchy-guard' ),
+			_n(
+				'%s URL changed.',
+				'%s URLs changed.',
+				count,
+				'hierarchy-guard'
+			),
 			shown
 		);
 		const add = provider.name
@@ -7244,13 +7301,13 @@ export function changedSentence( count, capped, serving, provider ) {
 						'hierarchy-guard'
 					),
 					provider.name
-			  )
+				)
 			: _n(
 					'Add its redirect in your redirect plugin.',
 					'Add their redirects in your redirect plugin.',
 					count,
 					'hierarchy-guard'
-			  );
+				);
 		return changed + ' ' + add;
 	}
 	return sprintf(
@@ -7283,7 +7340,7 @@ export function viewRedirectsLabel( count, capped ) {
 /**
  * What an old URL's redirect looks like now, by what handles redirects.
  *
- * @param {boolean}     serving Whether built-in redirects reach this page.
+ * @param {boolean}     serving  Whether built-in redirects reach this page.
  * @param {Object|null} provider Detected redirect plugin.
  * @param {boolean}     inUse    Whether a live page now uses the old URL.
  * @return {string} Short state.
@@ -7557,8 +7614,8 @@ Create `src/classic/index.js`:
  * changed slug or parent on a published page with subpages.
  */
 import domReady from '@wordpress/dom-ready';
-import { __, _n, sprintf } from '@wordpress/i18n';
-import { formatCount } from '../common/copy';
+import config from '../common/config';
+import { classicConfirm } from '../common/copy';
 
 domReady( () => {
 	const box = window.document.querySelector( '.hierarchy-guard-box' );
@@ -7581,29 +7638,21 @@ domReady( () => {
 	// A jQuery handler: core re-binds its own submit handler on every click of
 	// a submit button, so it always runs after this one and sees the cancel.
 	$( '#post' ).on( 'submit.hierarchy-guard', ( event ) => {
+		// Preview Changes submits the form too, and saves nothing.
+		if ( 'dopreview' === $( '#wp-preview' ).val() ) {
+			return;
+		}
 		const edited =
 			( slug ? slug.value : '' ) !== initial.slug ||
 			( parent ? parent.value : '' ) !== initial.parent;
 		if ( ! edited ) {
 			return;
 		}
-		const message = [
-			sprintf(
-				/* translators: %s: number of subpages, such as 12 or 1,000+. */
-				_n(
-					'Saving changes this page’s URL and the URL of %s subpage.',
-					'Saving changes this page’s URL and the URLs of %s subpages.',
-					count,
-					'hierarchy-guard'
-				),
-				formatCount( count, '1' === box.dataset.capped )
-			),
-			__(
-				'You’ll get the redirects to add in the Hierarchy box after saving.',
-				'hierarchy-guard'
-			),
-			__( 'Continue?', 'hierarchy-guard' ),
-		].join( ' ' );
+		const message = classicConfirm(
+			count,
+			'1' === box.dataset.capped,
+			config.serving
+		);
 		// eslint-disable-next-line no-alert
 		if ( ! window.confirm( message ) ) {
 			event.preventDefault();
