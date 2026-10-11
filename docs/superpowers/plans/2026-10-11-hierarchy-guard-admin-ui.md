@@ -2463,7 +2463,7 @@ git commit -m "feat: Hierarchy column, View subpages and the subtree filter"
 
 **Interfaces:**
 - Consumes: Task 1's `Subtree::ordered_children()`, Task 2's `Pairs::collect_post()`, `page()` and `all()`, Task 3's `Csv`, Task 4's `List_Table::filter_url()`; plan 1's `Ledger::paths_for()`, `Providers::detect()`; plan 2's `Trash_Handler::policy_for()`, `Subtree::count_live_children()`, `Subtree::count_live_descendants()`, `Subtree::nearest_live_ancestor()`.
-- Produces: `Overview` with `CHILDREN_PER_PAGE = 10`, `MAX_OLD_PATHS = 20`, `describe( WP_Post $post, int $children_page = 1 ): array` (keys `id`, `status`, `ancestors` top level first, `children` (the page's readable ones from the first cap in menu order, each with `id`, `title`, `edit_link`, `status`, `status_label`, `children_count`, `children_capped`, `view_link`), `children_total`, `children_capped`, `has_more`, `descendants{count,capped}`, `old_paths` newest first as `{path,url}` (paths without a URL left out), `redirects{serving,provider{name,url,csv}|null}`, `trash_policy`, `trash_fallback`, `trash_to{id,title,edit_link}|null`, `list_url`), `static title( int $post_id ): string` (plain text, "(no title)" when empty), `static ref( int $post_id ): array{id:int,title:string,edit_link:string|null}` ("(private page)" as the title of a post the user may not `read_post`).
+- Produces: `Overview` with `CHILDREN_PER_PAGE = 10`, `MAX_OLD_PATHS = 20`, `describe( WP_Post $post, int $children_page = 1 ): array` (keys `id`, `status`, `ancestors` top level first, `children` (the page's readable ones from the first cap in menu order, each with `id`, `title`, `edit_link`, `status`, `status_label`, `children_count`, `children_capped`, `view_link`), `children_total`, `children_capped`, `has_more`, `descendants{count,capped}`, `old_paths` newest first as `{path,url,in_use}` (paths without a URL left out; `in_use` when another viewable page now owns the path), `redirects{serving,provider{name,url,csv}|null}` (`serving` only when built-in redirects are on and the page is publicly viewable), `trash_policy`, `trash_fallback`, `trash_to{id,title,edit_link}|null`, `list_url`), `static title( int $post_id ): string` (plain text, "(no title)" when empty), `static ref( int $post_id ): array{id:int,title:string,edit_link:string|null}` ("(private page)" as the title of a post the user may not `read_post`).
 - Produces: `REST\Hierarchy_Controller` with `NAMESPACE = 'hierarchy-guard/v1'`, routes `GET posts/(?P<id>\d+)/hierarchy` (`children_page`), `GET posts/(?P<id>\d+)/pairs` (`from` required, `page`, `per_page` up to the larger of 1,000 and the filtered cap), `GET posts/(?P<id>\d+)/csv` (`from`, `format`), all behind `can_edit()`. `from` must be one of the post's recorded old paths.
 - Produces: `REST\Csv_Download` with `FLAG = 'X-Hierarchy-Guard-Csv'`, `static response( string $layout, array $pairs ): WP_REST_Response` and `serve()` on `rest_pre_serve_request` at priority 11, after core's CORS headers. It prints a flagged 200 response's string body (nothing for HEAD) and returns true.
 - Produces: `Plugin::register()` creates `$providers`, `$pairs` and `$overview` once; Tasks 6 to 10 pass them on.
@@ -6419,11 +6419,15 @@ describe( 'warnings and outcomes', () => {
 			'Add in Redirection'
 		);
 		expect( oldUrlState( false, null ) ).toBe( 'Not redirected' );
+		expect( oldUrlState( true, null, true ) ).toBe(
+			'Used by another page'
+		);
 	} );
 
 	it( 'says what trashing the page would do, by policy', () => {
 		const data = {
 			children_total: 4,
+			children_capped: false,
 			descendants: { count: 12, capped: false },
 			trash_policy: 'reparent',
 			trash_to: { title: 'Company' },
@@ -6441,6 +6445,14 @@ describe( 'warnings and outcomes', () => {
 			'Trashing this page leaves its 4 subpages where they are.'
 		);
 		expect( trashNote( { ...data, children_total: 0 } ) ).toBe( '' );
+		expect(
+			trashNote( {
+				...data,
+				children_total: 1000,
+				children_capped: true,
+				trash_policy: 'keep',
+			} )
+		).toBe( 'Trashing this page leaves its 1,000+ subpages where they are.' );
 	} );
 
 	it( 'explains an old URL without a new one', () => {
@@ -7271,11 +7283,15 @@ export function viewRedirectsLabel( count, capped ) {
 /**
  * What an old URL's redirect looks like now, by what handles redirects.
  *
- * @param {boolean}     serving  Whether built-in redirects are on.
+ * @param {boolean}     serving Whether built-in redirects reach this page.
  * @param {Object|null} provider Detected redirect plugin.
+ * @param {boolean}     inUse    Whether a live page now uses the old URL.
  * @return {string} Short state.
  */
-export function oldUrlState( serving, provider ) {
+export function oldUrlState( serving, provider, inUse = false ) {
+	if ( inUse ) {
+		return __( 'Used by another page', 'hierarchy-guard' );
+	}
 	if ( serving ) {
 		return __( 'Redirects here', 'hierarchy-guard' );
 	}
@@ -7298,6 +7314,8 @@ export function oldUrlState( serving, provider ) {
 export function trashNote( data ) {
 	const children = data.children_total;
 	const all = data.descendants.count;
+	const shownChildren = formatCount( children, data.children_capped );
+	const shownAll = formatCount( all, data.descendants.capped );
 	if ( ! children ) {
 		return '';
 	}
@@ -7310,7 +7328,7 @@ export function trashNote( data ) {
 				all,
 				'hierarchy-guard'
 			),
-			formatCount( all )
+			shownAll
 		);
 	}
 	if ( 'keep' === data.trash_policy ) {
@@ -7322,7 +7340,7 @@ export function trashNote( data ) {
 				children,
 				'hierarchy-guard'
 			),
-			formatCount( children )
+			shownChildren
 		);
 	}
 	if ( data.trash_to ) {
@@ -7334,7 +7352,7 @@ export function trashNote( data ) {
 				children,
 				'hierarchy-guard'
 			),
-			formatCount( children ),
+			shownChildren,
 			data.trash_to.title
 		);
 	}
@@ -7346,7 +7364,7 @@ export function trashNote( data ) {
 			children,
 			'hierarchy-guard'
 		),
-		formatCount( children )
+		shownChildren
 	);
 }
 
@@ -8461,7 +8479,8 @@ function Overview( { data, onView } ) {
 								<span className="hierarchy-guard-panel__meta">
 									{ oldUrlState(
 										data.redirects.serving,
-										data.redirects.provider
+										data.redirects.provider,
+										old.in_use
 									) }
 									{ ' · ' }
 									<Button
