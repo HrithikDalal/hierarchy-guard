@@ -1,6 +1,6 @@
 {
 	"name": "hrithikdalal/hierarchy-guard",
-	"description": "Shows page hierarchy in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and keeps old URLs reaching their pages.",
+	"description": "Shows page hierarchy in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and records old URLs so they can be redirected to their pages.",
 	"type": "wordpress-plugin",
 	"license": "GPL-2.0-or-later",
 	"require": {
