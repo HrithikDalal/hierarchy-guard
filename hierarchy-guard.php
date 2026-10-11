@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Hierarchy Guard
  * Plugin URI:        https://github.com/hrithikdalal/hierarchy-guard
- * Description:       Records page URL changes and redirects old subpage URLs to their new location.
+ * Description:       Shows page hierarchy in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and keeps old URLs reaching their pages.
  * Version:           0.1.0
  * Requires at least: 6.6
  * Requires PHP:      8.0
