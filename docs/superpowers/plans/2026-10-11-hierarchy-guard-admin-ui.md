@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html` is a snapshot of the live spec at https://claude.ai/artifact/6V5RMR2w49uPiEp96ycyzq. Read "Features and mockups" (Editor sidebar panel; Hierarchy column, subtree filter and Tree view; Trash dialog; Outcome notice and redirects needed), "What the editor sees, by situation", "REST endpoint", Architecture and Testing. This plan builds spec build-order steps 6 and 7. The Tree view (step 8) is plan 4. The DataViews field and trash action, and the `hierarchy_guard` field on the REST page object they need (steps 9 and 10), are plan 5. The spec's parent dropdown is replaced by a breadcrumb beside the heading: a dropdown of every parent page cannot be bounded on a site with a million pages.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: after every task the PHP suite passes (355 tests at the end), `composer lint` exits 0, and from Task 10 on `npm run lint:js`, `npm run lint:style`, `npm run test:js` (19 tests at the end) and `npm run build` succeed. The prototype was also checked in the browser. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3) before it was written down: after every task the PHP suite passes (381 tests at the end), `composer lint` exits 0, and from Task 10 on `npm run lint:js`, `npm run lint:style`, `npm run test:js` (22 tests at the end) and `npm run build` succeed. The prototype was also checked in the browser. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -21,14 +21,16 @@
 - Tooling versions: `@wordpress/scripts` exactly 36.1.0, which needs Node `^22.22.2 || ^24.15.0` (CI uses 24) and runs unit tests with Vitest 5 and Vite 8. `@wordpress/*` imports are externals at run time, so code may use only APIs WordPress 6.6 ships: no `__experimental` components, `createRoot` from `@wordpress/element`, `PluginDocumentSettingPanel` and `store` from `@wordpress/editor`.
 - Tests that check a hook is registered must find the plugin's own object in `$GLOBALS['wp_filter'][ $hook ]->callbacks[ $priority ]`; `has_action( $hook )` alone is always true because core registers callbacks on the same hooks.
 - UI: core components and core admin classes only (`notice`, `description`, `widefat striped`, `subtitle`, `screen-reader-text`). No colours, radii, shadows or type sizes of the plugin's own; plugin CSS sets layout only (margins, gaps, widths, grid, display). Status is text, not a pill. The word is "subpages".
-- Copy: sentence case, no product name inside UI text except the nudge, no exclamation marks. One translatable string per sentence, `_n()` on the counted noun, a translator comment for every placeholder, titles inside the string as “%s”, curly quotes and apostrophes. PHP numbers through `number_format_i18n()`, JS numbers through `formatCount()`; a count at the cap shows as "1,000+". "Trash" is capitalised in sentences shown on core's notices and in the list screen's dialogs, as core does there. Text domain `hierarchy-guard` in PHP and JS.
-- Scale: no request does work that grows with the size of a subtree. Every walk stops at `Subtree::count_cap()` (filter `hierarchy_guard_count_cap`, default 1,000). The Hierarchy column costs one query per list screen, none in core's indented tree mode. The trash dialog's capability check covers one batch of direct subpages (`Operations::threshold()`, default 200).
-- REST: namespace `hierarchy-guard/v1`, every route read-only. `posts/{id}/hierarchy`, `posts/{id}/pairs` and `posts/{id}/csv` need a supported type and `edit_post` on the ID; `trash-preview` needs a logged-in user and lists only IDs the user may `delete_post`; `changes/{id}/pairs` and `changes/{id}/csv` answer only for the current user's latest change. Error codes: `rest_post_invalid_id` (404), `rest_forbidden`, `hierarchy_guard_unknown_path` (404), `hierarchy_guard_change_gone` (404).
-- Pairs: a pair is a published page's old URL and its current one, both relative to the home URL (`/about/team/`). An old path whose head has no target is "unresolved", with reason `trash`, `unpublished` or `none`. Pairs are never stored. CSV layouts: `redirection` and `srm` are `source,target,regex,code` with `0` and `301`; `generic` is `source,target,code`; CRLF line ends, a header row, RFC 4180 quoting, and a leading apostrophe on a cell starting with `=`, `+`, `-`, `@`, tab or CR. A CSV response carries the `X-Hierarchy-Guard-Csv` header and is printed as is; download links carry `_wpnonce` for `wp_rest`.
+- Copy: sentence case, no product name inside UI text except the nudge, no exclamation marks. One translatable string per sentence, `_n()` on the counted noun, a translator comment for every placeholder, titles inside the string as “%s”, curly quotes and apostrophes. PHP counts through `Subtree::format_count()`, JS counts through `formatCount()` (the user's locale), and a count at the cap shows as the translatable "1,000+". "Trash" is capitalised where core's own screen capitalises it (the Pages list, its notices and dialogs, the classic editor) and lower case in the block editor, which says "Move to trash". Text domain `hierarchy-guard` in PHP and JS.
+- Scale: no request does work that grows with the size of a subtree. Every walk stops at `Subtree::count_cap()` (filter `hierarchy_guard_count_cap`, default 1,000). Children are read only through `Subtree::ordered_children()`, which follows the `post_parent` index's own order up to the limit and sorts only what it read; no query sorts every child of a parent. The Hierarchy column costs one query per list screen plus one to prime the rows' parents, and none in core's indented tree mode. The trash preview shares one count budget and one capability-check budget of `Operations::threshold()` (default 200) across every page it previews. Collected pairs are cached for five minutes, keyed on the source and the posts' last change.
+- Scripts load only where they act: the editor bundle on supported block-editor screens, the classic bundle on classic editor screens, and the list-table bundle only when the list screen fires `hierarchy_guard_list_script`, because it printed a row with subpages, the breadcrumb, a URLs notice or the nudge.
+- REST: namespace `hierarchy-guard/v1`, every route read-only. `posts/{id}/hierarchy`, `posts/{id}/pairs` and `posts/{id}/csv` need a supported type and `edit_post` on the ID; `trash-preview` needs a logged-in user, previews at most 50 IDs (counting the rest in `more`) and lists only IDs the user may `delete_post`; `changes/{id}/pairs` and `changes/{id}/csv` answer only for the current user's latest change. Error codes: `rest_post_invalid_id` (404), `rest_forbidden`, `hierarchy_guard_unknown_path` (404), `hierarchy_guard_change_gone` (404).
+- Pairs: a pair is a published page's old URL and its current one, both relative to the home URL (`/about/team/`). An old path whose head has no target is "unresolved", with reason `trash`, `unpublished` or `none`; one a live page uses now is unresolved with reason `in_use`, because a redirect plugin would hide that page. An old path with no URL form (plain permalinks, a type without a permastruct), one that leads where it already is, and one whose pages now sit under the trash have no pairs. Pairs are never stored. CSV layouts: `redirection` and `srm` are `source,target,regex,code` with `0` and `301`; `generic` is `source,target,code`; CRLF line ends, a header row, RFC 4180 quoting, and a leading apostrophe on a cell starting with `=`, `+`, `-`, `@`, tab or CR. A CSV response carries the `X-Hierarchy-Guard-Csv` header and is printed as is; download links carry `_wpnonce` for `wp_rest`.
 - Trash dialog: the chosen policy travels as `hierarchy_guard_policy` on core's own row-action link (`post.php?action=trash`) or bulk form (`edit.php`, `action` or `action2` `trash`). It applies only after core's nonce verifies again (`trash-post_{id}`, `bulk-posts`) and only to the IDs the request names, through the `hierarchy_guard_trash_policy` filter.
 - Subtree filter: query var `hierarchy_guard_under` (an ID). The filtered list is the capped walk's IDs as `post__in`, sorted by menu order then title as an array, so core renders paginated rows instead of loading every page for its tree.
 - Settings anchors: `#hierarchy-guard-redirects` on the Redirects checkbox and `#hierarchy-guard-trash-policy` on the trash-policy fieldset. "Turn on redirects" and "Settings" links appear only for users with `manage_options`.
-- The redirects nudge: user meta `hierarchy_guard_nudge_dismissed` (boolean, `show_in_rest`, writable by users with `manage_options`), shown on supported list screens while built-in redirects are off and no redirect plugin is detected.
+- The redirects nudge: shown on supported list screens to users with `manage_options` while built-in redirects are off, no redirect plugin is detected, and the ledger holds at least one old URL; not on a load that shows a URLs notice. Dismissed through core's `dismiss-wp-pointer` Ajax action as pointer `hierarchy_guard_nudge` (user meta `dismissed_wp_pointers`).
+- Block editor: a plugin document panel starts closed and renders nothing inside, so nothing a user must see lives only in the panel. The save warning uses `PluginPostStatusInfo`; the message after a save is a core editor notice.
 
 ## Review Focus
 
@@ -47,6 +49,10 @@ Accepted for this plan; reviewers should not re-raise them.
 - Bulk Edit parent changes get neither the warning nor the redirects notice.
 - Once a trashed page is deleted for good its moved markers are gone, so a subpage that was renamed on the move is listed at its current slug.
 - CSV and modal paths are relative to the home URL, so on a subdirectory install they leave out the directory.
+- Before WordPress 7.0, classic admin colour schemes don't set `--wp-admin-theme-color`, so the list screen's dialogs and modal use the components' default blue accent instead of the user's scheme. The block editor maps the schemes itself and is not affected.
+- A 1,000-pair page of the modal, "Copy as text" or a full CSV loads up to 1,000 posts to build their permalinks (bounded by the cap, and only when a user asks for it).
+- The trash preview checks one batch of subpages across the whole selection, so in a large bulk dialog a page past the first batch may not show the "can't edit" note. The trash itself still leaves such subpages in place and reports them.
+- Sentences of a notice are joined with a space, as core joins its own bulk messages.
 - The Tree view is plan 4. The DataViews field and trash action, the `hierarchy_guard` REST page field, readme.txt, uninstall cleanup and the release zip are plan 5.
 
 ---
@@ -56,7 +62,7 @@ Accepted for this plan; reviewers should not re-raise them.
 ```
 hierarchy-guard.php                        MOD  plugin description
 includes/HierarchyGuard/
-├── Subtree.php                            MOD  child_counts() for a screen of rows, descendant_ids() capped walk
+├── Subtree.php                            MOD  child_counts(), ordered_children() bounded read, descendant_ids(), format_count()
 ├── Paths.php                              MOD  url() core's URL for a path, relative() home-relative form
 ├── Overview.php                           NEW  one page's ancestors, paged children, counts, old URLs, trash outcome
 ├── Plugin.php                             MOD  wiring
@@ -69,13 +75,13 @@ includes/HierarchyGuard/
 ├── Trash/Trash_Handler.php                MOD  passes the old path to the change
 ├── Admin/List_Table.php                   NEW  Hierarchy column, "View subpages", subtree filter and breadcrumb
 ├── Admin/Trash_Choice.php                 NEW  the dialog's policy from core's verified trash request
-├── Admin/Notices.php                      NEW  outcome notice (was Trash_Notice), background progress, redirects nudge
+├── Admin/Notices.php                      NEW  subpage sentences on core's notice (was Trash_Notice), the URLs notice, progress, nudge
 ├── Admin/Trash_Notice.php                 DEL  moved to Notices.php
 ├── Admin/Meta_Box.php                     NEW  read-only Hierarchy box in the classic editor
 ├── Admin/Assets.php                       NEW  enqueues built bundles with their settings
 └── Admin/Settings_Section.php             MOD  anchors, the spec's help text, a nameless provider
 src/
-├── common/   config.js · copy.js (every sentence) · api.js · mount.js · redirects-modal.js · modal.scss · test/
+├── common/   config.js · copy.js (every sentence) · api.js · mount.js · url.js · redirects-modal.js · modal.scss · test/
 ├── editor/   index.js · panel.js · editor.scss        block editor Hierarchy panel
 ├── list-table/ index.js · trash-dialog.js · quick-edit.js · list-table.scss
 └── classic/  index.js                                  classic-editor confirmation
@@ -89,16 +95,18 @@ tests/phpunit/
 `Pairs` is the only class that decides which old URL leads where. `Overview` decides what one page's summary says. The REST controllers check permissions and shape responses; `List_Table`, `Notices`, `Meta_Box` and `Trash_Choice` are the PHP screens; the bundles add behaviour on top of markup that works without them. Every sentence the scripts show lives in `src/common/copy.js`.
 
 ---
-### Task 1: Capped child counts, the subtree walk, and URL helpers
+### Task 1: Capped child counts, bounded ordered children, the subtree walk, and URL helpers
 
 **Files:**
-- Modify: `includes/HierarchyGuard/Subtree.php` (two methods at the end of the class)
+- Modify: `includes/HierarchyGuard/Subtree.php` (four methods at the end of the class)
 - Modify: `includes/HierarchyGuard/Paths.php` (an import and two methods at the end of the class)
 - Test: `tests/phpunit/SubtreeTest.php`, `tests/phpunit/PathsTest.php` (tests at the end of each class)
 
 **Interfaces:**
 - Produces: `Subtree::child_counts( int[] $ids, string $post_type, int $cap ): array<int,int>`: live direct-child counts for a screenful of posts in one statement (a capped subquery per ID joined with `UNION ALL`), every given ID present, each count stopping at `$cap`.
-- Produces: `Subtree::descendant_ids( int $root_id, string $post_type, int $cap ): array{ids:int[],capped:bool}`: live descendants level by level, each level in menu order then title then ID, at most `$cap` IDs, `capped` when more exist.
+- Produces: `Subtree::ordered_children( int[] $parent_ids, string $post_type, int $limit ): array<int,array{ID:string,post_parent:string,post_name:string,post_status:string}>`: live children of the given parents (0 for top level), at most `$limit`, in menu order then title then ID. The first query orders by `post_parent, ID`, the `post_parent` index's own order, so `LIMIT` stops the read; the second sorts only that bounded set. No query reads every child of a large parent. Above the limit, the children listed are the lowest IDs, in menu order. Tasks 2 and 5 read children only through it.
+- Produces: `Subtree::descendant_ids( int $root_id, string $post_type, int $cap ): array{ids:int[],capped:bool}`: live descendants level by level through `ordered_children()`, at most `$cap` IDs, `capped` when more exist.
+- Produces: `Subtree::format_count( int $count, bool $capped = false ): string`: `number_format_i18n()`, and the translatable "%s+" for a capped count. Every PHP count shown at the cap goes through it.
 - Produces: `Paths::url( string $post_type, string $path ): string`: the absolute URL core would build for a post of that type at that path (page permastruct, or the type's extra permastruct), empty without pretty permalinks or a permastruct.
 - Produces: `Paths::relative( string $url ): string`: a URL on this site as a path relative to the home URL (`/about/team/`), query string kept, a subdirectory home stripped.
 
@@ -144,6 +152,41 @@ Append to the class in `tests/phpunit/SubtreeTest.php`:
 
 		$exact = Subtree::descendant_ids( $this->ids['company'], 'page', 4 );
 		$this->assertFalse( $exact['capped'], 'Exactly the cap is not capped.' );
+	}
+
+	public function test_ordered_children_reads_up_to_the_limit_in_menu_order(): void {
+		$zed = $this->page( 'zed', $this->ids['about'] );
+		wp_update_post(
+			[
+				'ID'         => $zed,
+				'menu_order' => -1,
+			]
+		);
+
+		$this->assertSame( [ $zed, $this->ids['history'], $this->ids['team'] ], array_map( 'intval', array_column( Subtree::ordered_children( [ $this->ids['about'] ], 'page', 10 ), 'ID' ) ) );
+		$this->assertCount( 2, Subtree::ordered_children( [ $this->ids['about'] ], 'page', 2 ), 'The limit bounds the read.' );
+		$this->assertSame( [], Subtree::ordered_children( [], 'page', 2 ) );
+	}
+
+	public function test_ordered_children_reads_in_the_index_s_order_then_sorts_what_it_read(): void {
+		$queries = [];
+		$capture = static function ( string $sql ) use ( &$queries ): string {
+			$queries[] = $sql;
+			return $sql;
+		};
+		add_filter( 'query', $capture );
+		Subtree::ordered_children( [ $this->ids['about'] ], 'page', 10 );
+		remove_filter( 'query', $capture );
+
+		$this->assertCount( 2, $queries );
+		$this->assertStringContainsString( 'ORDER BY post_parent ASC, ID ASC LIMIT 10', $queries[0], 'The post_parent index gives this order, so LIMIT stops the read; no sort of every child.' );
+		$this->assertStringContainsString( 'WHERE ID IN (', $queries[1] );
+		$this->assertStringContainsString( 'ORDER BY menu_order ASC, post_title ASC, ID ASC', $queries[1] );
+	}
+
+	public function test_format_count_marks_a_capped_count(): void {
+		$this->assertSame( '1,000+', Subtree::format_count( 1000, true ) );
+		$this->assertSame( '12', Subtree::format_count( 12 ) );
 	}
 ```
 
@@ -256,16 +299,45 @@ Append to the class in `includes/HierarchyGuard/Subtree.php`:
 	}
 
 	/**
+	 * Live children of the given parents, at most $limit, in menu order then
+	 * title then ID. The first query follows the post_parent index in its own
+	 * order and stops at the limit; the second sorts only that bounded set. No
+	 * query reads every child of a large parent.
+	 *
+	 * @param int[]  $parent_ids Parent post IDs; 0 stands for top level.
+	 * @param string $post_type  Post type name.
+	 * @param int    $limit      Most children to read.
+	 * @return array<int,array{ID:string,post_parent:string,post_name:string,post_status:string}>
+	 */
+	public static function ordered_children( array $parent_ids, string $post_type, int $limit ): array {
+		global $wpdb;
+
+		$parent_ids = array_values( array_unique( array_map( 'intval', $parent_ids ) ) );
+		if ( [] === $parent_ids || $limit < 1 ) {
+			return [];
+		}
+
+		$in = implode( ',', $parent_ids );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only; the index's own order lets LIMIT stop the read.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY post_parent ASC, ID ASC LIMIT %d", $post_type, $limit ) );
+		if ( [] === $ids ) {
+			return [];
+		}
+
+		$in = implode( ',', array_map( 'intval', $ids ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds the integers read above, at most $limit of them.
+		return (array) $wpdb->get_results( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) ORDER BY menu_order ASC, post_title ASC, ID ASC", ARRAY_A );
+	}
+
+	/**
 	 * Live descendants level by level, stopping at the cap.
 	 *
 	 * @param int    $root_id   Root post ID.
 	 * @param string $post_type Post type name.
 	 * @param int    $cap       Most IDs to return.
-	 * @return array{ids:int[],capped:bool} IDs root-near first; capped when more exist.
+	 * @return array{ids:int[],capped:bool} IDs root-near first, each level in menu order; capped when more exist.
 	 */
 	public static function descendant_ids( int $root_id, string $post_type, int $cap ): array {
-		global $wpdb;
-
 		$cap   = max( 1, $cap );
 		$ids   = [];
 		$found = 0;
@@ -274,9 +346,7 @@ Append to the class in `includes/HierarchyGuard/Subtree.php`:
 
 		while ( [] !== $level && $found <= $cap && $depth < 50 ) {
 			++$depth;
-			$in = implode( ',', array_map( 'intval', $level ) );
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only; LIMIT bounds each level by the remaining cap.
-			$level  = array_map( 'intval', $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC LIMIT %d", $post_type, $cap + 1 - $found ) ) );
+			$level  = array_map( 'intval', array_column( self::ordered_children( $level, $post_type, $cap + 1 - $found ), 'ID' ) );
 			$ids    = array_merge( $ids, $level );
 			$found += count( $level );
 		}
@@ -285,6 +355,19 @@ Append to the class in `includes/HierarchyGuard/Subtree.php`:
 			'ids'    => array_slice( $ids, 0, $cap ),
 			'capped' => $found > $cap,
 		];
+	}
+
+	/**
+	 * A count for display: "1,000", or "1,000+" when more exist.
+	 *
+	 * @param int  $count  Count, already at most the cap.
+	 * @param bool $capped Whether more exist.
+	 * @return string
+	 */
+	public static function format_count( int $count, bool $capped = false ): string {
+		$number = number_format_i18n( $count );
+		/* translators: %s: a number that is a lower bound, such as 1,000. */
+		return $capped ? sprintf( __( '%s+', 'hierarchy-guard' ), $number ) : $number;
 	}
 ```
 
@@ -364,7 +447,7 @@ Expected: lint exits 0; the suite passes.
 
 ```bash
 git add includes/HierarchyGuard/Subtree.php includes/HierarchyGuard/Paths.php tests/phpunit/SubtreeTest.php tests/phpunit/PathsTest.php
-git commit -m "feat: capped child counts, the subtree walk and URL helpers"
+git commit -m "feat: capped child counts, bounded ordered children and URL helpers"
 ```
 
 ### Task 2: Old and new URL pairs
@@ -377,14 +460,12 @@ git commit -m "feat: capped child counts, the subtree walk and URL helpers"
 
 **Interfaces:**
 - Consumes: Task 1's `Paths::url()` and `Paths::relative()`; `Subtree::count_cap()`; plan 2's `Markers::rows()`, `Markers::moved_key()`, `Markers::decode_moved()`, `Subtree::status()`, `Change_Log`.
-- Produces: `Redirects\Pairs` with `PER_PAGE = 20`.
-  - A block is `array{post_type:string, old:string, head:int, reason:string, children:array<int,array{id:int,parent:int,segment:string,status:string}>}`: the old path leads to `head` (0 for none), and each listed child, at its old `segment`, leads to that child today.
-  - `static post_block( WP_Post $post, string $old_path ): array`: the block for an old path recorded on a post; its children are the post's live children at their current slugs.
-  - `static change_blocks( array $change ): array`: one block per root of a `trash` change whose policy is `reparent` and whose `path` is set. A root restored since has no block. While the root is in the trash its head is 0 with reason `trash` and its children are the moved markers at their original slugs; once it is deleted for good its head is its `to` and its children are the change's `ids` that are live children of `to`.
-  - `collect( array $blocks ): array{pairs:array<int,array{old:string,id:int}>, unresolved:array<int,array{old:string,reason:string}>, capped:bool}`: depth first in menu order, published pages only, at most the count cap. A head that is not publicly viewable is unresolved with the block's reason, else `unpublished` for a post head or `none` without one.
-  - `page( array $blocks, int $page, int $per_page ): array{pairs:array<int,array{old:string,new:string}>, unresolved:array<int,array{old:string,reason:string}>, total:int, capped:bool, page:int, pages:int}`: URLs relative to the home URL; a page past the end shows the last one.
-  - `all( array $blocks ): array<int,array{old:string,new:string}>` and `count( array $blocks ): array{count:int,capped:bool}`.
-- Produces: `Change_Log` root entries gain `path` (string, the root's old path); `Trash_Handler::summarize()` sets it from the job's `paths[0]`.
+- Produces: `Redirects\Pairs` with `PER_PAGE = 20` and `CACHE_TTL = 300`.
+  - `collect_post( WP_Post $post, string $old_path ): array` and `collect_change( array $change ): array` return the collected pairs `array{post_type:string, pairs:array<int,array{old:string,id:int}>, unresolved:array<int,array{old:string,reason:string}>, capped:bool}`. They are cached in the plugin's cache group for five minutes, keyed on the source, the change's `updated` time and the posts' last-changed value, so modal pages, "Copy as text" and the CSV share one walk.
+  - `page( array $collected, int $page, int $per_page ): array{pairs:array<int,array{old:string,new:string}>, unresolved:array<int,array{old:string,reason:string}>, total:int, capped:bool, page:int, pages:int}`, `all( array $collected ): array<int,array{old:string,new:string}>` and `count( array $collected ): array{count:int,capped:bool}`. URLs are relative to the home URL; a page past the end shows the last one.
+  - A block starts at one old path: `array{old, head, reason, base, from, children, incomplete}`. `post_block( WP_Post, string )` leads the old path to the post and lists the post's live children at their current slugs (`from`). `change_blocks( array $change )` builds one block per `reparent` root of a `trash` change with a `path`, from three batched queries whatever the number of roots. A restored root has no block. A root in the trash has head 0 with reason `trash` and its moved markers at their original slugs. A root deleted for good has its `to` as head, and the IDs its own entry kept that still live under `to`; it is `incomplete` (capped) when it moved more than it kept.
+  - `collect( array $blocks, string $post_type ): array` skips a block whose old path has no URL (plain permalinks, or no permastruct), which leads where it already is (`base`), or whose pages now sit under a trashed segment. It marks a block whose old path a live, viewable page now uses as unresolved with reason `in_use`. It walks every block's levels together through `Subtree::ordered_children()`, depth first in menu order, published pages only, at most the count cap. A head that is not publicly viewable is unresolved with the block's reason, else `unpublished` for a post head or `none` without one.
+- Produces: `Change_Log` root entries gain `path` (string, the root's old path) and `ids` (int[], at most 200, this root's own affected IDs); `Change_Log::update()` refreshes `ids` too. `Trash_Handler::summarize()` passes the job's `paths[0]` and `ids`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -448,18 +529,35 @@ final class PairsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Old and new URLs of a page of pairs.
+	 * Old and new URLs of the pairs behind an old path on about.
 	 *
-	 * @param array<int,array<string,mixed>> $blocks Blocks.
+	 * @param string $old_path Old path.
 	 * @return array<int,string> "old -> new" lines.
 	 */
-	private function lines( array $blocks ): array {
-		return array_map( static fn( array $pair ): string => $pair['old'] . ' -> ' . $pair['new'], $this->pairs->page( $blocks, 1, 100 )['pairs'] );
+	private function about_lines( string $old_path = 'company/about-us' ): array {
+		return $this->lines( $this->pairs->collect_post( get_post( $this->ids['about'] ), $old_path ) );
+	}
+
+	/**
+	 * Old and new URLs of collected pairs.
+	 *
+	 * @param array<string,mixed> $collected Collected pairs.
+	 * @return array<int,string> "old -> new" lines.
+	 */
+	private function lines( array $collected ): array {
+		return array_map( static fn( array $pair ): string => $pair['old'] . ' -> ' . $pair['new'], $this->pairs->page( $collected, 1, 100 )['pairs'] );
+	}
+
+	/**
+	 * The pairs of the admin's last change.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private function last_change(): array {
+		return $this->pairs->collect_change( $this->log->latest( $this->admin ) );
 	}
 
 	public function test_an_old_path_on_a_page_leads_to_the_page_and_its_subpages(): void {
-		$block = Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' );
-
 		$this->assertSame(
 			[
 				'/company/about-us/ -> /company/about/',
@@ -467,7 +565,7 @@ final class PairsTest extends WP_UnitTestCase {
 				'/company/about-us/team/ -> /company/about/team/',
 				'/company/about-us/team/leadership/ -> /company/about/team/leadership/',
 			],
-			$this->lines( [ $block ] ),
+			$this->about_lines(),
 			'Depth first, in menu order then title.'
 		);
 	}
@@ -486,7 +584,7 @@ final class PairsTest extends WP_UnitTestCase {
 				'/company/about-us/history/ -> /company/about/history/',
 				'/company/about-us/team/leadership/ -> /company/about/team/leadership/',
 			],
-			$this->lines( [ Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' ) ] )
+			$this->about_lines()
 		);
 	}
 
@@ -498,7 +596,7 @@ final class PairsTest extends WP_UnitTestCase {
 			]
 		);
 
-		$page = $this->pairs->page( [ Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' ) ], 1, 100 );
+		$page = $this->pairs->page( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ), 1, 100 );
 
 		$this->assertSame(
 			[
@@ -513,21 +611,21 @@ final class PairsTest extends WP_UnitTestCase {
 	}
 
 	public function test_pairs_are_paged(): void {
-		$block = Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' );
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' );
 
-		$page = $this->pairs->page( [ $block ], 2, 3 );
+		$page = $this->pairs->page( $collected, 2, 3 );
 
 		$this->assertSame( 4, $page['total'] );
 		$this->assertSame( 2, $page['pages'] );
 		$this->assertSame( 2, $page['page'] );
 		$this->assertSame( [ '/company/about-us/team/leadership/' ], array_column( $page['pairs'], 'old' ) );
-		$this->assertSame( 2, $this->pairs->page( [ $block ], 9, 3 )['page'], 'A page past the end shows the last one.' );
+		$this->assertSame( 2, $this->pairs->page( $collected, 9, 3 )['page'], 'A page past the end shows the last one.' );
 	}
 
 	public function test_the_walk_stops_at_the_count_cap(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
 
-		$count = $this->pairs->count( [ Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' ) ] );
+		$count = $this->pairs->count( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) );
 
 		$this->assertSame(
 			[
@@ -538,18 +636,65 @@ final class PairsTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_the_walk_costs_one_query_per_level(): void {
-		$block   = Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' );
+	public function test_the_walk_costs_two_queries_per_level_and_is_then_cached(): void {
+		$post    = get_post( $this->ids['about'] );
 		$queries = get_num_queries();
 
-		$this->pairs->collect( [ $block ] );
+		$this->pairs->collect_post( $post, 'company/about-us' );
 
-		$this->assertLessThanOrEqual( 3, get_num_queries() - $queries, 'Levels below about: team and history, then leadership, then an empty level.' );
+		$this->assertLessThanOrEqual( 7, get_num_queries() - $queries, 'One path lookup, then an index read and a sort per level: about, team and history, leadership.' );
+
+		$queries = get_num_queries();
+		$this->pairs->collect_post( $post, 'company/about-us' );
+		$this->assertSame( 0, get_num_queries() - $queries, 'The collected pairs are cached until a post changes.' );
+	}
+
+	public function test_without_pretty_permalinks_nothing_is_listed(): void {
+		$this->set_permalink_structure( '' );
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' );
+
+		$this->assertSame( [], $collected['pairs'], 'No URL ever held the path.' );
+		$this->assertSame( [], $collected['unresolved'] );
+		$this->assertSame( [], $this->pairs->all( $collected ) );
+	}
+
+	public function test_an_old_path_a_live_page_uses_now_is_not_redirected(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		$this->page( 'about', $this->ids['company'] );
+
+		$page = $this->pairs->page( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' ), 1, 100 );
+
+		$this->assertSame( 0, $page['total'], 'A redirect plugin would hide the new page and its subpages.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/company/about/',
+					'reason' => 'in_use',
+				],
+			],
+			$page['unresolved']
+		);
+	}
+
+	public function test_an_old_path_that_is_the_current_path_has_no_pairs(): void {
+		$this->assertSame( [], $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' )['pairs'] );
+	}
+
+	public function test_a_page_in_the_trash_lists_no_pairs_under_it(): void {
+		$this->trash_raw( $this->ids['about'] );
+
+		$this->assertSame( [], $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' )['pairs'], 'Its subpages now sit under a __trashed URL.' );
 	}
 
 	public function test_a_trash_lists_the_moved_subpages_under_the_old_path(): void {
 		wp_trash_post( $this->ids['about'] );
-		$blocks = Pairs::change_blocks( $this->log->latest( $this->admin ) );
+		$collected = $this->last_change();
 
 		$this->assertSame(
 			[
@@ -557,7 +702,7 @@ final class PairsTest extends WP_UnitTestCase {
 				'/company/about/team/ -> /company/team/',
 				'/company/about/team/leadership/ -> /company/team/leadership/',
 			],
-			$this->lines( $blocks )
+			$this->lines( $collected )
 		);
 		$this->assertSame(
 			[
@@ -566,7 +711,7 @@ final class PairsTest extends WP_UnitTestCase {
 					'reason' => 'trash',
 				],
 			],
-			$this->pairs->page( $blocks, 1, 20 )['unresolved'],
+			$this->pairs->page( $collected, 1, 20 )['unresolved'],
 			'The trashed page itself has no target.'
 		);
 	}
@@ -576,7 +721,7 @@ final class PairsTest extends WP_UnitTestCase {
 
 		wp_trash_post( $this->ids['about'] );
 
-		$this->assertContains( '/company/about/team/ -> /company/team-2/', $this->lines( Pairs::change_blocks( $this->log->latest( $this->admin ) ) ) );
+		$this->assertContains( '/company/about/team/ -> /company/team-2/', $this->lines( $this->last_change() ) );
 	}
 
 	public function test_once_the_trash_is_emptied_the_old_path_leads_to_the_new_parent(): void {
@@ -591,8 +736,35 @@ final class PairsTest extends WP_UnitTestCase {
 				'/company/about/team/ -> /company/team/',
 				'/company/about/team/leadership/ -> /company/team/leadership/',
 			],
-			$this->lines( Pairs::change_blocks( $change ) )
+			$this->lines( $this->pairs->collect_change( $change ) )
 		);
+	}
+
+	public function test_after_a_delete_each_root_lists_only_its_own_subpages(): void {
+		$sibling = $this->page( 'careers', $this->ids['company'] );
+		$this->page( 'jobs', $sibling );
+		// One request, one change with two roots.
+		wp_trash_post( $this->ids['about'] );
+		wp_trash_post( $sibling );
+		$change = $this->log->latest( $this->admin );
+		wp_delete_post( $this->ids['about'], true );
+
+		$lines = $this->lines( $this->pairs->collect_change( $change ) );
+
+		$this->assertContains( '/company/about/history/ -> /company/history/', $lines );
+		$this->assertNotContains( '/company/about/jobs/ -> /company/jobs/', $lines, 'Jobs moved up from Careers, not from About.' );
+		$this->assertContains( '/company/careers/jobs/ -> /company/jobs/', $lines );
+	}
+
+	public function test_after_a_delete_a_root_that_moved_more_than_it_kept_is_capped(): void {
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+		$root   = $this->ids['about'];
+		// As if the root had moved more subpages than its entry could keep.
+		$change['roots'][ $root ]['counts']['moved'] = 500;
+		wp_delete_post( $root, true );
+
+		$this->assertTrue( $this->pairs->collect_change( $change )['capped'] );
 	}
 
 	public function test_a_restored_page_needs_no_redirects(): void {
@@ -612,10 +784,25 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertSame( [], Pairs::change_blocks( [ 'action' => 'restore' ] ) );
 	}
 
-	public function test_a_download_has_every_pair(): void {
-		$block = Pairs::post_block( get_post( $this->ids['about'] ), 'company/about-us' );
+	public function test_the_blocks_of_a_bulk_trash_cost_the_same_few_queries(): void {
+		$roots = [];
+		foreach ( [ 'a', 'b', 'c', 'd' ] as $slug ) {
+			$roots[] = $this->page( 'parent-' . $slug, $this->ids['company'] );
+			$this->page( 'kid-' . $slug, end( $roots ) );
+		}
+		foreach ( $roots as $root ) {
+			wp_trash_post( $root );
+		}
+		$change = $this->log->latest( $this->admin );
 
-		$this->assertCount( 4, $this->pairs->all( [ $block ] ) );
+		$queries = get_num_queries();
+		Pairs::change_blocks( $change );
+
+		$this->assertLessThanOrEqual( 4, get_num_queries() - $queries, 'Statuses, markers and moved pages in one query each, whatever the number of roots.' );
+	}
+
+	public function test_a_download_has_every_pair(): void {
+		$this->assertCount( 4, $this->pairs->all( $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about-us' ) ) );
 	}
 }
 ```
@@ -625,18 +812,34 @@ final class PairsTest extends WP_UnitTestCase {
 Run: `npm run test:php -- --filter PairsTest`
 Expected: FAIL with `Error: Class "HierarchyGuard\Redirects\Pairs" not found`.
 
-- [ ] **Step 3: Keep the root's old path in the change**
+- [ ] **Step 3: Keep the root's old path and its own IDs in the change**
 
-In `includes/HierarchyGuard/Trash/Change_Log.php`, replace:
+In `includes/HierarchyGuard/Trash/Change_Log.php`, make these replacements.
+
+Replace:
 ```php
 	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, counts, kept_ids, urls, job.
 ```
 with:
 ```php
-	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, urls, job.
+	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, ids, urls, job.
 ```
 
-and replace:
+Replace:
+```php
+					'counts'   => $counts,
+					'kept_ids' => $kept_ids,
+					'job'      => $running,
+```
+with:
+```php
+					'counts'   => $counts,
+					'kept_ids' => $kept_ids,
+					'ids'      => $ids,
+					'job'      => $running,
+```
+
+Replace:
 ```php
 			'fallback' => (bool) ( $entry['fallback'] ?? false ),
 			'counts'   => $counts,
@@ -648,10 +851,23 @@ with:
 			'counts'   => $counts,
 ```
 
+Replace:
+```php
+			'kept_ids' => array_slice( array_map( 'intval', (array) ( $entry['kept_ids'] ?? [] ) ), 0, self::MAX_KEPT ),
+```
+with:
+```php
+			'kept_ids' => array_slice( array_map( 'intval', (array) ( $entry['kept_ids'] ?? [] ) ), 0, self::MAX_KEPT ),
+			// This root's own affected IDs, so its redirects can be listed after it is deleted for good.
+			'ids'      => array_slice( array_map( 'intval', (array) ( $entry['ids'] ?? [] ) ), 0, self::MAX_IDS ),
+```
+
 In `includes/HierarchyGuard/Trash/Trash_Handler.php`, replace:
 ```php
 				'fallback' => (bool) $job['fallback'],
 				'counts'   => (array) $job['counts'],
+				'kept_ids' => (array) $job['kept_ids'],
+				'urls'     => (array) $job['urls'],
 ```
 with:
 ```php
@@ -659,6 +875,9 @@ with:
 				// The root's own old path: the redirects modal rebuilds the pairs from it.
 				'path'     => (string) ( $job['paths'][0] ?? '' ),
 				'counts'   => (array) $job['counts'],
+				'kept_ids' => (array) $job['kept_ids'],
+				'ids'      => (array) $job['ids'],
+				'urls'     => (array) $job['urls'],
 ```
 
 - [ ] **Step 4: Create Pairs**
@@ -676,6 +895,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Redirects;
 
+use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
@@ -686,55 +906,72 @@ use WP_Post;
  * Lists the old URLs a change left behind and where each leads now.
  *
  * A block starts at one old path. Its head is the post that path leads to,
- * or none. Below it come the listed children, each at its old path segment,
- * and the published pages under them, depth first in menu order. Nothing is
- * stored: pairs are computed when asked for, and no walk goes past the
- * count cap.
+ * or none. Below it come its first-level pages, each at its old path
+ * segment, and the published pages under them, depth first in menu order.
+ * Every block of a change is walked together, one query pair per level, and
+ * no walk goes past the count cap. Nothing is stored: the collected pairs
+ * are cached for a few minutes, keyed on the posts' last change.
  */
 final class Pairs {
 
-	public const PER_PAGE = 20;
+	public const PER_PAGE  = 20;
+	public const CACHE_TTL = 5 * MINUTE_IN_SECONDS;
 
 	/**
-	 * The block for an old path recorded on a post: the old path leads to the
-	 * post, and each old subpage path to the same subpage today.
+	 * Every pair behind an old path recorded on a post: the old path leads to
+	 * the post, and each old subpage path to the same subpage today.
+	 *
+	 * @param WP_Post $post     Post the old path is recorded on.
+	 * @param string  $old_path The old path, any form.
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 */
+	public function collect_post( WP_Post $post, string $old_path ): array {
+		$old = Paths::normalize( $old_path );
+		return $this->cached(
+			'post:' . (int) $post->ID . ':' . md5( $old ),
+			fn(): array => $this->collect( [ self::post_block( $post, $old ) ], (string) $post->post_type )
+		);
+	}
+
+	/**
+	 * Every pair of a trash change: one block per root whose subpages moved up.
+	 *
+	 * @param array<string,mixed> $change A change from Change_Log.
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 */
+	public function collect_change( array $change ): array {
+		return $this->cached(
+			'change:' . (string) ( $change['id'] ?? '' ) . ':' . (int) ( $change['updated'] ?? 0 ),
+			fn(): array => $this->collect( self::change_blocks( $change ), (string) ( $change['post_type'] ?? 'page' ) )
+		);
+	}
+
+	/**
+	 * The block for an old path recorded on a post.
 	 *
 	 * @param WP_Post $post     Post the old path is recorded on.
 	 * @param string  $old_path The old path, any form.
 	 * @return array<string,mixed> Block.
 	 */
 	public static function post_block( WP_Post $post, string $old_path ): array {
-		global $wpdb;
-
-		$type = (string) $post->post_type;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Index range on post_parent, bounded by the count cap.
-		$rows = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC LIMIT %d",
-				(int) $post->ID,
-				$type,
-				Subtree::count_cap() + 1
-			),
-			ARRAY_A
-		);
-
-		$children = [];
-		foreach ( (array) $rows as $row ) {
-			$children[] = self::node( $row, (string) $row['post_name'] );
-		}
-
 		return [
-			'post_type' => $type,
-			'old'       => Paths::normalize( $old_path ),
-			'head'      => (int) $post->ID,
-			'reason'    => '',
-			'children'  => $children,
+			'old'        => Paths::normalize( $old_path ),
+			'head'       => (int) $post->ID,
+			'reason'     => '',
+			'base'       => Paths::uri( $post ),
+			'from'       => (int) $post->ID,
+			'children'   => [],
+			'incomplete' => false,
 		];
 	}
 
 	/**
-	 * The blocks for a trash change: one per root whose subpages moved up.
-	 * A root restored since has no block, because its URLs work again.
+	 * The blocks for a trash change. A root restored since has no block,
+	 * because its URLs work again. While a root is in the trash its old path
+	 * leads nowhere and its first-level pages are the moved markers, at their
+	 * original slugs. Once it is deleted for good its old path leads to the
+	 * page its subpages moved under, and its first-level pages are the IDs its
+	 * change entry kept that still live there.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
 	 * @return array<int,array<string,mixed>> Blocks.
@@ -744,32 +981,38 @@ final class Pairs {
 			return [];
 		}
 
-		$type   = (string) $change['post_type'];
-		$blocks = [];
+		$type  = (string) $change['post_type'];
+		$roots = [];
 		foreach ( (array) $change['roots'] as $root ) {
-			$path = (string) ( $root['path'] ?? '' );
-			if ( Settings::POLICY_REPARENT !== ( $root['policy'] ?? '' ) || '' === $path ) {
-				continue;
+			if ( Settings::POLICY_REPARENT === ( $root['policy'] ?? '' ) && '' !== (string) ( $root['path'] ?? '' ) ) {
+				$roots[ (int) $root['root'] ] = $root;
 			}
-			$root_id = (int) $root['root'];
-			$to      = (int) $root['to'];
-			$status  = Subtree::status( $root_id );
+		}
+		if ( [] === $roots ) {
+			return [];
+		}
+
+		$statuses = self::statuses( array_keys( $roots ) );
+		$trashed  = array_keys( array_filter( $statuses, static fn( string $status ): bool => 'trash' === $status ) );
+		$moved    = self::moved_children( $trashed, $type );
+		$kept     = self::kept_children( array_diff_key( $roots, $statuses ), $type );
+
+		$blocks = [];
+		foreach ( $roots as $root_id => $root ) {
+			$status = $statuses[ $root_id ] ?? '';
 			if ( '' !== $status && 'trash' !== $status ) {
 				continue;
 			}
-
-			$children = 'trash' === $status ? self::moved_children( $root_id ) : [];
-			if ( [] === $children ) {
-				$children = self::children_among( array_map( 'intval', (array) ( $change['ids'] ?? [] ) ), $to, $type );
-			}
-
+			$to       = (int) $root['to'];
+			$parent   = $to > 0 ? get_post( $to ) : null;
 			$blocks[] = [
-				'post_type' => $type,
-				'old'       => Paths::normalize( $path ),
-				// A deleted root's old path now leads to the page its subpages moved under.
-				'head'      => '' === $status ? $to : 0,
-				'reason'    => 'trash' === $status ? 'trash' : '',
-				'children'  => $children,
+				'old'        => Paths::normalize( (string) $root['path'] ),
+				'head'       => '' === $status ? $to : 0,
+				'reason'     => 'trash' === $status ? 'trash' : '',
+				'base'       => $parent instanceof WP_Post ? Paths::uri( $parent ) : '',
+				'from'       => 0,
+				'children'   => 'trash' === $status ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
+				'incomplete' => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
 			];
 		}
 
@@ -779,16 +1022,44 @@ final class Pairs {
 	/**
 	 * Every pair of the blocks, up to the count cap.
 	 *
-	 * @param array<int,array<string,mixed>> $blocks Blocks.
-	 * @return array{pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 * A block is skipped when its old path has no URL (plain permalinks, or a
+	 * type without a permastruct), when it leads where it already is, or when
+	 * its pages now sit under the trash. A block whose old path a live page
+	 * uses now is unresolved: redirect plugins redirect before WordPress
+	 * looks, so listing it would hide that page.
+	 *
+	 * @param array<int,array<string,mixed>> $blocks    Blocks.
+	 * @param string                         $post_type Post type name.
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
 	 */
-	public function collect( array $blocks ): array {
+	public function collect( array $blocks, string $post_type ): array {
 		$cap        = Subtree::count_cap();
-		$pairs      = [];
 		$unresolved = [];
 		$capped     = false;
+		$live       = [];
 
-		foreach ( $blocks as $block ) {
+		foreach ( $blocks as $index => $block ) {
+			$old  = (string) $block['old'];
+			$base = (string) $block['base'];
+			if ( '' === $old || '' === Paths::url( $post_type, $old ) || $old === $base || Paths::has_trashed_segment( $base ) ) {
+				continue;
+			}
+			$owner = get_page_by_path( $old, OBJECT, $post_type );
+			if ( $owner instanceof WP_Post && (int) $owner->ID !== (int) $block['head'] && is_post_publicly_viewable( $owner ) ) {
+				$unresolved[] = [
+					'old'    => $old,
+					'reason' => 'in_use',
+				];
+				continue;
+			}
+			$live[ $index ] = $block;
+			$capped         = $capped || ! empty( $block['incomplete'] );
+		}
+
+		$tree = $this->walk( $live, $post_type, $cap );
+
+		$pairs = [];
+		foreach ( $live as $index => $block ) {
 			$old  = (string) $block['old'];
 			$head = (int) $block['head'];
 			if ( $head > 0 && is_post_publicly_viewable( $head ) ) {
@@ -797,67 +1068,73 @@ final class Pairs {
 					'id'  => $head,
 				];
 			} else {
-				$reason = (string) $block['reason'];
-				if ( '' === $reason ) {
-					$reason = $head > 0 ? 'unpublished' : 'none';
-				}
+				$reason       = (string) $block['reason'];
 				$unresolved[] = [
 					'old'    => $old,
-					'reason' => $reason,
+					'reason' => '' !== $reason ? $reason : ( $head > 0 ? 'unpublished' : 'none' ),
 				];
 			}
 
-			$budget = $cap - count( $pairs );
-			if ( $budget <= 0 ) {
-				$capped = true;
-				break;
-			}
-
-			$walk = $this->walk( (array) $block['children'], (string) $block['post_type'], $old, $budget );
-			foreach ( $walk['pairs'] as $pair ) {
-				$pairs[] = $pair;
-			}
-			if ( $walk['capped'] ) {
-				$capped = true;
-				break;
+			$stack = array_reverse(
+				array_map(
+					static fn( array $node ): array => [ $node, $old ],
+					$tree['tops'][ $index ] ?? []
+				)
+			);
+			while ( [] !== $stack ) {
+				if ( count( $pairs ) >= $cap ) {
+					$capped = true;
+					break 2;
+				}
+				[ $node, $path_base ] = array_pop( $stack );
+				// Core skips an empty slug when it builds a path, so the old path does too.
+				$path = '' !== $node['segment'] ? $path_base . '/' . $node['segment'] : $path_base;
+				if ( 'publish' === $node['status'] ) {
+					$pairs[] = [
+						'old' => $path,
+						'id'  => $node['id'],
+					];
+				}
+				foreach ( array_reverse( $tree['kids'][ $node['id'] ] ?? [] ) as $kid ) {
+					$stack[] = [ $kid, $path ];
+				}
 			}
 		}
 
 		return [
-			'pairs'      => array_slice( $pairs, 0, $cap ),
+			'post_type'  => $post_type,
+			'pairs'      => $pairs,
 			'unresolved' => $unresolved,
-			'capped'     => $capped || count( $pairs ) > $cap,
+			'capped'     => $capped || $tree['capped'],
 		];
 	}
 
 	/**
 	 * One page of pairs as URLs relative to the home URL.
 	 *
-	 * @param array<int,array<string,mixed>> $blocks   Blocks.
-	 * @param int                            $page     Page number, from 1.
-	 * @param int                            $per_page Pairs per page.
+	 * @param array<string,mixed> $collected From collect_post() or collect_change().
+	 * @param int                 $page      Page number, from 1.
+	 * @param int                 $per_page  Pairs per page.
 	 * @return array{pairs:array<int,array{old:string,new:string}>,unresolved:array<int,array{old:string,reason:string}>,total:int,capped:bool,page:int,pages:int}
 	 */
-	public function page( array $blocks, int $page, int $per_page ): array {
-		$all      = $this->collect( $blocks );
+	public function page( array $collected, int $page, int $per_page ): array {
+		$type     = (string) $collected['post_type'];
 		$per_page = max( 1, $per_page );
-		$total    = count( $all['pairs'] );
+		$total    = count( $collected['pairs'] );
 		$pages    = max( 1, (int) ceil( $total / $per_page ) );
 		$page     = min( max( 1, $page ), $pages );
-		$slice    = array_slice( $all['pairs'], ( $page - 1 ) * $per_page, $per_page );
-		$type     = (string) ( $blocks[0]['post_type'] ?? 'page' );
 
 		return [
-			'pairs'      => $this->urls( $slice, $type ),
+			'pairs'      => $this->urls( array_slice( $collected['pairs'], ( $page - 1 ) * $per_page, $per_page ), $type ),
 			'unresolved' => array_map(
 				static fn( array $row ): array => [
 					'old'    => Paths::relative( Paths::url( $type, $row['old'] ) ),
 					'reason' => $row['reason'],
 				],
-				$all['unresolved']
+				$collected['unresolved']
 			),
 			'total'      => $total,
-			'capped'     => $all['capped'],
+			'capped'     => (bool) $collected['capped'],
 			'page'       => $page,
 			'pages'      => $pages,
 		];
@@ -866,15 +1143,13 @@ final class Pairs {
 	/**
 	 * Every pair as URLs relative to the home URL, for a download.
 	 *
-	 * @param array<int,array<string,mixed>> $blocks Blocks.
+	 * @param array<string,mixed> $collected From collect_post() or collect_change().
 	 * @return array<int,array{old:string,new:string}>
 	 */
-	public function all( array $blocks ): array {
-		$type  = (string) ( $blocks[0]['post_type'] ?? 'page' );
-		$pairs = $this->collect( $blocks )['pairs'];
-		$out   = [];
-		foreach ( array_chunk( $pairs, 100 ) as $chunk ) {
-			foreach ( $this->urls( $chunk, $type ) as $row ) {
+	public function all( array $collected ): array {
+		$out = [];
+		foreach ( array_chunk( $collected['pairs'], 100 ) as $chunk ) {
+			foreach ( $this->urls( $chunk, (string) $collected['post_type'] ) as $row ) {
 				$out[] = $row;
 			}
 		}
@@ -884,80 +1159,88 @@ final class Pairs {
 	/**
 	 * The number of pairs, stopping at the cap.
 	 *
-	 * @param array<int,array<string,mixed>> $blocks Blocks.
+	 * @param array<string,mixed> $collected From collect_post() or collect_change().
 	 * @return array{count:int,capped:bool}
 	 */
-	public function count( array $blocks ): array {
-		$all = $this->collect( $blocks );
+	public function count( array $collected ): array {
 		return [
-			'count'  => count( $all['pairs'] ),
-			'capped' => $all['capped'],
+			'count'  => count( $collected['pairs'] ),
+			'capped' => (bool) $collected['capped'],
 		];
 	}
 
 	/**
-	 * Depth-first pairs below a block's children, level queries bounded by the budget.
+	 * Reads the collected pairs from the cache, or builds and caches them.
 	 *
-	 * @param array<int,array{id:int,parent:int,segment:string,status:string}> $children Listed children.
-	 * @param string                                                            $type     Post type name.
-	 * @param string                                                            $old      Old path of the block.
-	 * @param int                                                               $budget   Most pairs to return.
-	 * @return array{pairs:array<int,array{old:string,id:int}>,capped:bool}
+	 * @param string   $key   Source key.
+	 * @param callable $build Builds the collected pairs.
+	 * @return array<string,mixed>
 	 */
-	private function walk( array $children, string $type, string $old, int $budget ): array {
-		global $wpdb;
+	private function cached( string $key, callable $build ): array {
+		$key = 'pairs:' . $key . ':' . wp_cache_get_last_changed( 'posts' );
+		$hit = wp_cache_get( $key, Ledger::CACHE_GROUP );
+		if ( is_array( $hit ) ) {
+			return $hit;
+		}
+		$value = $build();
+		// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 5 minutes.
+		wp_cache_set( $key, $value, Ledger::CACHE_GROUP, self::CACHE_TTL );
+		return $value;
+	}
 
-		$visited = count( $children );
-		$capped  = $visited > $budget;
-		$tops    = array_slice( $children, 0, $budget );
-		$kids    = [];
-		$level   = array_map( static fn( array $node ): int => (int) $node['id'], $tops );
-		$depth   = 0;
+	/**
+	 * Every block's pages, level by level for all blocks at once, within the budget.
+	 *
+	 * @param array<int,array<string,mixed>> $blocks Blocks to walk, by index.
+	 * @param string                         $type   Post type name.
+	 * @param int                            $cap    Most pages to read.
+	 * @return array{tops:array<int,array<int,array<string,mixed>>>,kids:array<int,array<int,array<string,mixed>>>,capped:bool}
+	 */
+	private function walk( array $blocks, string $type, int $cap ): array {
+		$tops    = [];
+		$froms   = [];
+		$visited = 0;
+		foreach ( $blocks as $index => $block ) {
+			foreach ( (array) $block['children'] as $node ) {
+				$tops[ $index ][] = $node;
+				++$visited;
+			}
+			if ( (int) $block['from'] > 0 ) {
+				$froms[ (int) $block['from'] ] = $index;
+			}
+		}
+		if ( [] !== $froms && $visited <= $cap ) {
+			$rows = Subtree::ordered_children( array_keys( $froms ), $type, $cap + 1 - $visited );
+			foreach ( $rows as $row ) {
+				$tops[ $froms[ (int) $row['post_parent'] ] ][] = self::node( $row, (string) $row['post_name'] );
+			}
+			$visited += count( $rows );
+		}
 
-		while ( [] !== $level && ! $capped && $depth < 50 ) {
+		$kids  = [];
+		$level = [];
+		foreach ( $tops as $nodes ) {
+			foreach ( $nodes as $node ) {
+				$level[] = (int) $node['id'];
+			}
+		}
+		$depth = 0;
+		while ( [] !== $level && $visited <= $cap && $depth < 50 ) {
 			++$depth;
-			$in = implode( ',', $level );
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only; LIMIT bounds the level by what is left of the budget.
-			$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC LIMIT %d", $type, $budget + 1 - $visited ), ARRAY_A );
+			$rows  = Subtree::ordered_children( $level, $type, $cap + 1 - $visited );
 			$level = [];
-			foreach ( (array) $rows as $row ) {
+			foreach ( $rows as $row ) {
 				$node                      = self::node( $row, (string) $row['post_name'] );
 				$kids[ $node['parent'] ][] = $node;
 				$level[]                   = $node['id'];
 			}
-			$visited += count( $level );
-			if ( $visited > $budget ) {
-				$capped = true;
-			}
-		}
-
-		$pairs = [];
-		$found = 0;
-		$stack = array_reverse(
-			array_map(
-				static fn( array $node ): array => [ $node, $old ],
-				$tops
-			)
-		);
-		while ( [] !== $stack && $found < $budget ) {
-			[ $node, $base ] = array_pop( $stack );
-			// Core skips an empty slug when it builds a path, so the old path does too.
-			$path = '' !== $node['segment'] ? $base . '/' . $node['segment'] : $base;
-			if ( 'publish' === $node['status'] ) {
-				$pairs[] = [
-					'old' => $path,
-					'id'  => $node['id'],
-				];
-				++$found;
-			}
-			foreach ( array_reverse( $kids[ $node['id'] ] ?? [] ) as $kid ) {
-				$stack[] = [ $kid, $path ];
-			}
+			$visited += count( $rows );
 		}
 
 		return [
-			'pairs'  => $pairs,
-			'capped' => $capped || [] !== $stack,
+			'tops'   => $tops,
+			'kids'   => $kids,
+			'capped' => $visited > $cap,
 		];
 	}
 
@@ -973,12 +1256,13 @@ final class Pairs {
 
 		$out = [];
 		foreach ( $pairs as $pair ) {
+			$old = Paths::url( $type, $pair['old'] );
 			$new = get_permalink( $pair['id'] );
-			if ( ! is_string( $new ) || '' === $new ) {
+			if ( '' === $old || ! is_string( $new ) || '' === $new ) {
 				continue;
 			}
 			$out[] = [
-				'old' => Paths::relative( Paths::url( $type, $pair['old'] ) ),
+				'old' => Paths::relative( $old ),
 				'new' => Paths::relative( $new ),
 			];
 		}
@@ -986,59 +1270,107 @@ final class Pairs {
 	}
 
 	/**
-	 * Subpages the trash moved up, with the slug each had under the root.
+	 * Statuses of the given posts, read past the object cache. A missing ID was deleted.
 	 *
-	 * @param int $root_id Root in the trash.
-	 * @return array<int,array{id:int,parent:int,segment:string,status:string}>
+	 * @param int[] $ids Post IDs.
+	 * @return array<int,string> Status by ID.
 	 */
-	private static function moved_children( int $root_id ): array {
+	private static function statuses( array $ids ): array {
 		global $wpdb;
 
-		$original = [];
-		foreach ( Markers::rows( Markers::moved_key( $root_id ), Subtree::count_cap() + 1 ) as $row ) {
-			$original[ (int) $row['post_id'] ] = Markers::decode_moved( (string) $row['value'] )['original'];
-		}
-		if ( [] === $original ) {
-			return [];
-		}
+		$in = implode( ',', array_map( 'intval', $ids ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, one per root of the change; a batch may have moved them since.
+		$rows = $wpdb->get_results( "SELECT ID, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} )", ARRAY_A );
 
-		$in = implode( ',', array_keys( $original ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, at most the count cap of them.
-		$rows = $wpdb->get_results( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC", ARRAY_A );
-
-		$children = [];
+		$out = [];
 		foreach ( (array) $rows as $row ) {
-			$slug       = $original[ (int) $row['ID'] ] ?? '';
-			$children[] = self::node( $row, '' !== $slug ? $slug : (string) $row['post_name'] );
+			$out[ (int) $row['ID'] ] = (string) $row['post_status'];
 		}
-		return $children;
+		return $out;
 	}
 
 	/**
-	 * The given posts that are live children of a parent, at their current slugs.
-	 * Used once a deleted root's moved markers are gone.
+	 * Subpages the trash moved up, by root, with the slug each had under it.
 	 *
-	 * @param int[]  $ids       Affected post IDs from the change.
-	 * @param int    $parent_id Parent they moved under, 0 for top level.
-	 * @param string $type      Post type name.
-	 * @return array<int,array{id:int,parent:int,segment:string,status:string}>
+	 * @param int[]  $root_ids Roots in the trash.
+	 * @param string $type     Post type name.
+	 * @return array<int,array<int,array{id:int,parent:int,segment:string,status:string}>>
 	 */
-	private static function children_among( array $ids, int $parent_id, string $type ): array {
+	private static function moved_children( array $root_ids, string $type ): array {
 		global $wpdb;
 
-		$ids = array_values( array_filter( $ids ) );
-		if ( [] === $ids ) {
+		if ( [] === $root_ids ) {
 			return [];
 		}
-		$in = implode( ',', $ids );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, at most Change_Log::MAX_IDS of them.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_parent = %d AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC", $parent_id, $type ), ARRAY_A );
-
-		$children = [];
-		foreach ( (array) $rows as $row ) {
-			$children[] = self::node( $row, (string) $row['post_name'] );
+		$keys = [];
+		foreach ( $root_ids as $root_id ) {
+			$keys[ Markers::moved_key( (int) $root_id ) ] = (int) $root_id;
 		}
-		return $children;
+		$placeholders = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Range on the meta_key index, one placeholder per key, bounded by LIMIT.
+		$markers = $wpdb->get_results( $wpdb->prepare( "SELECT meta_key, post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ( {$placeholders} ) LIMIT %d", ...array_merge( array_keys( $keys ), [ Subtree::count_cap() + 1 ] ) ), ARRAY_A );
+
+		$root_of  = [];
+		$original = [];
+		foreach ( (array) $markers as $marker ) {
+			$id              = (int) $marker['post_id'];
+			$root_of[ $id ]  = $keys[ (string) $marker['meta_key'] ];
+			$original[ $id ] = Markers::decode_moved( (string) $marker['meta_value'] )['original'];
+		}
+		if ( [] === $root_of ) {
+			return [];
+		}
+
+		$out = [];
+		foreach ( self::rows( array_keys( $root_of ), $type ) as $row ) {
+			$id                       = (int) $row['ID'];
+			$slug                     = '' !== $original[ $id ] ? $original[ $id ] : (string) $row['post_name'];
+			$out[ $root_of[ $id ] ][] = self::node( $row, $slug );
+		}
+		return $out;
+	}
+
+	/**
+	 * The subpages each deleted root's entry kept, by root, where they still live under its target.
+	 *
+	 * @param array<int,array<string,mixed>> $roots Root entries of deleted roots, by root ID.
+	 * @param string                         $type  Post type name.
+	 * @return array<int,array<int,array{id:int,parent:int,segment:string,status:string}>>
+	 */
+	private static function kept_children( array $roots, string $type ): array {
+		$owner = [];
+		foreach ( $roots as $root_id => $root ) {
+			foreach ( (array) ( $root['ids'] ?? [] ) as $id ) {
+				$owner[ (int) $id ] = (int) $root_id;
+			}
+		}
+		if ( [] === $owner ) {
+			return [];
+		}
+
+		$out = [];
+		foreach ( self::rows( array_keys( $owner ), $type ) as $row ) {
+			$root_id = $owner[ (int) $row['ID'] ];
+			if ( (int) $row['post_parent'] === (int) $roots[ $root_id ]['to'] ) {
+				$out[ $root_id ][] = self::node( $row, (string) $row['post_name'] );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Live posts of a type among the given IDs, in menu order then title.
+	 *
+	 * @param int[]  $ids  Post IDs, at most the count cap plus one.
+	 * @param string $type Post type name.
+	 * @return array<int,array<string,string>>
+	 */
+	private static function rows( array $ids, string $type ): array {
+		global $wpdb;
+
+		$in = implode( ',', array_map( 'intval', $ids ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, bounded by the cap; a primary-key range.
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC", $type ), ARRAY_A );
 	}
 
 	/**
@@ -1295,10 +1627,12 @@ git commit -m "feat: CSV of redirect pairs in import layouts"
 - Test: `tests/phpunit/ListTableTest.php`
 
 **Interfaces:**
-- Consumes: Task 1's `Subtree::child_counts()` and `Subtree::descendant_ids()`; core's `_draft_or_post_title()` (loaded on list screens and in the Quick Edit Ajax save).
-- Produces: `Admin\List_Table` with `QUERY_VAR = 'hierarchy_guard_under'`, `COLUMN = 'hierarchy_guard'`, `static filter_url( string $post_type, int $post_id ): string`, `static under(): int`, and hooks: `hook_types()` on `admin_init` (column filters per supported type), `row_actions()` on `page_row_actions`, `filter_request()` on `request`, `filter_controls()` on `restrict_manage_posts`.
-- Produces: each cell prints `<span class="hierarchy-guard-cell" data-id data-children data-status>`. `data-children` is the live child count up to the cap plus one; the list-table script (Task 12) reads it to decide whether a Trash link needs the dialog.
-- Produces: the filter prints `<input type="hidden" name="hierarchy_guard_under">` and `<span class="hierarchy-guard-under">Subpages of {ancestors} › <strong>{page}</strong> · Clear</span>` above the table; Task 12 moves the span beside the heading.
+- Consumes: Task 1's `Subtree::child_counts()`, `Subtree::descendant_ids()` and `Subtree::format_count()`; core's `_draft_or_post_title()` (loaded on list screens and in the Quick Edit Ajax save).
+- Produces: `Admin\List_Table` with `QUERY_VAR = 'hierarchy_guard_under'`, `COLUMN = 'hierarchy_guard'`, `SCRIPT = 'hierarchy_guard_list_script'`, `static filter_url( string $post_type, int $post_id ): string`, `static under(): int`, and hooks: `hook_types()` on `admin_init` (column filters per supported type), `row_actions()` on `page_row_actions`, `filter_request()` on `request`, `filter_controls()` on `restrict_manage_posts`.
+- Produces: each cell prints `<span class="hierarchy-guard-cell" data-id data-children data-status>`, with a screen-reader "Parent:" before the parent, `aria-hidden` separators and an `aria-label` on the count link. `data-children` is the live child count up to the cap plus one; the list-table script (Task 12) reads it to decide whether a Trash link needs the dialog.
+- Produces: the filter prints `<input type="hidden" name="hierarchy_guard_under">` and `<span class="hierarchy-guard-under">Subpages of {ancestors} › <strong>{page}</strong> · Show all pages</span>` above the table; Task 12 moves the span beside the heading. A root the user may not `read_post` is ignored.
+- Produces: the action `hierarchy_guard_list_script`, fired once when the screen prints something the list-table script acts on (a row with subpages, the breadcrumb). Task 8's notices fire it too, and Task 10's `Assets` enqueues the script only then, so a Pages list without parents never loads React or the components.
+- Counting: core's indented tree mode is counted from its own rows without a query, and a row it doesn't list counts 0. Otherwise the rows core shows on this page are counted in one statement (a search in tree mode is sliced by `paged`, as core slices it), and their parents, which the column prints, are primed in one more.
 
 Hooking the column on `admin_init` rather than `load-edit.php` matters: core re-renders a row after a Quick Edit save in `admin-ajax.php`, which never fires `load-edit.php`.
 
@@ -1428,7 +1762,8 @@ final class ListTableTest extends WP_UnitTestCase {
 		$cell = $this->cell( $this->ids['about'] );
 
 		$this->assertStringContainsString( 'data-children="2"', $cell );
-		$this->assertStringContainsString( '>Company</a> · <a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '">2 subpages</a>', $cell );
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent: </span><a href="', $cell );
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> · </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '" aria-label="View the 2 subpages of “About”">2 subpages</a>', $cell );
 	}
 
 	public function test_a_cell_without_subpages_shows_only_the_parent(): void {
@@ -1571,8 +1906,8 @@ final class ListTableTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 
 		$this->assertStringContainsString( '<input type="hidden" name="hierarchy_guard_under" value="' . $this->ids['team'] . '">', $html );
-		$this->assertStringContainsString( 'Subpages of <a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['company'] ) ) . '">Company</a> › <a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '">About</a> › <strong>Team</strong>', $html );
-		$this->assertStringContainsString( '>Clear</a>', $html );
+		$this->assertStringContainsString( 'Subpages of <a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['company'] ) ) . '">Company</a><span aria-hidden="true"> › </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '">About</a><span aria-hidden="true"> › </span><strong>Team</strong>', $html );
+		$this->assertStringContainsString( '>Show all pages</a>', $html );
 
 		ob_start();
 		$this->table->filter_controls( 'page', 'bottom' );
@@ -1591,6 +1926,79 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertEqualSets( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ) );
 		$this->assertNotSame( 'menu_order title', $GLOBALS['wp_query']->query['orderby'] );
 		$_GET = [];
+	}
+
+	public function test_a_flat_screen_loads_the_rows_parents_in_one_query(): void {
+		$this->screen_rows( [ $this->ids['history'], $this->ids['leadership'] ] );
+		// Their parents, About and Team, are not rows on this screen.
+		clean_post_cache( $this->ids['about'] );
+		clean_post_cache( $this->ids['team'] );
+
+		$queries = get_num_queries();
+		$this->cell( $this->ids['history'] );
+		$this->cell( $this->ids['leadership'] );
+
+		$this->assertSame( 2, get_num_queries() - $queries, 'The counts, then every parent the column prints, not one query per parent.' );
+	}
+
+	public function test_page_two_of_a_search_counts_the_rows_it_shows(): void {
+		update_user_option( get_current_user_id(), 'edit_page_per_page', 2 );
+		$query        = new WP_Query();
+		$query->query = [
+			'fields' => 'id=>parent',
+			's'      => 'a',
+		];
+		$query->set( 'paged', 2 );
+		$query->posts        = array_map(
+			fn( string $slug ) => (object) [
+				'ID'          => $this->ids[ $slug ],
+				'post_parent' => (int) get_post_field( 'post_parent', $this->ids[ $slug ] ),
+			],
+			[ 'company', 'history', 'about', 'team' ]
+		);
+		$GLOBALS['wp_query'] = $query;
+
+		$queries = get_num_queries();
+		$cells   = [ $this->cell( $this->ids['about'] ), $this->cell( $this->ids['team'] ) ];
+
+		$this->assertLessThanOrEqual( 2, get_num_queries() - $queries );
+		$this->assertStringContainsString( 'data-children="2"', $cells[0] );
+		$this->assertStringContainsString( 'data-children="1"', $cells[1] );
+	}
+
+	public function test_a_page_the_user_cannot_read_is_not_a_filter(): void {
+		$private = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $private ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $private === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$_GET[ List_Table::QUERY_VAR ] = (string) $private;
+
+		$this->assertSame( [ 'post_type' => 'page' ], $this->table->filter_request( [ 'post_type' => 'page' ] ) );
+		ob_start();
+		$this->table->filter_controls( 'page', 'top' );
+		$this->assertSame( '', (string) ob_get_clean() );
+	}
+
+	public function test_the_list_script_is_asked_for_once_when_a_row_has_subpages(): void {
+		$asked = 0;
+		add_action(
+			'hierarchy_guard_list_script',
+			static function () use ( &$asked ): void {
+				++$asked;
+			}
+		);
+
+		$this->cell( $this->ids['leadership'] );
+		$this->assertSame( 0, $asked, 'No subpages, nothing for the script to do.' );
+
+		$this->cell( $this->ids['about'] );
+		$this->cell( $this->ids['team'] );
+		$this->assertSame( 1, $asked );
 	}
 }
 ```
@@ -1631,6 +2039,7 @@ final class List_Table {
 
 	public const QUERY_VAR = 'hierarchy_guard_under';
 	public const COLUMN    = 'hierarchy_guard';
+	public const SCRIPT    = 'hierarchy_guard_list_script';
 
 	/**
 	 * Live child counts by post ID for the rows on this screen.
@@ -1645,6 +2054,20 @@ final class List_Table {
 	 * @var bool
 	 */
 	private bool $counted = false;
+
+	/**
+	 * Whether the counts come from core's tree, which holds every row of the view.
+	 *
+	 * @var bool
+	 */
+	private bool $tree = false;
+
+	/**
+	 * Whether the list-table script was asked for.
+	 *
+	 * @var bool
+	 */
+	private bool $signalled = false;
 
 	/**
 	 * The subtree filter's walk, once run.
@@ -1739,28 +2162,31 @@ final class List_Table {
 			return;
 		}
 
-		$type     = (string) $post->post_type;
-		$count    = $this->child_count( (int) $post->ID, $type );
-		$cap      = Subtree::count_cap();
-		$parts    = [];
-		$parent   = (int) $post->post_parent;
-		$readable = $parent > 0 ? get_post( $parent ) : null;
+		$type   = (string) $post->post_type;
+		$count  = $this->child_count( (int) $post->ID, $type );
+		$cap    = Subtree::count_cap();
+		$parts  = [];
+		$parent = (int) $post->post_parent;
+		$above  = $parent > 0 ? get_post( $parent ) : null;
 
-		if ( $readable instanceof WP_Post ) {
+		if ( $above instanceof WP_Post ) {
 			$title = _draft_or_post_title( $parent );
 			$link  = get_edit_post_link( $parent );
 			$name  = is_string( $link ) && '' !== $link ? sprintf( '<a href="%s">%s</a>', esc_url( $link ), $title ) : $title;
-			if ( 'trash' === $readable->post_status ) {
+			if ( 'trash' === $above->post_status ) {
 				/* translators: %s: title of a parent page that is in the trash. */
 				$name = sprintf( __( '%s (in the Trash)', 'hierarchy-guard' ), $name );
 			}
-			$parts[] = $name;
+			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent:', 'hierarchy-guard' ) . ' </span>' . $name;
 		}
 		if ( $count > 0 ) {
-			$shown = number_format_i18n( min( $count, $cap ) ) . ( $count > $cap ? '+' : '' );
+			$this->signal();
+			$shown = Subtree::format_count( min( $count, $cap ), $count > $cap );
 			/* translators: %s: number of subpages, such as 3 or 1,000+. */
-			$label   = sprintf( _n( '%s subpage', '%s subpages', min( $count, $cap ), 'hierarchy-guard' ), $shown );
-			$parts[] = sprintf( '<a href="%s">%s</a>', esc_url( self::filter_url( $type, (int) $post->ID ) ), esc_html( $label ) );
+			$label = sprintf( _n( '%s subpage', '%s subpages', min( $count, $cap ), 'hierarchy-guard' ), $shown );
+			/* translators: 1: number of subpages, such as 3 or 1,000+, 2: page title. */
+			$aria    = sprintf( _n( 'View the %1$s subpage of “%2$s”', 'View the %1$s subpages of “%2$s”', min( $count, $cap ), 'hierarchy-guard' ), $shown, _draft_or_post_title( $post ) );
+			$parts[] = sprintf( '<a href="%1$s" aria-label="%2$s">%3$s</a>', esc_url( self::filter_url( $type, (int) $post->ID ) ), esc_attr( $aria ), esc_html( $label ) );
 		}
 
 		printf(
@@ -1768,7 +2194,7 @@ final class List_Table {
 			(int) $post->ID,
 			(int) min( $count, $cap + 1 ),
 			esc_attr( (string) $post->post_status ),
-			[] !== $parts ? implode( ' · ', $parts ) : '<span aria-hidden="true">—</span><span class="screen-reader-text">' . esc_html__( 'Top level, no subpages', 'hierarchy-guard' ) . '</span>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every part was escaped as it was built.
+			[] !== $parts ? implode( '<span aria-hidden="true"> · </span>', $parts ) : '<span aria-hidden="true">—</span><span class="screen-reader-text">' . esc_html__( 'Top level, no subpages', 'hierarchy-guard' ) . '</span>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every part was escaped as it was built.
 		);
 	}
 
@@ -1811,7 +2237,7 @@ final class List_Table {
 		}
 		$root = self::under();
 		$type = (string) ( $vars['post_type'] ?? '' );
-		if ( 0 === $root || ! Post_Types::is_supported( $type ) || get_post_type( $root ) !== $type ) {
+		if ( ! self::is_root( $root, $type ) ) {
 			return $vars;
 		}
 
@@ -1841,13 +2267,16 @@ final class List_Table {
 	public function filter_controls( $post_type, $which = 'top' ): void {
 		$root = self::under();
 		$type = (string) $post_type;
-		if ( 'top' !== $which || 0 === $root || ! Post_Types::is_supported( $type ) || get_post_type( $root ) !== $type ) {
+		if ( 'top' !== $which || ! self::is_root( $root, $type ) ) {
 			return;
 		}
+		$this->signal();
 
 		$crumbs = [];
 		foreach ( array_reverse( get_post_ancestors( $root ) ) as $ancestor_id ) {
-			$crumbs[] = sprintf( '<a href="%s">%s</a>', esc_url( self::filter_url( $type, (int) $ancestor_id ) ), _draft_or_post_title( (int) $ancestor_id ) );
+			$crumbs[] = current_user_can( 'read_post', (int) $ancestor_id )
+				? sprintf( '<a href="%s">%s</a>', esc_url( self::filter_url( $type, (int) $ancestor_id ) ), _draft_or_post_title( (int) $ancestor_id ) )
+				: esc_html__( '(private page)', 'hierarchy-guard' );
 		}
 		$crumbs[] = '<strong>' . _draft_or_post_title( $root ) . '</strong>';
 
@@ -1857,7 +2286,7 @@ final class List_Table {
 		printf( '<input type="hidden" name="%1$s" value="%2$d">', esc_attr( self::QUERY_VAR ), (int) $root );
 		echo '<span class="hierarchy-guard-under">';
 		/* translators: %s: the filtered page, after its ancestors, such as "Company › About". */
-		printf( esc_html__( 'Subpages of %s', 'hierarchy-guard' ), implode( ' › ', $crumbs ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
+		printf( esc_html__( 'Subpages of %s', 'hierarchy-guard' ), implode( '<span aria-hidden="true"> › </span>', $crumbs ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
 		if ( $walk['capped'] ) {
 			echo ' ' . esc_html(
 				sprintf(
@@ -1867,7 +2296,7 @@ final class List_Table {
 				)
 			);
 		}
-		printf( ' · <a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Clear', 'hierarchy-guard' ) );
+		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Show all pages', 'hierarchy-guard' ) );
 		echo '</span>';
 	}
 
@@ -1879,11 +2308,11 @@ final class List_Table {
 	 * @return int Count, up to the cap plus one.
 	 */
 	private function child_count( int $post_id, string $post_type ): int {
-		if ( ! array_key_exists( $post_id, $this->counts ) && ! $this->counted ) {
+		if ( ! $this->counted ) {
 			$this->counted = true;
-			$this->counts += $this->screen_counts( $post_type );
+			$this->counts  = $this->screen_counts( $post_type );
 		}
-		if ( ! array_key_exists( $post_id, $this->counts ) ) {
+		if ( ! array_key_exists( $post_id, $this->counts ) && ! $this->tree ) {
 			// A row the screen query did not return, such as a Quick Edit save over Ajax.
 			$this->counts += Subtree::child_counts( [ $post_id ], $post_type, Subtree::count_cap() + 1 );
 		}
@@ -1891,11 +2320,14 @@ final class List_Table {
 	}
 
 	/**
-	 * Live child counts for the screen's rows.
+	 * Live child counts for the screen's rows, and their parents primed.
 	 *
 	 * In core's indented tree mode the query already holds the ID and parent of
 	 * every page in the view, so children are counted from it without a query.
-	 * Otherwise the rows on this page are counted in one statement.
+	 * Otherwise the rows core shows on this page are counted in one statement,
+	 * and their parents, which the column prints, are loaded in another. A
+	 * search keeps core's tree query but shows one page of it, which is the
+	 * slice counted here.
 	 *
 	 * @param string $post_type Post type name.
 	 * @return array<int,int>
@@ -1907,26 +2339,61 @@ final class List_Table {
 			return [];
 		}
 
-		$ids = [];
-		foreach ( $wp_query->posts as $row ) {
-			if ( is_object( $row ) && isset( $row->ID ) ) {
-				$ids[] = (int) $row->ID;
-			}
-		}
-
-		$tree = 'id=>parent' === ( $wp_query->query['fields'] ?? '' ) && empty( $wp_query->query['s'] );
-		if ( $tree ) {
-			$counts = array_fill_keys( $ids, 0 );
+		$tree_query = 'id=>parent' === ( $wp_query->query['fields'] ?? '' );
+		if ( $tree_query && empty( $wp_query->query['s'] ) ) {
+			$this->tree = true;
+			$counts     = [];
 			foreach ( $wp_query->posts as $row ) {
 				$parent = is_object( $row ) && isset( $row->post_parent ) ? (int) $row->post_parent : 0;
-				if ( $parent > 0 && isset( $counts[ $parent ] ) ) {
-					++$counts[ $parent ];
+				if ( $parent > 0 ) {
+					$counts[ $parent ] = ( $counts[ $parent ] ?? 0 ) + 1;
 				}
 			}
 			return $counts;
 		}
 
-		return Subtree::child_counts( array_slice( $ids, 0, self::per_page( $post_type ) ), $post_type, Subtree::count_cap() + 1 );
+		$per_page = self::per_page( $post_type );
+		$start    = $tree_query ? ( max( 1, (int) $wp_query->get( 'paged' ) ) - 1 ) * $per_page : 0;
+		$shown    = array_slice( array_values( (array) $wp_query->posts ), $start, $per_page );
+		$ids      = [];
+		$parents  = [];
+		foreach ( $shown as $row ) {
+			if ( is_object( $row ) && isset( $row->ID ) ) {
+				$ids[] = (int) $row->ID;
+				if ( ! empty( $row->post_parent ) ) {
+					$parents[] = (int) $row->post_parent;
+				}
+			}
+		}
+		_prime_post_caches( array_values( array_unique( $parents ) ), false, false );
+
+		return Subtree::child_counts( $ids, $post_type, Subtree::count_cap() + 1 );
+	}
+
+	/**
+	 * Whether an ID is a page of this list's type the user may read, so the list can be filtered to it.
+	 *
+	 * @param int    $root_id   Requested page.
+	 * @param string $post_type List's post type.
+	 * @return bool
+	 */
+	private static function is_root( int $root_id, string $post_type ): bool {
+		return $root_id > 0 && Post_Types::is_supported( $post_type ) && get_post_type( $root_id ) === $post_type && current_user_can( 'read_post', $root_id );
+	}
+
+	/**
+	 * Asks once for the list-table script: this screen prints something it acts on.
+	 */
+	private function signal(): void {
+		if ( ! $this->signalled ) {
+			$this->signalled = true;
+			/**
+			 * Fires when the list screen needs the plugin's list-table script.
+			 *
+			 * @internal
+			 */
+			do_action( 'hierarchy_guard_list_script' );
+		}
 	}
 
 	/**
@@ -1996,10 +2463,10 @@ git commit -m "feat: Hierarchy column, View subpages and the subtree filter"
 - Test: `tests/phpunit/HierarchyControllerTest.php`
 
 **Interfaces:**
-- Consumes: Task 1, Task 2's `Pairs::post_block()`, `Pairs::page()`, `Pairs::all()`, Task 3's `Csv`, Task 4's `List_Table::filter_url()`; plan 1's `Ledger::paths_for()`, `Providers::detect()`; plan 2's `Trash_Handler::policy_for()`, `Subtree::count_live_children()`, `Subtree::count_live_descendants()`, `Subtree::nearest_live_ancestor()`.
-- Produces: `Overview` with `CHILDREN_PER_PAGE = 10`, `MAX_OLD_PATHS = 20`, `describe( WP_Post $post, int $children_page = 1 ): array` (keys `id`, `status`, `ancestors` top level first, `children` (the page's readable ones, each with `id`, `title`, `edit_link`, `status`, `status_label`, `children_count`, `children_capped`, `view_link`), `children_total`, `children_capped`, `has_more`, `descendants{count,capped}`, `old_paths` newest first as `{path,url}`, `redirects{serving,provider{name,url,csv}|null}`, `trash_policy`, `trash_fallback`, `trash_to{id,title,edit_link}|null`, `list_url`), `static title( int $post_id ): string` (plain text, "(no title)" when empty), `static ref( int $post_id ): array{id:int,title:string,edit_link:string|null}`.
-- Produces: `REST\Hierarchy_Controller` with `NAMESPACE = 'hierarchy-guard/v1'`, routes `GET posts/(?P<id>\d+)/hierarchy` (`children_page`), `GET posts/(?P<id>\d+)/pairs` (`from` required, `page`, `per_page` ≤ 1,000), `GET posts/(?P<id>\d+)/csv` (`from`, `format`), all behind `can_edit()`. `from` must be one of the post's recorded old paths.
-- Produces: `REST\Csv_Download` with `FLAG = 'X-Hierarchy-Guard-Csv'`, `static response( string $layout, array $pairs ): WP_REST_Response` and `serve()` on `rest_pre_serve_request`, which prints a flagged 200 response's string body (nothing for HEAD) and returns true.
+- Consumes: Task 1's `Subtree::ordered_children()`, Task 2's `Pairs::collect_post()`, `page()` and `all()`, Task 3's `Csv`, Task 4's `List_Table::filter_url()`; plan 1's `Ledger::paths_for()`, `Providers::detect()`; plan 2's `Trash_Handler::policy_for()`, `Subtree::count_live_children()`, `Subtree::count_live_descendants()`, `Subtree::nearest_live_ancestor()`.
+- Produces: `Overview` with `CHILDREN_PER_PAGE = 10`, `MAX_OLD_PATHS = 20`, `describe( WP_Post $post, int $children_page = 1 ): array` (keys `id`, `status`, `ancestors` top level first, `children` (the page's readable ones from the first cap in menu order, each with `id`, `title`, `edit_link`, `status`, `status_label`, `children_count`, `children_capped`, `view_link`), `children_total`, `children_capped`, `has_more`, `descendants{count,capped}`, `old_paths` newest first as `{path,url}` (paths without a URL left out), `redirects{serving,provider{name,url,csv}|null}`, `trash_policy`, `trash_fallback`, `trash_to{id,title,edit_link}|null`, `list_url`), `static title( int $post_id ): string` (plain text, "(no title)" when empty), `static ref( int $post_id ): array{id:int,title:string,edit_link:string|null}` ("(private page)" as the title of a post the user may not `read_post`).
+- Produces: `REST\Hierarchy_Controller` with `NAMESPACE = 'hierarchy-guard/v1'`, routes `GET posts/(?P<id>\d+)/hierarchy` (`children_page`), `GET posts/(?P<id>\d+)/pairs` (`from` required, `page`, `per_page` up to the larger of 1,000 and the filtered cap), `GET posts/(?P<id>\d+)/csv` (`from`, `format`), all behind `can_edit()`. `from` must be one of the post's recorded old paths.
+- Produces: `REST\Csv_Download` with `FLAG = 'X-Hierarchy-Guard-Csv'`, `static response( string $layout, array $pairs ): WP_REST_Response` and `serve()` on `rest_pre_serve_request` at priority 11, after core's CORS headers. It prints a flagged 200 response's string body (nothing for HEAD) and returns true.
 - Produces: `Plugin::register()` creates `$providers`, `$pairs` and `$overview` once; Tasks 6 to 10 pass them on.
 
 - [ ] **Step 1: Write the failing test**
@@ -2249,6 +2716,30 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertFalse( $served );
 	}
+
+	public function test_an_ancestor_the_user_may_not_read_keeps_its_title(): void {
+		$hidden = $this->ids['company'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $hidden === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$data = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data();
+
+		$this->assertSame( [ '(private page)' ], array_column( $data['ancestors'], 'title' ) );
+		$this->assertSame( '(private page)', $data['trash_to']['title'] );
+	}
+
+	public function test_old_paths_without_a_url_are_left_out(): void {
+		$this->rename( $this->ids['about'], 'about-us' );
+		$this->set_permalink_structure( '' );
+
+		$this->assertSame( [], $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['old_paths'] );
+	}
 }
 ```
 
@@ -2371,7 +2862,8 @@ final class Overview {
 	}
 
 	/**
-	 * A short reference to a post.
+	 * A short reference to a post. A post the user may not read keeps its
+	 * title to itself, as core's REST routes do.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return array{id:int,title:string,edit_link:string|null}
@@ -2380,7 +2872,7 @@ final class Overview {
 		$link = get_edit_post_link( $post_id, 'raw' );
 		return [
 			'id'        => $post_id,
-			'title'     => self::title( $post_id ),
+			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : __( '(private page)', 'hierarchy-guard' ),
 			'edit_link' => is_string( $link ) && '' !== $link ? $link : null,
 		];
 	}
@@ -2411,28 +2903,15 @@ final class Overview {
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function children( int $parent_id, string $type, int $page ): array {
-		global $wpdb;
-
 		$cap    = Subtree::count_cap();
 		$offset = ( $page - 1 ) * self::CHILDREN_PER_PAGE;
 		if ( $offset >= $cap ) {
 			return [];
 		}
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Index range on post_parent; the offset stops at the count cap.
-		$ids = array_map(
-			'intval',
-			$wpdb->get_col(
-				$wpdb->prepare(
-					"SELECT ID FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC LIMIT %d OFFSET %d",
-					$parent_id,
-					$type,
-					self::CHILDREN_PER_PAGE,
-					$offset
-				)
-			)
-		);
-		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		// The first $cap children in menu order, read without sorting every child of a large parent.
+		$rows = array_slice( Subtree::ordered_children( [ $parent_id ], $type, $cap ), $offset, self::CHILDREN_PER_PAGE );
+		$ids  = array_map( static fn( array $row ): int => (int) $row['ID'], $rows );
 		_prime_post_caches( $ids, false, false );
 		$counts = Subtree::child_counts( $ids, $type, $cap + 1 );
 
@@ -2462,14 +2941,18 @@ final class Overview {
 	 * @return array<int,array{path:string,url:string}>
 	 */
 	private function old_paths( int $post_id, string $type ): array {
-		$paths = array_slice( array_reverse( $this->ledger->paths_for( $post_id ) ), 0, self::MAX_OLD_PATHS );
-		return array_map(
-			static fn( string $path ): array => [
-				'path' => $path,
-				'url'  => Paths::relative( Paths::url( $type, $path ) ),
-			],
-			$paths
-		);
+		$out = [];
+		foreach ( array_slice( array_reverse( $this->ledger->paths_for( $post_id ) ), 0, self::MAX_OLD_PATHS ) as $path ) {
+			$url = Paths::url( $type, $path );
+			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
+			if ( '' !== $url ) {
+				$out[] = [
+					'path' => $path,
+					'url'  => Paths::relative( $url ),
+				];
+			}
+		}
+		return $out;
 	}
 }
 ```
@@ -2504,10 +2987,10 @@ final class Csv_Download {
 	public const FLAG = 'X-Hierarchy-Guard-Csv';
 
 	/**
-	 * Hooks into core.
+	 * Hooks into core, after core's own CORS headers at priority 10.
 	 */
 	public function register(): void {
-		add_filter( 'rest_pre_serve_request', [ $this, 'serve' ], 10, 3 );
+		add_filter( 'rest_pre_serve_request', [ $this, 'serve' ], 11, 3 );
 	}
 
 	/**
@@ -2676,7 +3159,7 @@ final class Hierarchy_Controller {
 					'per_page' => [
 						'type'    => 'integer',
 						'minimum' => 1,
-						'maximum' => Subtree::COUNT_CAP,
+						'maximum' => max( Subtree::COUNT_CAP, Subtree::count_cap() ),
 						'default' => Pairs::PER_PAGE,
 					],
 				],
@@ -2741,11 +3224,11 @@ final class Hierarchy_Controller {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function pairs( WP_REST_Request $request ) {
-		$blocks = $this->post_blocks( $request );
-		if ( $blocks instanceof WP_Error ) {
-			return $blocks;
+		$collected = $this->collected( $request );
+		if ( $collected instanceof WP_Error ) {
+			return $collected;
 		}
-		return new WP_REST_Response( $this->pairs->page( $blocks, (int) $request['page'], (int) $request['per_page'] ) );
+		return new WP_REST_Response( $this->pairs->page( $collected, (int) $request['page'], (int) $request['per_page'] ) );
 	}
 
 	/**
@@ -2755,26 +3238,26 @@ final class Hierarchy_Controller {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function csv( WP_REST_Request $request ) {
-		$blocks = $this->post_blocks( $request );
-		if ( $blocks instanceof WP_Error ) {
-			return $blocks;
+		$collected = $this->collected( $request );
+		if ( $collected instanceof WP_Error ) {
+			return $collected;
 		}
-		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $blocks ) );
+		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $collected ) );
 	}
 
 	/**
-	 * The pairs block for the request's old path, if it is recorded on the post.
+	 * The pairs behind the request's old path, if it is recorded on the post.
 	 *
 	 * @param WP_REST_Request $request Request.
-	 * @return array<int,array<string,mixed>>|WP_Error
+	 * @return array<string,mixed>|WP_Error
 	 */
-	private function post_blocks( WP_REST_Request $request ) {
+	private function collected( WP_REST_Request $request ) {
 		$post = get_post( (int) $request['id'] );
 		$from = Paths::normalize( (string) $request['from'] );
 		if ( '' === $from || ! in_array( $from, $this->ledger->paths_for( (int) $post->ID ), true ) ) {
 			return new WP_Error( 'hierarchy_guard_unknown_path', __( 'This old URL is not recorded for this page.', 'hierarchy-guard' ), [ 'status' => 404 ] );
 		}
-		return [ Pairs::post_block( $post, $from ) ];
+		return $this->pairs->collect_post( $post, $from );
 	}
 }
 ```
@@ -2838,9 +3321,15 @@ git commit -m "feat: hierarchy REST route, page pairs and CSV downloads"
 - Test: `tests/phpunit/HierarchyControllerTest.php` (tests at the end of the class), `tests/phpunit/TrashChoiceTest.php`
 
 **Interfaces:**
-- Consumes: Task 5's controller and `Overview::title()`, `Overview::ref()`; plan 2's `Operations::threshold()`, `Subtree::live_children()`, `Settings::trash_policy()`, the `hierarchy_guard_trash_policy` filter.
-- Produces: `GET hierarchy-guard/v1/trash-preview?ids[]=…` (at most `MAX_PREVIEW = 50` IDs), answering `{ pages: [ { id, title, path, children, descendants{count,capped}, fallback, to{id,title,edit_link}|null, example{from,to}|null, denied } ], total{count,capped}, policy, cap }`. A page appears only if it has live subpages, isn't in the trash, and the user may `delete_post` it. Every page draws on one shared budget, so a large selection is still one capped walk. `example` uses the lowest-ID subpage. `denied` means the user can't `edit_post` one of the first `Operations::threshold()` direct subpages.
-- Produces: `Admin\Trash_Choice` with `PARAM = 'hierarchy_guard_policy'`, `static chosen( int $post_id ): ?string`, and `filter()` on `hierarchy_guard_trash_policy`.
+- Consumes: Task 5's controller and `Overview::title()`, `Overview::ref()`; plan 2's `Operations::threshold()`, `Subtree::live_children()`, `Settings::trash_policy()`, `Trash_Handler::policy_for()`, the `hierarchy_guard_trash_policy` filter.
+- Produces: `GET hierarchy-guard/v1/trash-preview?ids[]=…`, previewing at most `MAX_PREVIEW = 50` IDs and counting the rest in `more`. It answers `{ pages: [ { id, title, path, policy, children, descendants{count,capped}, fallback, to{id,title,edit_link}|null, example{from,to}|null, denied, denied_trash } ], more, total{count,capped}, policy, cap }`.
+  - A page appears only if it has live subpages, isn't in the trash, and the user may `delete_post` it.
+  - Every page draws on one shared count budget and one shared check budget of `Operations::threshold()` subpages, the most the trash itself moves inline, so a large selection costs no more than one page.
+  - `policy` is the page's own `policy_for()`, and the top-level `policy` is the site default.
+  - `fallback` is true when the page has more subpages than the cap, and null when its count was cut by the shared budget.
+  - `denied` means the user can't `edit_post` a checked subpage, and `denied_trash` that they can't `delete_post` one.
+  - `example` uses the lowest-ID subpage, and `path` is empty without a URL form.
+- Produces: `Admin\Trash_Choice` with `PARAM = 'hierarchy_guard_policy'`, `static chosen( int $post_id ): ?string`, and `filter()` on `hierarchy_guard_trash_policy` at priority 99, so an explicit choice wins over other filters. Bulk requests are read from `action` only, as core's list table does.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2915,6 +3404,68 @@ Append to the class in `tests/phpunit/HierarchyControllerTest.php`:
 		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_data();
 
 		$this->assertSame( [], $data['pages'] );
+	}
+
+	public function test_the_trash_preview_carries_each_page_s_own_policy(): void {
+		$about = $this->ids['about'];
+		add_filter( 'hierarchy_guard_trash_policy', static fn( string $policy, \WP_Post $post ): string => $about === (int) $post->ID ? Settings::POLICY_KEEP : $policy, 10, 2 );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $about, $this->ids['team'] ] ] )->get_data();
+
+		$this->assertSame( [ Settings::POLICY_KEEP, Settings::POLICY_REPARENT ], array_column( $data['pages'], 'policy' ) );
+		$this->assertSame( Settings::POLICY_REPARENT, $data['policy'], 'The site default, for a bulk dialog.' );
+	}
+
+	public function test_the_trash_preview_checks_both_rights(): void {
+		$locked = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+				return 'delete_post' === $cap && isset( $args[0] ) && $locked === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$page = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_data()['pages'][0];
+
+		$this->assertFalse( $page['denied'], 'Team can be moved.' );
+		$this->assertTrue( $page['denied_trash'], 'Team can’t be trashed.' );
+	}
+
+	public function test_the_trash_preview_reports_pages_past_its_limit(): void {
+		$ids = array_merge( [ $this->ids['about'] ], range( 900000, 900050 ) );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => $ids ] )->get_data();
+
+		$this->assertSame( 2, $data['more'] );
+		$this->assertTrue( $data['total']['capped'] );
+	}
+
+	public function test_a_page_counted_past_the_shared_budget_has_an_unknown_fallback(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 3 );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['team'], $this->ids['about'] ] ] )->get_data();
+
+		$this->assertFalse( $data['pages'][0]['fallback'], 'Team was counted in full.' );
+		$this->assertNull( $data['pages'][1]['fallback'], 'About was counted against what was left.' );
+	}
+
+	public function test_the_capability_checks_share_one_batch(): void {
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$locked = $this->ids['leadership'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $locked === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'], $this->ids['team'] ] ] )->get_data();
+
+		$this->assertFalse( $data['pages'][1]['denied'], 'About used the whole batch, so Team’s subpages were not checked.' );
 	}
 ```
 
@@ -3007,8 +3558,7 @@ final class TrashChoiceTest extends WP_UnitTestCase {
 	public function test_the_bulk_form_s_choice_applies_to_the_selected_pages(): void {
 		$GLOBALS['pagenow'] = 'edit.php';
 		$_REQUEST           = [
-			'action'            => '-1',
-			'action2'           => 'trash',
+			'action'            => 'trash',
 			'post'              => [ (string) $this->ids['about'], (string) $this->ids['history'] ],
 			'_wpnonce'          => wp_create_nonce( 'bulk-posts' ),
 			Trash_Choice::PARAM => Settings::POLICY_TRASH_CHILDREN,
@@ -3017,8 +3567,12 @@ final class TrashChoiceTest extends WP_UnitTestCase {
 		$this->assertSame( Settings::POLICY_TRASH_CHILDREN, Trash_Choice::chosen( $this->ids['about'] ) );
 		$this->assertNull( Trash_Choice::chosen( $this->ids['team'] ), 'Not selected.' );
 
-		$_REQUEST['action2'] = 'edit';
+		$_REQUEST['action'] = 'edit';
 		$this->assertNull( Trash_Choice::chosen( $this->ids['about'] ), 'Not a trash.' );
+
+		$_REQUEST['action']  = '-1';
+		$_REQUEST['action2'] = 'trash';
+		$this->assertNull( Trash_Choice::chosen( $this->ids['about'] ), 'Core reads only `action`, so this request trashes nothing.' );
 	}
 
 	public function test_outside_the_two_screens_the_choice_is_ignored(): void {
@@ -3034,6 +3588,13 @@ final class TrashChoiceTest extends WP_UnitTestCase {
 		wp_trash_post( $this->ids['about'] );
 
 		$this->assertSame( $this->ids['about'], (int) get_post_field( 'post_parent', $this->ids['team'] ), 'Kept where it was.' );
+	}
+
+	public function test_an_explicit_choice_wins_over_other_filters(): void {
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_REPARENT );
+		$this->row_request( $this->ids['about'], Settings::POLICY_KEEP );
+
+		$this->assertSame( Settings::POLICY_KEEP, Trash_Handler::policy_for( get_post( $this->ids['about'] ) ) );
 	}
 }
 ```
@@ -3056,6 +3617,7 @@ use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Operations;
+use HierarchyGuard\Trash\Trash_Handler;
 ```
 
 replace:
@@ -3104,7 +3666,6 @@ with:
 							'type'    => 'integer',
 							'minimum' => 1,
 						],
-						'maxItems' => self::MAX_PREVIEW,
 						'required' => true,
 					],
 				],
@@ -3121,11 +3682,11 @@ and replace the `csv()` method:
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function csv( WP_REST_Request $request ) {
-		$blocks = $this->post_blocks( $request );
-		if ( $blocks instanceof WP_Error ) {
-			return $blocks;
+		$collected = $this->collected( $request );
+		if ( $collected instanceof WP_Error ) {
+			return $collected;
 		}
-		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $blocks ) );
+		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $collected ) );
 	}
 ```
 with the same method followed by the two new ones:
@@ -3137,11 +3698,11 @@ with the same method followed by the two new ones:
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function csv( WP_REST_Request $request ) {
-		$blocks = $this->post_blocks( $request );
-		if ( $blocks instanceof WP_Error ) {
-			return $blocks;
+		$collected = $this->collected( $request );
+		if ( $collected instanceof WP_Error ) {
+			return $collected;
 		}
-		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $blocks ) );
+		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $collected ) );
 	}
 
 	/**
@@ -3152,10 +3713,14 @@ with the same method followed by the two new ones:
 	 */
 	public function trash_preview( WP_REST_Request $request ): WP_REST_Response {
 		$cap    = Subtree::count_cap();
-		$ids    = array_slice( array_values( array_unique( array_map( 'absint', (array) $request['ids'] ) ) ), 0, self::MAX_PREVIEW );
+		$ids    = array_values( array_unique( array_map( 'absint', (array) $request['ids'] ) ) );
+		$more   = max( 0, count( $ids ) - self::MAX_PREVIEW );
+		$ids    = array_slice( $ids, 0, self::MAX_PREVIEW );
 		$pages  = [];
 		$total  = 0;
-		$capped = false;
+		$capped = $more > 0;
+		// The trash moves at most one batch inline across every page it trashes; check no more.
+		$checks = Operations::threshold();
 
 		_prime_post_caches( $ids, false, false );
 		foreach ( $ids as $id ) {
@@ -3175,12 +3740,13 @@ with the same method followed by the two new ones:
 			$total      += min( $descendants, $budget );
 			$capped      = $capped || $descendants > $budget;
 
-			$pages[] = $this->preview_page( $post, $children, $descendants, $budget );
+			$pages[] = $this->preview_page( $post, $children, $descendants, $budget, $checks );
 		}
 
 		return new WP_REST_Response(
 			[
 				'pages'  => $pages,
+				'more'   => $more,
 				'total'  => [
 					'count'  => min( $total, $cap ),
 					'capped' => $capped || $total > $cap,
@@ -3198,18 +3764,31 @@ with the same method followed by the two new ones:
 	 * @param int     $children    Live children, up to the cap plus one.
 	 * @param int     $descendants Live descendants, up to the budget plus one.
 	 * @param int     $budget      The cap the descendants were counted against.
+	 * @param int     $checks      Capability checks left for this request; reduced here.
 	 * @return array<string,mixed>
 	 */
-	private function preview_page( WP_Post $post, int $children, int $descendants, int $budget ): array {
+	private function preview_page( WP_Post $post, int $children, int $descendants, int $budget, int &$checks ): array {
 		$id   = (int) $post->ID;
 		$type = (string) $post->post_type;
 		$cap  = Subtree::count_cap();
 		$to   = Subtree::nearest_live_ancestor( $post );
+		$path = Paths::url( $type, Paths::untrashed_uri( $post ) );
+
+		// The trash leaves a subpage the user can't edit (moving) or delete (trashing) where it is.
+		$checked = $checks > 0 ? Subtree::live_children( $id, $type, $checks ) : [];
+		$checks -= count( $checked );
+		_prime_post_caches( $checked, false, false );
+		$denied       = false;
+		$denied_trash = false;
+		foreach ( $checked as $child_id ) {
+			$denied       = $denied || ! current_user_can( 'edit_post', $child_id );
+			$denied_trash = $denied_trash || ! current_user_can( 'delete_post', $child_id );
+		}
 
 		// The first subpage shows what an URL change looks like.
-		$first   = Subtree::live_children( $id, $type, 1 );
+		$first   = [] !== $checked ? [ $checked[0] ] : Subtree::live_children( $id, $type, 1 );
 		$example = null;
-		if ( [] !== $first && '' !== (string) get_option( 'permalink_structure' ) ) {
+		if ( [] !== $first && '' !== $path ) {
 			$slug    = (string) get_post_field( 'post_name', $first[0] );
 			$base    = $to > 0 ? Paths::uri( get_post( $to ) ) . '/' : '';
 			$example = [
@@ -3218,31 +3797,28 @@ with the same method followed by the two new ones:
 			];
 		}
 
-		// Moving a subpage needs the right to edit it; the trash flow leaves the rest in place.
-		// One batch is checked, the most the trash moves in the request itself.
-		$checked = Subtree::live_children( $id, $type, Operations::threshold() );
-		_prime_post_caches( $checked, false, false );
-		$denied = false;
-		foreach ( $checked as $child_id ) {
-			if ( ! current_user_can( 'edit_post', $child_id ) ) {
-				$denied = true;
-				break;
-			}
+		if ( $descendants <= $budget ) {
+			$fallback = $descendants > $cap;
+		} else {
+			// Counted against what was left of the shared budget, so only a full cap can tell.
+			$fallback = $budget >= $cap ? true : null;
 		}
 
 		return [
-			'id'          => $id,
-			'title'       => Overview::title( $id ),
-			'path'        => Paths::relative( Paths::url( $type, Paths::untrashed_uri( $post ) ) ),
-			'children'    => min( $children, $cap ),
-			'descendants' => [
+			'id'           => $id,
+			'title'        => Overview::title( $id ),
+			'path'         => '' !== $path ? Paths::relative( $path ) : '',
+			'policy'       => Trash_Handler::policy_for( $post ),
+			'children'     => min( $children, $cap ),
+			'descendants'  => [
 				'count'  => min( $descendants, $budget ),
 				'capped' => $descendants > $budget,
 			],
-			'fallback'    => $descendants > $cap,
-			'to'          => $to > 0 ? Overview::ref( $to ) : null,
-			'example'     => $example,
-			'denied'      => $denied,
+			'fallback'     => $fallback,
+			'to'           => $to > 0 ? Overview::ref( $to ) : null,
+			'example'      => $example,
+			'denied'       => $denied,
+			'denied_trash' => $denied_trash,
 		];
 	}
 ```
@@ -3278,7 +3854,8 @@ final class Trash_Choice {
 	 * Hooks into core.
 	 */
 	public function register(): void {
-		add_filter( 'hierarchy_guard_trash_policy', [ $this, 'filter' ], 10, 2 );
+		// Late, so an editor's explicit choice wins over other filters.
+		add_filter( 'hierarchy_guard_trash_policy', [ $this, 'filter' ], 99, 2 );
 	}
 
 	/**
@@ -3319,10 +3896,8 @@ final class Trash_Choice {
 			$target = isset( $_REQUEST['post'] ) ? absint( wp_unslash( $_REQUEST['post'] ) ) : 0;
 			$valid  = 'trash' === $action && $target === $post_id && false !== wp_verify_nonce( $nonce, 'trash-post_' . $post_id );
 		} elseif ( 'edit.php' === $page ) {
-			$action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
-			if ( '' === $action || '-1' === $action ) {
-				$action = isset( $_REQUEST['action2'] ) ? sanitize_key( wp_unslash( $_REQUEST['action2'] ) ) : '';
-			}
+			// Core's list table reads only `action`; its script keeps both selects in step.
+			$action  = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
 			$targets = isset( $_REQUEST['post'] ) ? array_map( 'absint', (array) wp_unslash( $_REQUEST['post'] ) ) : [];
 			$valid   = 'trash' === $action && in_array( $post_id, $targets, true ) && false !== wp_verify_nonce( $nonce, 'bulk-posts' );
 		} else {
@@ -3369,7 +3944,7 @@ git commit -m "feat: trash preview and the dialog's chosen policy"
 - Test: `tests/phpunit/ChangesControllerTest.php`
 
 **Interfaces:**
-- Consumes: Task 2's `Pairs::change_blocks()`, `page()`, `all()`; Task 5's `Hierarchy_Controller::NAMESPACE`, `Csv_Download::response()`; plan 2's `Change_Log::latest()`.
+- Consumes: Task 2's `Pairs::collect_change()`, `page()`, `all()`; Task 5's `Hierarchy_Controller::NAMESPACE`, `Csv_Download::response()`; plan 2's `Change_Log::latest()`.
 - Produces: `GET hierarchy-guard/v1/changes/(?P<id>[0-9a-f-]{36})/pairs` (`page`, `per_page` ≤ 1,000) and `…/csv` (`format`), for a logged-in user, answering only for that user's latest change with that ID; otherwise `hierarchy_guard_change_gone` (404).
 
 - [ ] **Step 1: Write the failing test**
@@ -3579,7 +4154,7 @@ final class Changes_Controller {
 					'per_page' => [
 						'type'    => 'integer',
 						'minimum' => 1,
-						'maximum' => Subtree::COUNT_CAP,
+						'maximum' => max( Subtree::COUNT_CAP, Subtree::count_cap() ),
 						'default' => Pairs::PER_PAGE,
 					],
 				],
@@ -3616,7 +4191,7 @@ final class Changes_Controller {
 		if ( $change instanceof WP_Error ) {
 			return $change;
 		}
-		return new WP_REST_Response( $this->pairs->page( Pairs::change_blocks( $change ), (int) $request['page'], (int) $request['per_page'] ) );
+		return new WP_REST_Response( $this->pairs->page( $this->pairs->collect_change( $change ), (int) $request['page'], (int) $request['per_page'] ) );
 	}
 
 	/**
@@ -3630,7 +4205,7 @@ final class Changes_Controller {
 		if ( $change instanceof WP_Error ) {
 			return $change;
 		}
-		return Csv_Download::response( (string) $request['format'], $this->pairs->all( Pairs::change_blocks( $change ) ) );
+		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $this->pairs->collect_change( $change ) ) );
 	}
 
 	/**
@@ -3684,12 +4259,21 @@ git commit -m "feat: pairs and CSV of the user's last trash"
 - Test: `tests/phpunit/NoticesTest.php`, `tests/phpunit/SettingsSectionTest.php`
 
 **Interfaces:**
-- Consumes: Task 2's `Pairs::change_blocks()` and `count()`, Task 3's `Csv::layout()`, Task 5's `Overview::title()` and `Hierarchy_Controller::NAMESPACE`; plan 2's `Change_Log`, `Queue::load()`, and the sentence builders of `Trash_Notice`.
-- Produces: `Admin\Notices` (constructor `Change_Log, Queue, Pairs, Providers`) with `NUDGE_META = 'hierarchy_guard_nudge_dismissed'`, `append()` on `bulk_post_updated_messages` (same matching rules as `Trash_Notice`), `redirects_sentence( array $change ): string` (HTML), `static change_csv_url( string $change_id, string $layout ): string`, `render()` on `admin_notices`, `progress_sentences( string $post_type ): string[]`, `wants_nudge(): bool`, `register_meta()` on `init`, and the unchanged static `sentences( array $change ): string[]`.
-- Produces: the outcome notice's "View redirects" link is `<a href="{CSV download URL}" class="hierarchy-guard-view-redirects" data-change="{change id}">`; without JavaScript it downloads the CSV, and Task 12's script opens the modal instead. The nudge is a dismissible `.hierarchy-guard-nudge` notice.
+- Consumes: Task 2's `Pairs::collect_change()` and `count()`, Task 3's `Csv::layout()`, Task 4's `hierarchy_guard_list_script` action, Task 5's `Overview::title()` and `Hierarchy_Controller::NAMESPACE`; plan 1's `Ledger::KEY_PREFIX`, `ROOT_OPTION`, `CACHE_GROUP`; plan 2's `Change_Log`, `Queue::load()`, and the sentence builders of `Trash_Notice`.
+- Produces: `Admin\Notices` (constructor `Change_Log, Queue, Pairs, Providers`) with `NUDGE_POINTER = 'hierarchy_guard_nudge'`, `MAX_PROGRESS = 3`, `append()` on `bulk_post_updated_messages` (same matching rules as `Trash_Notice`; it marks the change shown and remembers it for the request), `urls_notice( array $change ): ?array{type,message}`, `static change_csv_url( string $change_id, string $layout ): string`, `render()` on `admin_notices`, `progress_sentences( string $post_type ): string[]`, `wants_nudge(): bool`, `static has_old_urls(): bool`, and the unchanged static `sentences( array $change ): string[]`.
+- Produces: the URLs notice carries `<a href="{CSV download URL}" class="hierarchy-guard-view-redirects" data-change="{change id}" data-label="View redirects (N)" download>Download redirects (CSV)</a>`. Without JavaScript it downloads the CSV; Task 12's script swaps it for a "View redirects (N)" button that opens the modal. The nudge is a dismissible `.hierarchy-guard-nudge` notice, dismissed into core's `dismissed_wp_pointers` user meta.
 - Produces: `Settings_Section::redirects_url(): string` and `Settings_Section::policy_url(): string`.
 
-What changes for the editor: when one page was trashed or restored, core's "1 page moved to the Trash." becomes "“About” moved to the Trash." After the subpage sentences comes one sentence about the URLs, by what handles them: "The 3 old URLs redirect to their new pages." with built-in redirects on; "3 URLs changed. View redirects (3)" with a redirect plugin; "3 old URLs now show “Page not found”. Turn on redirects · View redirects (3)" with neither. Core's Undo link stays last. The sentence for subpages a restore couldn't bring back now covers ones another plugin kept in the trash too.
+What changes for the editor:
+- When one page was trashed or restored, core's "1 page moved to the Trash." becomes "“About” moved to the Trash.", followed by the subpage sentences. Core's Undo link stays last.
+- The URLs the trash changed get a notice of their own, below core's, styled by what handles them:
+  - a success notice, "3 old URLs now redirect to their new pages.", with built-in redirects on;
+  - an info notice, "3 URLs changed. Add their redirects in Redirection. View redirects (3)", with a redirect plugin;
+  - a warning notice, "3 old URLs now show “Page not found”. Set up redirects · View redirects (3)", with neither.
+- On that load nothing else is printed.
+- On later loads, background progress is listed for the first three running pages, with one sentence for the rest.
+- The nudge waits until the ledger holds an old URL.
+- The sentence for subpages a restore couldn't bring back now also covers ones another plugin kept in the trash.
 
 - [ ] **Step 1: Move the files**
 
@@ -3773,6 +4357,40 @@ final class NoticesTest extends WP_UnitTestCase {
 		wp_trash_post( $this->ids['about'] );
 		$_REQUEST['ids'] = (string) $this->ids['about'];
 		return sprintf( $this->notice->append( $this->core_messages(), [ 'trashed' => 1 ] )['page']['trashed'], '1' );
+	}
+
+	/**
+	 * The URLs notice for the admin's last change.
+	 *
+	 * @return array{type:string,message:string}|null
+	 */
+	private function urls_notice(): ?array {
+		return $this->notice->urls_notice( $this->log->latest( $this->admin ) );
+	}
+
+	/**
+	 * What render() prints on the Pages list.
+	 *
+	 * @return string
+	 */
+	private function rendered(): string {
+		set_current_screen( 'edit-page' );
+		ob_start();
+		$this->notice->render();
+		return (string) ob_get_clean();
+	}
+
+	/**
+	 * Records an old URL, so the ledger is not empty.
+	 */
+	private function record_an_old_url(): void {
+		$this->set_permalink_structure( '/%postname%/' );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['history'],
+				'post_name' => 'our-history',
+			]
+		);
 	}
 
 	/**
@@ -4082,41 +4700,72 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertSame( [ '25 subpages moved to the Trash too.', 'The rest are still going to the Trash in the background.' ], Notices::sentences( $change ) );
 	}
 
-	public function test_with_a_redirect_plugin_the_notice_counts_the_changed_urls_and_links_the_redirects(): void {
+	public function test_core_s_notice_keeps_what_happened_and_leaves_the_urls_to_their_own_notice(): void {
+		$text = $this->trash_about();
+
+		$this->assertSame( '“About” moved to the Trash. 2 subpages moved up under “Company”.', $text, 'Core adds Undo after it.' );
+	}
+
+	public function test_with_a_redirect_plugin_the_urls_notice_says_where_to_add_them(): void {
 		$this->with_provider();
+		$this->trash_about();
 
-		$text = $this->trash_about();
+		$notice = $this->urls_notice();
 
-		$this->assertStringStartsWith( '“About” moved to the Trash. 2 subpages moved up under “Company”. 3 URLs changed. <a href="', $text );
-		$this->assertStringContainsString( 'class="hierarchy-guard-view-redirects" data-change="', $text );
-		$this->assertStringContainsString( '>View redirects (3)</a>', $text );
-		$this->assertStringContainsString( 'format=redirection', $text, 'The link downloads the provider’s layout without JavaScript.' );
+		$this->assertSame( 'info', $notice['type'] );
+		$this->assertStringStartsWith( '3 URLs changed. Add their redirects in Redirection. <a href="', $notice['message'] );
+		$this->assertStringContainsString( 'class="hierarchy-guard-view-redirects" data-change="', $notice['message'] );
+		$this->assertStringContainsString( 'data-label="View redirects (3)" download>Download redirects (CSV)</a>', $notice['message'], 'Without JavaScript it downloads the CSV.' );
+		$this->assertStringContainsString( 'format=redirection', $notice['message'] );
 	}
 
-	public function test_with_built_in_redirects_on_the_notice_says_the_old_urls_redirect(): void {
+	public function test_with_built_in_redirects_on_the_urls_notice_is_a_success(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->trash_about();
 
-		$text = $this->trash_about();
-
-		$this->assertStringEndsWith( 'The 3 old URLs redirect to their new pages.', $text );
-		$this->assertStringNotContainsString( 'View redirects', $text );
+		$this->assertSame(
+			[
+				'type'    => 'success',
+				'message' => '3 old URLs now redirect to their new pages.',
+			],
+			$this->urls_notice()
+		);
 	}
 
-	public function test_with_nothing_handling_redirects_the_notice_warns_and_offers_to_turn_them_on(): void {
-		$text = $this->trash_about();
+	public function test_with_nothing_handling_redirects_the_urls_notice_is_a_warning(): void {
+		$this->trash_about();
 
-		$this->assertStringContainsString( '3 old URLs now show “Page not found”. <a href="' . esc_url( admin_url( 'options-writing.php#hierarchy-guard-redirects' ) ) . '">Turn on redirects</a> · <a href="', $text );
-		$this->assertStringContainsString( 'format=generic', $text );
+		$notice = $this->urls_notice();
+
+		$this->assertSame( 'warning', $notice['type'] );
+		$this->assertStringStartsWith( '3 old URLs now show “Page not found”. <a href="' . esc_url( admin_url( 'options-writing.php#hierarchy-guard-redirects' ) ) . '">Set up redirects</a><span aria-hidden="true"> ·</span> <a href="', $notice['message'] );
+		$this->assertStringContainsString( 'format=generic', $notice['message'] );
 	}
 
 	public function test_an_editor_is_not_offered_the_settings(): void {
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'editor' ] ) );
 		$this->admin = get_current_user_id();
+		$this->trash_about();
 
-		$text = $this->trash_about();
+		$notice = $this->urls_notice();
 
-		$this->assertStringNotContainsString( 'Turn on redirects', $text );
-		$this->assertStringContainsString( 'View redirects (3)', $text );
+		$this->assertStringNotContainsString( 'Set up redirects', $notice['message'] );
+		$this->assertStringContainsString( 'View redirects (3)', $notice['message'] );
+	}
+
+	public function test_a_restore_or_a_trash_without_moved_subpages_has_no_urls_notice(): void {
+		$this->assertNull( $this->notice->urls_notice( $this->change( 'restore', [ $this->about( [ 'counts' => [ 'moved' => 2 ] ] ) ] ) ) );
+	}
+
+	public function test_the_landing_load_prints_the_urls_notice_and_nothing_else(): void {
+		$this->record_an_old_url();
+		$this->trash_about();
+
+		$html = $this->rendered();
+
+		$this->assertStringContainsString( 'notice-warning', $html );
+		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
+		$this->assertStringNotContainsString( 'hierarchy-guard-nudge', $html, 'The URLs notice already offers to set up redirects.' );
 	}
 
 	public function test_a_root_title_with_a_percent_sign_survives_core_s_sprintf(): void {
@@ -4214,12 +4863,15 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertSame( [], $this->notice->progress_sentences( 'page' ), 'No job in the queue.' );
 	}
 
-	public function test_the_nudge_needs_an_admin_with_nothing_handling_redirects(): void {
+	public function test_the_nudge_needs_old_urls_and_an_admin_with_nothing_handling_redirects(): void {
+		$this->assertFalse( $this->notice->wants_nudge(), 'Nothing recorded yet.' );
+
+		$this->record_an_old_url();
 		$this->assertTrue( $this->notice->wants_nudge() );
 
-		update_user_meta( $this->admin, Notices::NUDGE_META, true );
-		$this->assertFalse( $this->notice->wants_nudge(), 'Dismissed.' );
-		delete_user_meta( $this->admin, Notices::NUDGE_META );
+		update_user_meta( $this->admin, 'dismissed_wp_pointers', 'wp496_privacy,' . Notices::NUDGE_POINTER );
+		$this->assertFalse( $this->notice->wants_nudge(), 'Dismissed, through core’s pointer store.' );
+		delete_user_meta( $this->admin, 'dismissed_wp_pointers' );
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->assertFalse( $this->notice->wants_nudge(), 'Built-in redirects are on.' );
@@ -4230,18 +4882,19 @@ final class NoticesTest extends WP_UnitTestCase {
 	}
 
 	public function test_an_editor_gets_no_nudge(): void {
+		$this->record_an_old_url();
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'editor' ] ) );
 
 		$this->assertFalse( $this->notice->wants_nudge() );
 	}
 
 	public function test_the_nudge_is_printed_on_a_supported_list_screen_only(): void {
-		set_current_screen( 'edit-page' );
-		ob_start();
-		$this->notice->render();
-		$html = (string) ob_get_clean();
+		$this->record_an_old_url();
+
+		$html = $this->rendered();
 		$this->assertStringContainsString( 'hierarchy-guard-nudge', $html );
 		$this->assertStringContainsString( 'is-dismissible', $html );
+		$this->assertStringContainsString( 'Set up redirects', $html );
 
 		set_current_screen( 'dashboard' );
 		ob_start();
@@ -4249,27 +4902,37 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertSame( '', (string) ob_get_clean() );
 	}
 
-	public function test_the_nudge_setting_is_writable_through_the_users_route(): void {
-		$this->notice->register_meta();
-		$meta = get_registered_meta_keys( 'user' );
-
-		$this->assertArrayHasKey( Notices::NUDGE_META, $meta );
-		$this->assertTrue( (bool) $meta[ Notices::NUDGE_META ]['show_in_rest'] );
-		$this->assertNotFalse( has_action( 'init', [ $this->plugin_notices(), 'register_meta' ] ), 'The plugin registers it on init.' );
-		unregister_meta_key( 'user', Notices::NUDGE_META );
-	}
-
-	/**
-	 * The Notices instance the plugin registered.
-	 */
-	private function plugin_notices(): Notices {
-		global $wp_filter;
-		foreach ( $wp_filter['bulk_post_updated_messages']->callbacks[10] ?? [] as $callback ) {
-			if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Notices ) {
-				return $callback['function'][0];
-			}
+	public function test_progress_lists_three_pages_then_the_rest(): void {
+		$queue   = new Queue();
+		$entries = [];
+		foreach ( [ 'one', 'two', 'three', 'four', 'five' ] as $slug ) {
+			$entries[] = [
+				'root'   => $this->page( $slug ),
+				'to'     => 0,
+				'policy' => Settings::POLICY_REPARENT,
+				'job'    => true,
+			];
 		}
-		$this->fail( 'The plugin registered no Notices instance.' );
+		$id = $this->change( 'trash', $entries )['id'];
+		foreach ( $entries as $entry ) {
+			$queue->save(
+				[
+					'root'   => $entry['root'],
+					'change' => $id,
+					'total'  => 10,
+					'counts' => array_merge( Change_Log::empty_counts(), [ 'moved' => 4 ] ),
+				]
+			);
+		}
+
+		$sentences = $this->notice->progress_sentences( 'page' );
+
+		$this->assertCount( 4, $sentences );
+		$this->assertSame( 'Still moving the subpages of “One” in the background: 4 of 10 done.', $sentences[0] );
+		$this->assertSame( 'The subpages of 2 more pages are still being worked on in the background.', $sentences[3] );
+		foreach ( $entries as $entry ) {
+			$queue->delete( $entry['root'] );
+		}
 	}
 }
 ```
@@ -4370,6 +5033,7 @@ namespace HierarchyGuard\Admin;
 
 use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Export\Csv;
+use HierarchyGuard\Ledger;
 use HierarchyGuard\Overview;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\REST\Hierarchy_Controller;
@@ -4382,14 +5046,15 @@ use WP_Screen;
 
 /**
  * Trashing from the editor or the Pages list lands on core's "moved to the
- * Trash" notice. This rewrites it once per change into the outcome: what
- * happened to the subpages, how many URLs changed, and what handles them,
- * with core's own Undo link kept at the end. While a background batch runs,
- * the list screen says how far it got.
+ * Trash" notice. This adds what happened to the subpages to it once per
+ * change, keeping core's Undo link last, and prints the URLs the trash
+ * changed as a notice of its own, styled by what handles them. While a
+ * background batch runs, the list screen says how far it got.
  */
 final class Notices {
 
-	public const NUDGE_META = 'hierarchy_guard_nudge_dismissed';
+	public const NUDGE_POINTER = 'hierarchy_guard_nudge';
+	public const MAX_PROGRESS  = 3;
 
 	/**
 	 * Change log.
@@ -4420,11 +5085,11 @@ final class Notices {
 	private Providers $providers;
 
 	/**
-	 * Whether this request already showed the outcome notice.
+	 * The change core's notice showed on this request, if any.
 	 *
-	 * @var bool
+	 * @var array<string,mixed>|null
 	 */
-	private bool $shown_now = false;
+	private ?array $shown = null;
 
 	/**
 	 * Constructor.
@@ -4447,28 +5112,10 @@ final class Notices {
 	public function register(): void {
 		add_filter( 'bulk_post_updated_messages', [ $this, 'append' ], 10, 2 );
 		add_action( 'admin_notices', [ $this, 'render' ] );
-		add_action( 'init', [ $this, 'register_meta' ] );
 	}
 
 	/**
-	 * The user setting that hides the redirects nudge, writable through the REST users route.
-	 */
-	public function register_meta(): void {
-		register_meta(
-			'user',
-			self::NUDGE_META,
-			[
-				'type'          => 'boolean',
-				'single'        => true,
-				'default'       => false,
-				'show_in_rest'  => true,
-				'auth_callback' => static fn(): bool => current_user_can( 'manage_options' ),
-			]
-		);
-	}
-
-	/**
-	 * Rewrites core's trashed or untrashed message into the outcome notice.
+	 * Adds what happened to the subpages to core's trashed or untrashed message.
 	 *
 	 * @param mixed $messages Messages by post type, then by action.
 	 * @param mixed $counts   Counts by action.
@@ -4497,11 +5144,10 @@ final class Notices {
 			return $messages;
 		}
 
+		$this->log->mark_shown( $user, (string) $change['id'] );
+		$this->shown = $change;
+
 		$extra = array_map( 'esc_html', self::sentences( $change ) );
-		$urls  = 'trash' === $change['action'] ? $this->redirects_sentence( $change ) : '';
-		if ( '' !== $urls ) {
-			$extra[] = $urls;
-		}
 		if ( [] === $extra ) {
 			return $messages;
 		}
@@ -4520,52 +5166,69 @@ final class Notices {
 		}
 
 		$messages[ $key ][ $slot ] = $first . ' ' . str_replace( '%', '%%', implode( ' ', $extra ) );
-		$this->log->mark_shown( $user, (string) $change['id'] );
-		$this->shown_now = true;
 
 		return $messages;
 	}
 
 	/**
-	 * The sentence about the URLs a trash changed and what handles them, with its links.
+	 * The notice about the URLs a trash changed: its type and its HTML.
 	 *
 	 * @param array<string,mixed> $change A trash change.
-	 * @return string HTML, or an empty string when no URL changed.
+	 * @return array{type:string,message:string}|null Null when no URL changed.
 	 */
-	public function redirects_sentence( array $change ): string {
-		$count = $this->pairs->count( Pairs::change_blocks( $change ) );
+	public function urls_notice( array $change ): ?array {
+		if ( 'trash' !== ( $change['action'] ?? '' ) ) {
+			return null;
+		}
+		$count = $this->pairs->count( $this->pairs->collect_change( $change ) );
 		$n     = $count['count'];
 		if ( 0 === $n ) {
-			return '';
+			return null;
 		}
-		$shown = number_format_i18n( $n ) . ( $count['capped'] ? '+' : '' );
+		$shown = Subtree::format_count( $n, $count['capped'] );
 
 		if ( Settings::serve_redirects() ) {
-			/* translators: %s: number of old URLs, such as 12 or 1,000+. */
-			return esc_html( sprintf( _n( 'The %s old URL redirects to its new page.', 'The %s old URLs redirect to their new pages.', $n, 'hierarchy-guard' ), $shown ) );
+			return [
+				'type'    => 'success',
+				/* translators: %s: number of old URLs, such as 12 or 1,000+. */
+				'message' => esc_html( sprintf( _n( '%s old URL now redirects to its new page.', '%s old URLs now redirect to their new pages.', $n, 'hierarchy-guard' ), $shown ) ),
+			];
 		}
 
 		$provider = $this->providers->detect();
 		$layout   = null !== $provider ? Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ) : 'generic';
 		$view     = sprintf(
-			'<a href="%1$s" class="hierarchy-guard-view-redirects" data-change="%2$s">%3$s</a>',
+			'<a href="%1$s" class="hierarchy-guard-view-redirects" data-change="%2$s" data-label="%3$s" download>%4$s</a>',
 			esc_url( self::change_csv_url( (string) $change['id'], $layout ) ),
 			esc_attr( (string) $change['id'] ),
-			/* translators: %s: number of old URLs, such as 12 or 1,000+. */
-			esc_html( sprintf( __( 'View redirects (%s)', 'hierarchy-guard' ), $shown ) )
+			/* translators: %s: number of redirects, such as 12 or 1,000+. */
+			esc_attr( sprintf( __( 'View redirects (%s)', 'hierarchy-guard' ), $shown ) ),
+			esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' )
 		);
+		do_action( 'hierarchy_guard_list_script' );
 
 		if ( null !== $provider ) {
-			/* translators: %s: number of URLs, such as 12 or 1,000+. */
-			return esc_html( sprintf( _n( '%s URL changed.', '%s URLs changed.', $n, 'hierarchy-guard' ), $shown ) ) . ' ' . $view;
+			$name = trim( (string) ( $provider['name'] ?? '' ) );
+			$text = '' !== $name
+				/* translators: 1: number of URLs, such as 12 or 1,000+, 2: name of the redirect plugin. */
+				? sprintf( _n( '%1$s URL changed. Add its redirect in %2$s.', '%1$s URLs changed. Add their redirects in %2$s.', $n, 'hierarchy-guard' ), $shown, $name )
+				/* translators: %s: number of URLs, such as 12 or 1,000+. */
+				: sprintf( _n( '%s URL changed. Add its redirect in your redirect plugin.', '%s URLs changed. Add their redirects in your redirect plugin.', $n, 'hierarchy-guard' ), $shown );
+			return [
+				'type'    => 'info',
+				'message' => esc_html( $text ) . ' ' . $view,
+			];
 		}
 
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
-		$out = esc_html( sprintf( _n( '%s old URL now shows “Page not found”.', '%s old URLs now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) );
+		$message = esc_html( sprintf( _n( '%s old URL now shows “Page not found”.', '%s old URLs now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) );
 		if ( current_user_can( 'manage_options' ) ) {
-			$out .= sprintf( ' <a href="%1$s">%2$s</a> ·', esc_url( Settings_Section::redirects_url() ), esc_html__( 'Turn on redirects', 'hierarchy-guard' ) );
+			$message .= sprintf( ' <a href="%1$s">%2$s</a><span aria-hidden="true"> ·</span>', esc_url( Settings_Section::redirects_url() ), esc_html__( 'Set up redirects', 'hierarchy-guard' ) );
 		}
-		return $out . ' ' . $view;
+		return [
+			'type'    => 'warning',
+			'message' => $message . ' ' . $view,
+		];
 	}
 
 	/**
@@ -4586,11 +5249,27 @@ final class Notices {
 	}
 
 	/**
-	 * Prints the background progress and the redirects nudge on supported list screens.
+	 * Prints the URLs notice, background progress and the redirects nudge on supported list screens.
 	 */
 	public function render(): void {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 		if ( ! $screen instanceof WP_Screen || 'edit' !== $screen->base || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
+			return;
+		}
+
+		if ( null !== $this->shown ) {
+			$notice = $this->urls_notice( $this->shown );
+			if ( null !== $notice ) {
+				wp_admin_notice(
+					$notice['message'],
+					[
+						'type'               => $notice['type'],
+						'dismissible'        => true,
+						'additional_classes' => [ 'hierarchy-guard-urls' ],
+					]
+				);
+			}
+			// The trash notice on this load already says what is still running and what to do.
 			return;
 		}
 
@@ -4605,12 +5284,13 @@ final class Notices {
 		}
 
 		if ( $this->wants_nudge() ) {
+			do_action( 'hierarchy_guard_list_script' );
 			wp_admin_notice(
 				sprintf(
 					'%1$s <a href="%2$s">%3$s</a>',
-					esc_html__( 'Hierarchy Guard records page URL changes, but nothing on this site redirects old URLs yet.', 'hierarchy-guard' ),
+					esc_html__( 'Hierarchy Guard has recorded old page URLs, but nothing on this site redirects them yet.', 'hierarchy-guard' ),
 					esc_url( Settings_Section::redirects_url() ),
-					esc_html__( 'Turn on redirects', 'hierarchy-guard' )
+					esc_html__( 'Set up redirects', 'hierarchy-guard' )
 				),
 				[
 					'type'               => 'info',
@@ -4622,22 +5302,24 @@ final class Notices {
 	}
 
 	/**
-	 * One sentence per root of the user's change whose batch is still running.
+	 * One sentence per root of the user's change whose batch is still running,
+	 * for the first few, then one for the rest.
 	 *
 	 * @param string $post_type List screen's post type.
 	 * @return string[]
 	 */
 	public function progress_sentences( string $post_type ): array {
 		$change = $this->log->latest( get_current_user_id() );
-		if ( $this->shown_now || null === $change || $post_type !== $change['post_type'] ) {
+		if ( null !== $this->shown || null === $change || $post_type !== $change['post_type'] ) {
 			return [];
 		}
 
+		$running = array_values( array_filter( (array) $change['roots'], static fn( array $root ): bool => ! empty( $root['job'] ) ) );
+		$first   = array_slice( $running, 0, self::MAX_PROGRESS );
+		_prime_post_caches( array_map( static fn( array $root ): int => (int) $root['root'], $first ), false, false );
+
 		$out = [];
-		foreach ( (array) $change['roots'] as $root ) {
-			if ( empty( $root['job'] ) ) {
-				continue;
-			}
+		foreach ( $first as $root ) {
 			$job = $this->queue->load( (int) $root['root'] );
 			if ( null === $job || $job['change'] !== $change['id'] ) {
 				continue;
@@ -4668,12 +5350,19 @@ final class Notices {
 					: sprintf( __( 'Still moving the subpages of “%1$s” in the background: %2$s done so far.', 'hierarchy-guard' ), $title, number_format_i18n( $done ) );
 			}
 		}
+
+		$rest = count( $running ) - count( $first );
+		if ( $rest > 0 && [] !== $out ) {
+			/* translators: %s: number of pages. */
+			$out[] = sprintf( _n( 'The subpages of %s more page are still being worked on in the background.', 'The subpages of %s more pages are still being worked on in the background.', $rest, 'hierarchy-guard' ), number_format_i18n( $rest ) );
+		}
 		return $out;
 	}
 
 	/**
-	 * Whether to nudge this user to turn on redirects: nothing on the site
-	 * serves them, the user can change that, and has not dismissed the nudge.
+	 * Whether to nudge this user to turn on redirects: old URLs were recorded,
+	 * nothing on the site serves them, the user can change that, and has not
+	 * dismissed the nudge.
 	 *
 	 * @return bool
 	 */
@@ -4681,7 +5370,33 @@ final class Notices {
 		if ( Settings::serve_redirects() || ! current_user_can( 'manage_options' ) || null !== $this->providers->detect() ) {
 			return false;
 		}
-		return ! get_user_meta( get_current_user_id(), self::NUDGE_META, true );
+		$dismissed = explode( ',', (string) get_user_meta( get_current_user_id(), 'dismissed_wp_pointers', true ) );
+		return ! in_array( self::NUDGE_POINTER, $dismissed, true ) && self::has_old_urls();
+	}
+
+	/**
+	 * Whether the ledger holds any old URL. One index probe, cached until the ledger changes.
+	 *
+	 * @return bool
+	 */
+	public static function has_old_urls(): bool {
+		global $wpdb;
+
+		$key = 'has_old_urls:' . wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+		$hit = wp_cache_get( $key, Ledger::CACHE_GROUP );
+		if ( false !== $hit ) {
+			return (bool) $hit;
+		}
+
+		$roots = get_option( Ledger::ROOT_OPTION, [] );
+		$found = is_array( $roots ) && [] !== array_filter( $roots );
+		if ( ! $found ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- A prefix range on the meta_key index, LIMIT 1, cached below.
+			$found = null !== $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key LIKE %s LIMIT 1", $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%' ) );
+		}
+		wp_cache_set( $key, $found ? 1 : 0, Ledger::CACHE_GROUP, HOUR_IN_SECONDS );
+
+		return $found;
 	}
 
 	/**
@@ -4945,7 +5660,7 @@ git commit -m "feat: outcome notice with redirects, progress and the nudge"
 
 **Interfaces:**
 - Consumes: Task 5's `Overview::describe()`.
-- Produces: `Admin\Meta_Box` with `add()` on `add_meta_boxes` (side, `__back_compat_meta_box` so the block editor shows the panel instead), `render( WP_Post $post )`, `static counts_line( array $data ): string` ("2 direct · 3 in total"), `static trash_sentence( array $data ): string`.
+- Produces: `Admin\Meta_Box` with `add()` on `add_meta_boxes` (side, `__back_compat_meta_box` so the block editor shows the panel instead), `render( WP_Post $post )`, `static counts_line( array $data ): string` ("2 direct · 3 in total"), `static trash_sentence( array $data ): string`, `static csv_url( int $post_id, string $old_path, string $layout ): string`. Each old URL in the box has a "Download redirects (CSV)" link to `posts/{id}/csv`, which needs no JavaScript.
 - Produces: the box wraps its content in `<div class="hierarchy-guard-box" data-descendants data-capped data-status>`; Task 10's classic-editor script reads it.
 
 - [ ] **Step 1: Write the failing test**
@@ -5035,6 +5750,7 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'data-descendants="3"', $html );
 		$this->assertStringContainsString( 'data-status="publish"', $html );
 		$this->assertStringContainsString( '>Company</a>', $html );
+		$this->assertStringContainsString( '<strong>Subpages</strong>', $html );
 		$this->assertStringContainsString( '2 direct · 3 in total', $html );
 		$this->assertStringContainsString( '>Team</a> · 1 subpage</li>', $html );
 		$this->assertStringContainsString( 'Trashing this page moves its 2 subpages under “Company”.', $html );
@@ -5056,10 +5772,13 @@ final class MetaBoxTest extends WP_UnitTestCase {
 			]
 		);
 
-		$this->assertStringContainsString( '<code>/company/about/</code> — Not redirected', $this->html( $this->ids['about'] ) );
+		$html = $this->html( $this->ids['about'] );
+		$this->assertStringContainsString( '<code>/company/about/</code> · Not redirected · <a href="', $html );
+		$this->assertStringContainsString( '/hierarchy-guard/v1/posts/' . $this->ids['about'] . '/csv', $html );
+		$this->assertStringContainsString( 'aria-label="Download the redirects for /company/about/ (CSV)" download>Download redirects (CSV)</a>', $html );
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->assertStringContainsString( '<code>/company/about/</code> — Redirects here', $this->html( $this->ids['about'] ) );
+		$this->assertStringContainsString( '<code>/company/about/</code> · Redirects here', $this->html( $this->ids['about'] ) );
 	}
 
 	public function test_the_trash_sentence_follows_the_policy(): void {
@@ -5107,9 +5826,12 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Admin;
 
+use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Overview;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\REST\Hierarchy_Controller;
 use HierarchyGuard\Settings;
+use HierarchyGuard\Subtree;
 use WP_Post;
 
 /**
@@ -5188,7 +5910,7 @@ final class Meta_Box {
 		}
 		echo '</p>';
 
-		echo '<p><strong>' . esc_html__( 'Child pages', 'hierarchy-guard' ) . '</strong><br>';
+		echo '<p><strong>' . esc_html__( 'Subpages', 'hierarchy-guard' ) . '</strong><br>';
 		if ( 0 === (int) $data['children_total'] ) {
 			esc_html_e( 'No subpages.', 'hierarchy-guard' );
 			echo '</p>';
@@ -5197,7 +5919,7 @@ final class Meta_Box {
 			foreach ( $data['children'] as $child ) {
 				$note = (int) $child['children_count'] > 0
 					/* translators: %s: number of subpages. */
-					? sprintf( _n( '%s subpage', '%s subpages', (int) $child['children_count'], 'hierarchy-guard' ), number_format_i18n( (int) $child['children_count'] ) . ( $child['children_capped'] ? '+' : '' ) )
+					? sprintf( _n( '%s subpage', '%s subpages', (int) $child['children_count'], 'hierarchy-guard' ), Subtree::format_count( (int) $child['children_count'], (bool) $child['children_capped'] ) )
 					: '';
 				$state = 'publish' !== $child['status'] ? (string) $child['status_label'] : '';
 				printf(
@@ -5212,17 +5934,26 @@ final class Meta_Box {
 				printf(
 					'<p><a href="%1$s">%2$s</a></p>',
 					esc_url( (string) $data['list_url'] ),
-					/* translators: %s: number of subpages in all. */
-					esc_html( sprintf( __( 'View all %s in the list', 'hierarchy-guard' ), number_format_i18n( $descendants ) . ( $data['descendants']['capped'] ? '+' : '' ) ) )
+					/* translators: %s: number of subpages in all, such as 12 or 1,000+. */
+					esc_html( sprintf( _n( 'View all %s in the list', 'View all %s in the list', $descendants, 'hierarchy-guard' ), Subtree::format_count( $descendants, (bool) $data['descendants']['capped'] ) ) )
 				);
 			}
 		}
 
 		if ( [] !== $data['old_paths'] ) {
 			echo '<p><strong>' . esc_html__( 'Old URLs', 'hierarchy-guard' ) . '</strong></p><ul class="hierarchy-guard-box__old">';
-			$state = $data['redirects']['serving'] ? __( 'Redirects here', 'hierarchy-guard' ) : __( 'Not redirected', 'hierarchy-guard' );
+			$state  = $data['redirects']['serving'] ? __( 'Redirects here', 'hierarchy-guard' ) : __( 'Not redirected', 'hierarchy-guard' );
+			$layout = null !== $data['redirects']['provider'] ? Csv::layout( (string) $data['redirects']['provider']['csv'] ) : 'generic';
 			foreach ( $data['old_paths'] as $old ) {
-				printf( '<li><code>%1$s</code> — %2$s</li>', esc_html( (string) $old['url'] ), esc_html( $state ) );
+				printf(
+					'<li><code>%1$s</code> · %2$s · <a href="%3$s" aria-label="%4$s" download>%5$s</a></li>',
+					esc_html( (string) $old['url'] ),
+					esc_html( $state ),
+					esc_url( self::csv_url( (int) $post->ID, (string) $old['path'], $layout ) ),
+					/* translators: %s: an old URL, such as /about-us/. */
+					esc_attr( sprintf( __( 'Download the redirects for %s (CSV)', 'hierarchy-guard' ), (string) $old['url'] ) ),
+					esc_html__( 'Download redirects (CSV)', 'hierarchy-guard' )
+				);
 			}
 			echo '</ul>';
 		}
@@ -5235,14 +5966,33 @@ final class Meta_Box {
 	}
 
 	/**
+	 * The download URL for the pairs behind an old path recorded on a post.
+	 *
+	 * @param int    $post_id  Post ID.
+	 * @param string $old_path Old path recorded on it.
+	 * @param string $layout   CSV layout.
+	 * @return string
+	 */
+	public static function csv_url( int $post_id, string $old_path, string $layout ): string {
+		return add_query_arg(
+			[
+				'from'     => rawurlencode( $old_path ),
+				'format'   => $layout,
+				'_wpnonce' => wp_create_nonce( 'wp_rest' ),
+			],
+			rest_url( Hierarchy_Controller::NAMESPACE . '/posts/' . $post_id . '/csv' )
+		);
+	}
+
+	/**
 	 * "4 direct · 12 in total".
 	 *
 	 * @param array<string,mixed> $data Overview.
 	 * @return string
 	 */
 	public static function counts_line( array $data ): string {
-		$direct = number_format_i18n( (int) $data['children_total'] ) . ( $data['children_capped'] ? '+' : '' );
-		$all    = number_format_i18n( (int) $data['descendants']['count'] ) . ( $data['descendants']['capped'] ? '+' : '' );
+		$direct = Subtree::format_count( (int) $data['children_total'], (bool) $data['children_capped'] );
+		$all    = Subtree::format_count( (int) $data['descendants']['count'], (bool) $data['descendants']['capped'] );
 		/* translators: 1: number of direct subpages, 2: number of subpages at every level. */
 		return sprintf( __( '%1$s direct · %2$s in total', 'hierarchy-guard' ), $direct, $all );
 	}
@@ -5325,8 +6075,15 @@ git commit -m "feat: Hierarchy box in the classic editor"
 
 **Interfaces:**
 - Consumes: Task 4's `.hierarchy-guard-cell` data, Task 8's `Settings_Section::redirects_url()` and `policy_url()`, Task 9's `.hierarchy-guard-box` data.
-- Produces: `Admin\Assets` (constructor `Providers $providers, string $dir = HIERARCHY_GUARD_DIR`) with `HANDLE_PREFIX = 'hierarchy-guard-'`, `enqueue( string $name, string[] $extra = [] ): bool` (false when `build/{name}.asset.php` is missing; else script `hierarchy-guard-{name}` with the asset's dependencies plus `$extra`, translations, `window.hierarchyGuard` printed before it, `build/{name}.css` when built, and `wp-components` styles when the script uses components), `enqueue_editor()` on `enqueue_block_editor_assets` (bundle `editor`, supported types), `enqueue_admin( $hook_suffix )` on `admin_enqueue_scripts` (bundle `list-table` with `jquery` and `inline-edit-post` on `edit.php`, bundle `classic` on `post.php`/`post-new.php` outside the block editor), `config(): array` with `namespace`, `serving`, `provider{name,url,csv}|null`, `settingsUrl`, `policyUrl` (both empty without `manage_options`), `policy`, `postTypes`, `cap`, `restNonce`, `restUrl`.
-- Produces: `src/common/config.js` (the settings merged over defaults, read from `globalThis.hierarchyGuard`), `src/common/copy.js` (every sentence the scripts show; `POLICIES`, `formatCount`, `subpagesLabel`, `countsLine`, `trashedSegment`, `trashSentence`, `bulkSentence`, `optionLabel`, `optionDescription`, `deniedSentence`, `saveWarning`, `quickEditWarning`, `changedSentence`, `viewRedirectsLabel`, `trashNote`, `unresolvedSentence`, `pairsText`), `src/common/api.js` (`fetchHierarchy`, `sourceRoute`, `fetchPairs`, `csvUrl`, `trashPreview`, `dismissNudge`). A pairs source is `{ change }` or `{ post, from }`. Tasks 11 and 12 import these.
+- Produces: `Admin\Assets` (constructor `Providers $providers, string $dir = HIERARCHY_GUARD_DIR`) with `HANDLE_PREFIX = 'hierarchy-guard-'` and these methods:
+  - `enqueue( string $name, string[] $extra = [] ): bool`: false when `build/{name}.asset.php` is missing. Otherwise it enqueues script `hierarchy-guard-{name}` with the asset's dependencies plus `$extra`, its translations, `window.hierarchyGuard` printed before it, `build/{name}.css` when built, and `wp-components` styles when the script uses components.
+  - `enqueue_editor()` on `enqueue_block_editor_assets`: bundle `editor`, for supported types.
+  - `enqueue_admin( $hook_suffix )` on `admin_enqueue_scripts`: bundle `classic` with `jquery` on `post.php` and `post-new.php` outside the block editor.
+  - `want_list_table()` on `hierarchy_guard_list_script`, and `enqueue_list_table()` on `admin_footer`: bundle `list-table` with `jquery` and `inline-edit-post`, only when the screen asked for it. Footer scripts and late styles enqueued there still print.
+  - `config(): array` with `namespace`, `serving`, `provider{name,url,csv}|null`, `settingsUrl`, `policyUrl` (both empty without `manage_options`), `policy`, `postTypes`, `cap`, `locale` (the user locale with a hyphen), `restNonce`, `restUrl`.
+- Produces: `src/common/config.js`: the settings merged over defaults, read from `globalThis.hierarchyGuard`.
+- Produces: `src/common/copy.js`: every sentence the scripts show. Counts are formatted in the user's locale through `Intl.NumberFormat`, as PHP formats them, and the capped "%s+" is translatable. It exports `POLICIES`, `formatCount`, `subpagesLabel`, `countsLine`, `viewAllLabel`, `keptUrl`, `dialogTitle`, `initialSentence`, `trashSentence`, `bulkSentence`, `optionLabel`, `optionDescription` (a description with URLs is a template with `<from />` and `<to />`), `deniedSentence`, `previewError`, `saveWarning`, `quickEditWarning`, `changedStatus`, `changedSentence`, `viewRedirectsLabel`, `oldUrlState`, `trashNote`, `unresolvedSentence`, `copiedSentence` and `pairsText`.
+- Produces: `src/common/api.js`: `fetchHierarchy`, `sourceRoute`, `fetchPairs`, `csvUrl`, `trashPreview`, and `dismissNudge` (core's `dismiss-wp-pointer` Ajax action). A pairs source is `{ change }` or `{ post, from }`. Tasks 11 and 12 import these.
 - Produces: npm scripts `build`, `start`, `lint:js`, `lint:style`, `test:js`; a `JavaScript` CI job.
 
 Without a build every bundle is skipped, so the PHP suite and a checkout without npm keep working. Every screen already works without its script; the scripts add the dialog, the warnings and the modal.
@@ -5435,30 +6192,40 @@ import { describe, expect, it } from 'vitest';
 import {
 	bulkSentence,
 	changedSentence,
+	changedStatus,
+	copiedSentence,
 	countsLine,
+	deniedSentence,
+	dialogTitle,
 	formatCount,
+	initialSentence,
+	keptUrl,
+	oldUrlState,
 	optionDescription,
 	optionLabel,
 	pairsText,
+	previewError,
 	quickEditWarning,
 	saveWarning,
 	subpagesLabel,
 	trashNote,
 	trashSentence,
-	trashedSegment,
 	unresolvedSentence,
+	viewAllLabel,
 	viewRedirectsLabel,
 } from '../copy';
 
-const about = {
-	title: 'About',
-	path: '/company/about/',
-	children: 4,
-	descendants: { count: 12, capped: false },
+const team = {
+	title: 'Team',
+	path: '/studio/team/',
+	policy: 'reparent',
+	children: 2,
+	descendants: { count: 3, capped: false },
 	fallback: false,
-	to: { id: 7, title: 'Company' },
-	example: { from: '/company/about/team/', to: '/company/team/' },
+	to: { id: 7, title: 'Studio' },
+	example: { from: '/studio/team/ada/', to: '/studio/ada/' },
 	denied: false,
+	denied_trash: false,
 };
 
 describe( 'counts', () => {
@@ -5470,6 +6237,7 @@ describe( 'counts', () => {
 	it( 'labels subpages in the singular and the plural', () => {
 		expect( subpagesLabel( 1 ) ).toBe( '1 subpage' );
 		expect( subpagesLabel( 1000, true ) ).toBe( '1,000+ subpages' );
+		expect( viewAllLabel( 12, false ) ).toBe( 'View all 12 in the list' );
 	} );
 
 	it( 'says how many subpages sit directly below and at every level', () => {
@@ -5484,9 +6252,23 @@ describe( 'counts', () => {
 } );
 
 describe( 'the trash dialog', () => {
-	it( 'says where the subpages move under the default policy', () => {
-		expect( trashSentence( about, 'reparent', 1000 ) ).toBe(
-			'“About” has 4 subpages (12 pages in total). They’ll move up under “Company” and get new URLs.'
+	it( 'knows its title when the link is clicked', () => {
+		expect( dialogTitle( 1 ) ).toBe( 'Move this page to the Trash?' );
+		expect( dialogTitle( 3 ) ).toBe( 'Move 3 pages to the Trash?' );
+	} );
+
+	it( 'says something useful before the subpages are checked', () => {
+		expect( initialSentence( 'Team', 2, 'reparent' ) ).toBe(
+			'“Team” has 2 subpages. The subpages move up one level and get new URLs.'
+		);
+	} );
+
+	it( 'names what each number counts', () => {
+		expect( trashSentence( team, 'reparent', 1000 ) ).toBe(
+			'“Team” has 2 subpages directly under it, 3 in all. They’ll move up under “Studio” and get new URLs.'
+		);
+		expect( optionLabel( 'trash_children', team ) ).toBe(
+			'Trash all 3 subpages too'
 		);
 	} );
 
@@ -5494,7 +6276,7 @@ describe( 'the trash dialog', () => {
 		expect(
 			trashSentence(
 				{
-					...about,
+					...team,
 					children: 1,
 					descendants: { count: 1, capped: false },
 				},
@@ -5502,76 +6284,96 @@ describe( 'the trash dialog', () => {
 				1000
 			)
 		).toBe(
-			'“About” has 1 subpage. It will move up under “Company” and get a new URL.'
+			'“Team” has 1 subpage. It will move up under “Studio” and get a new URL.'
 		);
 	} );
 
 	it( 'says when the subpages become top-level pages', () => {
-		expect(
-			trashSentence( { ...about, to: null }, 'reparent', 1000 )
-		).toBe(
-			'“About” has 4 subpages (12 pages in total). They’ll become top-level pages and get new URLs.'
+		expect( trashSentence( { ...team, to: null }, 'reparent', 1000 ) ).toBe(
+			'“Team” has 2 subpages directly under it, 3 in all. They’ll become top-level pages and get new URLs.'
 		);
 	} );
 
 	it( 'describes trashing the subpages too, and the fallback past the cap', () => {
-		expect( trashSentence( about, 'trash_children', 1000 ) ).toBe(
-			'“About” has 4 subpages (12 pages in total). They go to the Trash too, and come back with their statuses if you restore “About”.'
+		expect( trashSentence( team, 'trash_children', 1000 ) ).toBe(
+			'“Team” has 2 subpages directly under it, 3 in all. They go to the Trash too, and come back with their statuses if you restore “Team”.'
 		);
 		expect(
-			trashSentence(
-				{ ...about, fallback: true },
-				'trash_children',
-				1000
-			)
+			trashSentence( { ...team, fallback: true }, 'trash_children', 1000 )
 		).toBe(
-			'“About” has 4 subpages (12 pages in total). That is more than 1,000, so they’ll move up one level instead of going to the Trash.'
+			'“Team” has 2 subpages directly under it, 3 in all. That is more than 1,000, so they’ll move up one level instead of going to the Trash.'
 		);
 	} );
 
-	it( 'names the trashed slug the kept subpages will carry', () => {
-		expect( trashedSegment( '/company/about/' ) ).toBe( 'about__trashed' );
-		expect( trashSentence( about, 'keep', 1000 ) ).toBe(
-			'“About” has 4 subpages (12 pages in total). They stay where they are, and their URLs will contain about__trashed until you move them.'
+	it( 'shows the URL a kept subpage gets', () => {
+		expect( keptUrl( team ) ).toBe( '/studio/team__trashed/ada/' );
+		expect( optionDescription( 'keep', team, 1000 ) ).toBe(
+			'Their URLs change until you move them, for example <from /> becomes <to />.'
 		);
 	} );
 
-	it( 'sums a bulk selection', () => {
+	it( 'sums a bulk selection, counting pages it did not preview', () => {
 		expect(
 			bulkSentence(
 				{
-					pages: [ about, about, about ],
+					pages: [ team, team ],
 					total: { count: 19, capped: false },
+					more: 0,
 				},
-				'reparent'
+				'reparent',
+				3,
+				1000
 			)
 		).toBe(
-			'3 of the selected pages have subpages (19 pages in total). The subpages move up one level and get new URLs.'
+			'3 of the selected pages have subpages, 19 in all. The subpages move up one level and get new URLs.'
+		);
+		expect(
+			bulkSentence(
+				{
+					pages: [ team, { ...team, fallback: null } ],
+					total: { count: 1000, capped: true },
+					more: 0,
+				},
+				'trash_children',
+				2,
+				1000
+			)
+		).toBe(
+			'2 of the selected pages have subpages, 1,000+ in all. The subpages go to the Trash too, and come back with their statuses if you restore their parent. A page with more than 1,000 subpages has them moved up instead.'
 		);
 	} );
 
-	it( 'labels and describes each option', () => {
-		expect( optionLabel( 'reparent', about ) ).toBe(
-			'Move the subpages up under “Company”'
+	it( 'labels and describes each option like the settings', () => {
+		expect( optionLabel( 'reparent', team ) ).toBe(
+			'Move the subpages up under “Studio”'
 		);
 		expect( optionLabel( 'reparent', null ) ).toBe(
-			'Move the subpages up one level'
+			'Move subpages up one level'
 		);
-		expect( optionLabel( 'trash_children', about ) ).toBe(
-			'Trash the 12 subpages too'
+		expect( optionLabel( 'keep', null ) ).toBe(
+			'Leave subpages where they are'
 		);
-		expect( optionDescription( 'reparent', about, 1000 ) ).toBe(
-			'Their URLs change, for example /company/about/team/ becomes /company/team/.'
+		expect( optionDescription( 'reparent', team, 1000 ) ).toBe(
+			'Their URLs change, for example <from /> becomes <to />.'
 		);
 		expect(
 			optionDescription(
 				'trash_children',
-				{ ...about, fallback: true },
+				{ ...team, fallback: true },
 				1000
 			)
 		).toBe( 'Not available: there are more than 1,000.' );
-		expect( optionDescription( 'keep', about, 1000 ) ).toBe(
-			'Their URLs will contain about__trashed until you move them.'
+	} );
+
+	it( 'names the right that is missing, and what an error leads to', () => {
+		expect( deniedSentence( 'reparent' ) ).toBe(
+			'You can’t edit some of the subpages. They’ll stay where they are.'
+		);
+		expect( deniedSentence( 'trash_children' ) ).toBe(
+			'You can’t delete some of the subpages. They’ll stay where they are.'
+		);
+		expect( previewError( 'keep' ) ).toBe(
+			'The subpages couldn’t be checked. If you continue, they’ll stay where they are.'
 		);
 	} );
 } );
@@ -5584,27 +6386,40 @@ describe( 'warnings and outcomes', () => {
 		expect( saveWarning( 1, false, true ) ).toBe(
 			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones.'
 		);
-	} );
-
-	it( 'warns in Quick Edit', () => {
-		expect( quickEditWarning( 12, false ) ).toBe(
-			'Changing this moves 12 subpages to new URLs.'
+		expect( quickEditWarning( 5, false ) ).toBe(
+			'Saving changes this page’s URL and the URLs of 5 subpages.'
 		);
 	} );
 
-	it( 'says what handles the changed URLs', () => {
+	it( 'says what handles the changed URLs, with a status to match', () => {
 		expect( changedSentence( 12, false, true, null ) ).toBe(
-			'The 12 old URLs redirect to their new pages.'
+			'12 old URLs now redirect to their new pages.'
 		);
 		expect(
 			changedSentence( 12, false, false, { name: 'Redirection' } )
-		).toBe( '12 URLs changed.' );
+		).toBe( '12 URLs changed. Add their redirects in Redirection.' );
+		expect( changedSentence( 2, false, false, { name: '' } ) ).toBe(
+			'2 URLs changed. Add their redirects in your redirect plugin.'
+		);
 		expect( changedSentence( 1, false, false, null ) ).toBe(
 			'1 old URL now shows “Page not found”.'
 		);
+		expect( changedStatus( true, null ) ).toBe( 'success' );
+		expect( changedStatus( false, { name: 'Redirection' } ) ).toBe(
+			'info'
+		);
+		expect( changedStatus( false, null ) ).toBe( 'warning' );
 		expect( viewRedirectsLabel( 1000, true ) ).toBe(
 			'View redirects (1,000+)'
 		);
+	} );
+
+	it( 'says how each old URL is handled', () => {
+		expect( oldUrlState( true, null ) ).toBe( 'Redirects here' );
+		expect( oldUrlState( false, { name: 'Redirection' } ) ).toBe(
+			'Add in Redirection'
+		);
+		expect( oldUrlState( false, null ) ).toBe( 'Not redirected' );
 	} );
 
 	it( 'says what trashing the page would do, by policy', () => {
@@ -5621,7 +6436,7 @@ describe( 'warnings and outcomes', () => {
 			'Trashing this page makes its 4 subpages top-level pages.'
 		);
 		expect( trashNote( { ...data, trash_policy: 'trash_children' } ) ).toBe(
-			'Trashing this page moves its 12 subpages to the Trash too.'
+			'Trashing this page moves its 12 subpages to the trash too.'
 		);
 		expect( trashNote( { ...data, trash_policy: 'keep' } ) ).toBe(
 			'Trashing this page leaves its 4 subpages where they are.'
@@ -5634,11 +6449,20 @@ describe( 'warnings and outcomes', () => {
 			unresolvedSentence( { old: '/about/', reason: 'trash' } )
 		).toBe( '/about/ is in the Trash, so it has no new URL.' );
 		expect(
+			unresolvedSentence( { old: '/about/', reason: 'in_use' } )
+		).toBe(
+			'/about/ belongs to another page now, so it needs no redirect.'
+		);
+		expect(
 			unresolvedSentence( { old: '/about/', reason: 'unpublished' } )
 		).toBe( '/about/ leads to a page that isn’t published.' );
 	} );
 
-	it( 'writes pairs as text', () => {
+	it( 'says what it copied', () => {
+		expect( copiedSentence( 3, false ) ).toBe( 'Copied.' );
+		expect( copiedSentence( 1000, true ) ).toBe(
+			'Copied the first 1,000.'
+		);
 		expect(
 			pairsText( [
 				{ old: '/a/', new: '/b/' },
@@ -5783,6 +6607,7 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertSame( Settings::POLICY_REPARENT, $config['policy'] );
 		$this->assertContains( 'page', $config['postTypes'] );
 		$this->assertSame( 1000, $config['cap'] );
+		$this->assertSame( 'en-US', $config['locale'] );
 
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'editor' ] ) );
 		$editor = ( new Assets( new Providers(), $this->dir ) )->config();
@@ -5790,12 +6615,16 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertSame( '', $editor['policyUrl'] );
 	}
 
-	public function test_the_list_screen_gets_the_list_table_bundle(): void {
+	public function test_the_list_screen_gets_the_list_table_bundle_only_when_it_asks(): void {
 		$this->build( 'list-table', [] );
 		set_current_screen( 'edit-page' );
+		$assets = new Assets( new Providers(), $this->dir );
 
-		( new Assets( new Providers(), $this->dir ) )->enqueue_admin( 'edit.php' );
+		$assets->enqueue_list_table();
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-list-table', 'enqueued' ), 'Nothing on the screen needs it.' );
 
+		$assets->want_list_table();
+		$assets->enqueue_list_table();
 		$this->assertTrue( wp_script_is( 'hierarchy-guard-list-table', 'enqueued' ) );
 		$deps = wp_scripts()->registered['hierarchy-guard-list-table']->deps;
 		$this->assertContains( 'jquery', $deps );
@@ -5805,10 +6634,22 @@ final class AssetsTest extends WP_UnitTestCase {
 	public function test_an_unsupported_screen_gets_nothing(): void {
 		$this->build( 'list-table', [] );
 		set_current_screen( 'edit-post' );
+		$assets = new Assets( new Providers(), $this->dir );
 
-		( new Assets( new Providers(), $this->dir ) )->enqueue_admin( 'edit.php' );
+		$assets->want_list_table();
+		$assets->enqueue_list_table();
 
 		$this->assertFalse( wp_script_is( 'hierarchy-guard-list-table', 'enqueued' ) );
+	}
+
+	public function test_the_plugin_listens_for_the_list_screen_s_request(): void {
+		global $wp_filter;
+		$found = false;
+		foreach ( $wp_filter['hierarchy_guard_list_script']->callbacks[10] ?? [] as $callback ) {
+			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets );
+		}
+
+		$this->assertTrue( $found );
 	}
 }
 ```
@@ -5836,6 +6677,7 @@ const defaults = {
 	policy: 'reparent',
 	postTypes: [],
 	cap: 1000,
+	locale: '',
 	restNonce: '',
 	restUrl: '/wp-json/',
 };
@@ -5849,8 +6691,25 @@ Create `src/common/copy.js`:
  * Every sentence the scripts show, in one place so it can be tested.
  */
 import { __, _n, sprintf } from '@wordpress/i18n';
+import config from './config';
 
 export const POLICIES = [ 'reparent', 'trash_children', 'keep' ];
+
+/**
+ * A number in the user's locale, as PHP's number_format_i18n() writes it.
+ *
+ * @param {number} count Number.
+ * @return {string} Formatted number.
+ */
+function formatNumber( count ) {
+	try {
+		return new Intl.NumberFormat( config.locale || undefined ).format(
+			count
+		);
+	} catch {
+		return new Intl.NumberFormat().format( count );
+	}
+}
 
 /**
  * A count for a sentence: 1,000 stays 1,000, a capped count becomes 1,000+.
@@ -5860,7 +6719,14 @@ export const POLICIES = [ 'reparent', 'trash_children', 'keep' ];
  * @return {string} Formatted count.
  */
 export function formatCount( count, capped = false ) {
-	return Number( count ).toLocaleString() + ( capped ? '+' : '' );
+	const number = formatNumber( Number( count ) );
+	return capped
+		? sprintf(
+				/* translators: %s: a number that is a lower bound, such as 1,000. */
+				__( '%s+', 'hierarchy-guard' ),
+				number
+			)
+		: number;
 }
 
 /**
@@ -5894,16 +6760,110 @@ export function countsLine( data ) {
 }
 
 /**
- * The trashed-slug segment a kept subpage's URL will carry, such as about__trashed.
+ * "View all 12 in the list".
  *
- * @param {string} path Page path relative to the home URL, such as /company/about/.
- * @return {string} Segment.
+ * @param {number}  count  Subpages at every level.
+ * @param {boolean} capped Whether more exist.
+ * @return {string} Label.
  */
-export function trashedSegment( path ) {
-	const parts = String( path || '' )
-		.split( '/' )
-		.filter( Boolean );
-	return ( parts.length ? parts[ parts.length - 1 ] : '' ) + '__trashed';
+export function viewAllLabel( count, capped ) {
+	return sprintf(
+		/* translators: %s: number of subpages in all, such as 12 or 1,000+. */
+		_n(
+			'View all %s in the list',
+			'View all %s in the list',
+			count,
+			'hierarchy-guard'
+		),
+		formatCount( count, capped )
+	);
+}
+
+/**
+ * The URL a kept subpage gets while its parent is in the trash.
+ *
+ * @param {Object} page A page from the trash preview.
+ * @return {string} URL relative to the home URL, or an empty string.
+ */
+export function keptUrl( page ) {
+	if ( ! page.example || ! page.path ) {
+		return '';
+	}
+	return page.example.from.replace(
+		page.path,
+		page.path.replace( /\/$/, '' ) + '__trashed/'
+	);
+}
+
+/**
+ * The dialog's title, known when the Trash link is clicked.
+ *
+ * @param {number} selected Pages selected.
+ * @return {string} Title.
+ */
+export function dialogTitle( selected ) {
+	return 1 === selected
+		? __( 'Move this page to the Trash?', 'hierarchy-guard' )
+		: sprintf(
+				/* translators: %s: number of selected pages. */
+				_n(
+					'Move %s page to the Trash?',
+					'Move %s pages to the Trash?',
+					selected,
+					'hierarchy-guard'
+				),
+				formatCount( selected )
+			);
+}
+
+/**
+ * What a policy does, without any page's details.
+ *
+ * @param {string} policy Policy.
+ * @return {string} Sentence.
+ */
+function genericTail( policy ) {
+	const tails = {
+		reparent: __(
+			'The subpages move up one level and get new URLs.',
+			'hierarchy-guard'
+		),
+		trash_children: __(
+			'The subpages go to the Trash too, and come back with their statuses if you restore their parent.',
+			'hierarchy-guard'
+		),
+		keep: __(
+			'The subpages stay where they are, and their URLs will contain “__trashed” until you move them.',
+			'hierarchy-guard'
+		),
+	};
+	return tails[ policy ] || tails.reparent;
+}
+
+/**
+ * The sentence shown while the dialog checks the subpages, from the row alone.
+ *
+ * @param {string} title    Page title.
+ * @param {number} children Direct subpages, from the Hierarchy column.
+ * @param {string} policy   Policy.
+ * @return {string} Sentence.
+ */
+export function initialSentence( title, children, policy ) {
+	return (
+		sprintf(
+			/* translators: 1: page title, 2: number of subpages. */
+			_n(
+				'“%1$s” has %2$s subpage.',
+				'“%1$s” has %2$s subpages.',
+				children,
+				'hierarchy-guard'
+			),
+			title,
+			formatCount( children )
+		) +
+		' ' +
+		genericTail( policy )
+	);
 }
 
 /**
@@ -5920,10 +6880,10 @@ export function trashSentence( page, policy, cap ) {
 	const head =
 		all > children
 			? sprintf(
-					/* translators: 1: page title, 2: number of direct subpages, 3: number of pages below it at every level. */
+					/* translators: 1: page title, 2: number of direct subpages, 3: number of subpages at every level. */
 					_n(
-						'“%1$s” has %2$s subpage (%3$s pages in total).',
-						'“%1$s” has %2$s subpages (%3$s pages in total).',
+						'“%1$s” has %2$s subpage directly under it, %3$s in all.',
+						'“%1$s” has %2$s subpages directly under it, %3$s in all.',
 						children,
 						'hierarchy-guard'
 					),
@@ -5943,115 +6903,100 @@ export function trashSentence( page, policy, cap ) {
 					formatCount( children )
 				);
 
-	if ( 'trash_children' === policy && page.fallback ) {
-		return (
-			head +
-			' ' +
-			sprintf(
-				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
-				__(
-					'That is more than %s, so they’ll move up one level instead of going to the Trash.',
-					'hierarchy-guard'
-				),
-				formatCount( cap )
-			)
+	let tail;
+	if ( 'trash_children' === policy && true === page.fallback ) {
+		tail = sprintf(
+			/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
+			__(
+				'That is more than %s, so they’ll move up one level instead of going to the Trash.',
+				'hierarchy-guard'
+			),
+			formatCount( cap )
 		);
-	}
-	if ( 'trash_children' === policy ) {
-		return (
-			head +
-			' ' +
-			sprintf(
-				/* translators: %s: page title. */
-				_n(
-					'It goes to the Trash too, and comes back with its status if you restore “%s”.',
-					'They go to the Trash too, and come back with their statuses if you restore “%s”.',
-					all,
-					'hierarchy-guard'
-				),
-				page.title
-			)
+	} else if ( 'trash_children' === policy ) {
+		tail = sprintf(
+			/* translators: %s: page title. */
+			_n(
+				'It goes to the Trash too, and comes back with its status if you restore “%s”.',
+				'They go to the Trash too, and come back with their statuses if you restore “%s”.',
+				all,
+				'hierarchy-guard'
+			),
+			page.title
 		);
-	}
-	if ( 'keep' === policy ) {
-		return (
-			head +
-			' ' +
-			sprintf(
-				/* translators: %s: the trashed slug the URLs will contain, such as about__trashed. */
-				_n(
-					'It stays where it is, and its URL will contain %s until you move it.',
-					'They stay where they are, and their URLs will contain %s until you move them.',
-					children,
-					'hierarchy-guard'
-				),
-				trashedSegment( page.path )
-			)
+	} else if ( 'keep' === policy ) {
+		tail = _n(
+			'It stays where it is, and its URL changes until you move it.',
+			'They stay where they are, and their URLs change until you move them.',
+			children,
+			'hierarchy-guard'
 		);
-	}
-	if ( page.to ) {
-		return (
-			head +
-			' ' +
-			sprintf(
-				/* translators: %s: title of the page the subpages move under. */
-				_n(
-					'It will move up under “%s” and get a new URL.',
-					'They’ll move up under “%s” and get new URLs.',
-					children,
-					'hierarchy-guard'
-				),
-				page.to.title
-			)
+	} else if ( page.to ) {
+		tail = sprintf(
+			/* translators: %s: title of the page the subpages move under. */
+			_n(
+				'It will move up under “%s” and get a new URL.',
+				'They’ll move up under “%s” and get new URLs.',
+				children,
+				'hierarchy-guard'
+			),
+			page.to.title
 		);
-	}
-	return (
-		head +
-		' ' +
-		_n(
+	} else {
+		tail = _n(
 			'It will become a top-level page and get a new URL.',
 			'They’ll become top-level pages and get new URLs.',
 			children,
 			'hierarchy-guard'
-		)
-	);
+		);
+	}
+	return head + ' ' + tail;
 }
 
 /**
  * What a bulk trash does to the subpages of the selected pages.
  *
- * @param {Object} preview Trash preview.
- * @param {string} policy  Policy.
+ * @param {Object} preview      Trash preview.
+ * @param {string} policy       Policy.
+ * @param {number} withChildren Selected pages with subpages, counted on the screen.
+ * @param {number} cap          Count cap.
  * @return {string} Sentence.
  */
-export function bulkSentence( preview, policy ) {
-	const parents = preview.pages.length;
-	const head = sprintf(
-		/* translators: 1: number of selected pages with subpages, 2: number of subpages at every level. */
-		_n(
-			'%1$s of the selected pages has subpages (%2$s pages in total).',
-			'%1$s of the selected pages have subpages (%2$s pages in total).',
-			parents,
-			'hierarchy-guard'
-		),
-		formatCount( parents ),
-		formatCount( preview.total.count, preview.total.capped )
-	);
-	const tails = {
-		reparent: __(
-			'The subpages move up one level and get new URLs.',
-			'hierarchy-guard'
-		),
-		trash_children: __(
-			'The subpages go to the Trash too, and come back with their statuses if you restore their parent.',
-			'hierarchy-guard'
-		),
-		keep: __(
-			'The subpages stay where they are, and their URLs will contain “__trashed” until you move them.',
-			'hierarchy-guard'
-		),
-	};
-	return head + ' ' + ( tails[ policy ] || tails.reparent );
+export function bulkSentence( preview, policy, withChildren, cap ) {
+	const parents = Math.max( withChildren, preview.pages.length );
+	let out =
+		sprintf(
+			/* translators: 1: number of selected pages with subpages, 2: number of subpages at every level, such as 19 or 1,000+. */
+			_n(
+				'%1$s of the selected pages has subpages, %2$s in all.',
+				'%1$s of the selected pages have subpages, %2$s in all.',
+				parents,
+				'hierarchy-guard'
+			),
+			formatCount( parents ),
+			formatCount(
+				preview.total.count,
+				preview.total.capped || preview.more > 0
+			)
+		) +
+		' ' +
+		genericTail( policy );
+	if (
+		'trash_children' === policy &&
+		preview.pages.some( ( page ) => false !== page.fallback )
+	) {
+		out +=
+			' ' +
+			sprintf(
+				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
+				__(
+					'A page with more than %s subpages has them moved up instead.',
+					'hierarchy-guard'
+				),
+				formatCount( cap )
+			);
+	}
+	return out;
 }
 
 /**
@@ -6067,8 +7012,8 @@ export function optionLabel( policy, page ) {
 			? sprintf(
 					/* translators: %s: number of subpages at every level. */
 					_n(
-						'Trash the %s subpage too',
-						'Trash the %s subpages too',
+						'Trash its %s subpage too',
+						'Trash all %s subpages too',
 						page.descendants.count,
 						'hierarchy-guard'
 					),
@@ -6080,7 +7025,7 @@ export function optionLabel( policy, page ) {
 			: __( 'Trash the subpages too', 'hierarchy-guard' );
 	}
 	if ( 'keep' === policy ) {
-		return __( 'Leave the subpages where they are', 'hierarchy-guard' );
+		return __( 'Leave subpages where they are', 'hierarchy-guard' );
 	}
 	if ( page && page.to ) {
 		return sprintf(
@@ -6091,20 +7036,21 @@ export function optionLabel( policy, page ) {
 	}
 	return page
 		? __( 'Make the subpages top-level pages', 'hierarchy-guard' )
-		: __( 'Move the subpages up one level', 'hierarchy-guard' );
+		: __( 'Move subpages up one level', 'hierarchy-guard' );
 }
 
 /**
- * The description under a policy option.
+ * The description under a policy option. A sentence with URLs in it is a
+ * template: <from /> and <to /> mark where the dialog puts the URLs.
  *
  * @param {string}      policy Policy.
  * @param {Object|null} page   The only page with subpages, or null for several.
  * @param {number}      cap    Count cap.
- * @return {string} Description.
+ * @return {string} Description or template.
  */
 export function optionDescription( policy, page, cap ) {
 	if ( 'trash_children' === policy ) {
-		if ( page && page.fallback ) {
+		if ( page && true === page.fallback ) {
 			return sprintf(
 				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
 				__(
@@ -6129,14 +7075,10 @@ export function optionDescription( policy, page, cap ) {
 				);
 	}
 	if ( 'keep' === policy ) {
-		return page
-			? sprintf(
-					/* translators: %s: the trashed slug the URLs will contain, such as about__trashed. */
-					__(
-						'Their URLs will contain %s until you move them.',
-						'hierarchy-guard'
-					),
-					trashedSegment( page.path )
+		return page && keptUrl( page )
+			? __(
+					'Their URLs change until you move them, for example <from /> becomes <to />.',
+					'hierarchy-guard'
 				)
 			: __(
 					'Their URLs will contain “__trashed” until you move them.',
@@ -6144,29 +7086,54 @@ export function optionDescription( policy, page, cap ) {
 				);
 	}
 	if ( page && page.example ) {
-		return sprintf(
-			/* translators: 1: an old URL, 2: the URL it becomes. */
-			__(
-				'Their URLs change, for example %1$s becomes %2$s.',
-				'hierarchy-guard'
-			),
-			page.example.from,
-			page.example.to
+		return __(
+			'Their URLs change, for example <from /> becomes <to />.',
+			'hierarchy-guard'
 		);
 	}
 	return __( 'Their URLs change.', 'hierarchy-guard' );
 }
 
 /**
- * The trash dialog's note when some subpages can't be moved.
+ * The trash dialog's note when some subpages can't be moved or trashed.
  *
+ * @param {string} policy Policy.
  * @return {string} Sentence.
  */
-export function deniedSentence() {
-	return __(
-		'You can’t edit some of the subpages. They’ll stay where they are.',
-		'hierarchy-guard'
-	);
+export function deniedSentence( policy ) {
+	return 'trash_children' === policy
+		? __(
+				'You can’t delete some of the subpages. They’ll stay where they are.',
+				'hierarchy-guard'
+			)
+		: __(
+				'You can’t edit some of the subpages. They’ll stay where they are.',
+				'hierarchy-guard'
+			);
+}
+
+/**
+ * What continuing does when the subpages couldn't be checked.
+ *
+ * @param {string} policy Policy that will apply.
+ * @return {string} Sentence.
+ */
+export function previewError( policy ) {
+	const outcomes = {
+		reparent: __(
+			'The subpages couldn’t be checked. If you continue, they’ll move up one level.',
+			'hierarchy-guard'
+		),
+		trash_children: __(
+			'The subpages couldn’t be checked. If you continue, they’ll go to the Trash too.',
+			'hierarchy-guard'
+		),
+		keep: __(
+			'The subpages couldn’t be checked. If you continue, they’ll stay where they are.',
+			'hierarchy-guard'
+		),
+	};
+	return outcomes[ policy ] || outcomes.reparent;
 }
 
 /**
@@ -6178,18 +7145,8 @@ export function deniedSentence() {
  * @return {string} Sentence.
  */
 export function saveWarning( count, capped, serving ) {
-	const first = sprintf(
-		/* translators: %s: number of subpages, such as 12 or 1,000+. */
-		_n(
-			'Saving changes this page’s URL and the URL of %s subpage.',
-			'Saving changes this page’s URL and the URLs of %s subpages.',
-			count,
-			'hierarchy-guard'
-		),
-		formatCount( count, capped )
-	);
 	return (
-		first +
+		quickEditWarning( count, capped ) +
 		' ' +
 		( serving
 			? __(
@@ -6204,7 +7161,7 @@ export function saveWarning( count, capped, serving ) {
 }
 
 /**
- * The Quick Edit warning when the slug or parent of a page with subpages changes.
+ * The warning when the slug or parent of a page with subpages changes.
  *
  * @param {number}  count  Subpages at every level.
  * @param {boolean} capped Whether more exist.
@@ -6214,13 +7171,27 @@ export function quickEditWarning( count, capped ) {
 	return sprintf(
 		/* translators: %s: number of subpages, such as 12 or 1,000+. */
 		_n(
-			'Changing this moves %s subpage to a new URL.',
-			'Changing this moves %s subpages to new URLs.',
+			'Saving changes this page’s URL and the URL of %s subpage.',
+			'Saving changes this page’s URL and the URLs of %s subpages.',
 			count,
 			'hierarchy-guard'
 		),
 		formatCount( count, capped )
 	);
+}
+
+/**
+ * The notice status for URLs a change moved, by what handles redirects.
+ *
+ * @param {boolean}     serving  Whether built-in redirects are on.
+ * @param {Object|null} provider Detected redirect plugin.
+ * @return {string} success, info or warning.
+ */
+export function changedStatus( serving, provider ) {
+	if ( serving ) {
+		return 'success';
+	}
+	return provider ? 'info' : 'warning';
 }
 
 /**
@@ -6238,20 +7209,33 @@ export function changedSentence( count, capped, serving, provider ) {
 		return sprintf(
 			/* translators: %s: number of old URLs, such as 12 or 1,000+. */
 			_n(
-				'The %s old URL redirects to its new page.',
-				'The %s old URLs redirect to their new pages.',
+				'%s old URL now redirects to its new page.',
+				'%s old URLs now redirect to their new pages.',
 				count,
 				'hierarchy-guard'
 			),
 			shown
 		);
 	}
+	if ( provider && provider.name ) {
+		return sprintf(
+			/* translators: 1: number of URLs, such as 12 or 1,000+, 2: name of the redirect plugin. */
+			_n(
+				'%1$s URL changed. Add its redirect in %2$s.',
+				'%1$s URLs changed. Add their redirects in %2$s.',
+				count,
+				'hierarchy-guard'
+			),
+			shown,
+			provider.name
+		);
+	}
 	if ( provider ) {
 		return sprintf(
 			/* translators: %s: number of URLs, such as 12 or 1,000+. */
 			_n(
-				'%s URL changed.',
-				'%s URLs changed.',
+				'%s URL changed. Add its redirect in your redirect plugin.',
+				'%s URLs changed. Add their redirects in your redirect plugin.',
 				count,
 				'hierarchy-guard'
 			),
@@ -6286,6 +7270,27 @@ export function viewRedirectsLabel( count, capped ) {
 }
 
 /**
+ * What an old URL's redirect looks like now, by what handles redirects.
+ *
+ * @param {boolean}     serving  Whether built-in redirects are on.
+ * @param {Object|null} provider Detected redirect plugin.
+ * @return {string} Short state.
+ */
+export function oldUrlState( serving, provider ) {
+	if ( serving ) {
+		return __( 'Redirects here', 'hierarchy-guard' );
+	}
+	if ( provider && provider.name ) {
+		return sprintf(
+			/* translators: %s: name of the redirect plugin. */
+			__( 'Add in %s', 'hierarchy-guard' ),
+			provider.name
+		);
+	}
+	return __( 'Not redirected', 'hierarchy-guard' );
+}
+
+/**
  * What trashing a page would do to its subpages, for the editor panel.
  *
  * @param {Object} data Hierarchy from the REST route.
@@ -6301,8 +7306,8 @@ export function trashNote( data ) {
 		return sprintf(
 			/* translators: %s: number of subpages at every level. */
 			_n(
-				'Trashing this page moves its %s subpage to the Trash too.',
-				'Trashing this page moves its %s subpages to the Trash too.',
+				'Trashing this page moves its %s subpage to the trash too.',
+				'Trashing this page moves its %s subpages to the trash too.',
 				all,
 				'hierarchy-guard'
 			),
@@ -6363,6 +7368,16 @@ export function unresolvedSentence( row ) {
 			row.old
 		);
 	}
+	if ( 'in_use' === row.reason ) {
+		return sprintf(
+			/* translators: %s: an old URL. */
+			__(
+				'%s belongs to another page now, so it needs no redirect.',
+				'hierarchy-guard'
+			),
+			row.old
+		);
+	}
 	if ( 'unpublished' === row.reason ) {
 		return sprintf(
 			/* translators: %s: an old URL. */
@@ -6375,6 +7390,23 @@ export function unresolvedSentence( row ) {
 		__( '%s has no new URL.', 'hierarchy-guard' ),
 		row.old
 	);
+}
+
+/**
+ * What "Copy as text" says it copied.
+ *
+ * @param {number}  count  Pairs copied.
+ * @param {boolean} capped Whether more exist.
+ * @return {string} Sentence.
+ */
+export function copiedSentence( count, capped ) {
+	return capped
+		? sprintf(
+				/* translators: %s: number of redirects copied, such as 1,000. */
+				__( 'Copied the first %s.', 'hierarchy-guard' ),
+				formatCount( count )
+			)
+		: __( 'Copied.', 'hierarchy-guard' );
 }
 
 /**
@@ -6485,15 +7517,18 @@ export function trashPreview( ids ) {
 }
 
 /**
- * Hides the redirects nudge for the current user.
+ * Hides the redirects nudge for the current user, in core's dismissed-pointers list.
  *
- * @return {Promise<Object>} The user.
+ * @return {Promise<Response>} The Ajax response.
  */
 export function dismissNudge() {
-	return apiFetch( {
-		path: '/wp/v2/users/me',
+	return window.fetch( window.ajaxurl, {
 		method: 'POST',
-		data: { meta: { hierarchy_guard_nudge_dismissed: true } },
+		credentials: 'same-origin',
+		body: new window.URLSearchParams( {
+			action: 'dismiss-wp-pointer',
+			pointer: 'hierarchy_guard_nudge',
+		} ),
 	} );
 }
 ```
@@ -6511,9 +7546,9 @@ import { _n, sprintf } from '@wordpress/i18n';
 import { formatCount } from '../common/copy';
 
 domReady( () => {
-	const box = document.querySelector( '.hierarchy-guard-box' );
-	const form = document.getElementById( 'post' );
-	if ( ! box || ! form ) {
+	const box = window.document.querySelector( '.hierarchy-guard-box' );
+	const $ = window.jQuery;
+	if ( ! box || ! $ ) {
 		return;
 	}
 	const count = Number( box.dataset.descendants || 0 );
@@ -6521,14 +7556,16 @@ domReady( () => {
 		return;
 	}
 
-	const slug = document.getElementById( 'post_name' );
-	const parent = document.getElementById( 'parent_id' );
+	const slug = window.document.getElementById( 'post_name' );
+	const parent = window.document.getElementById( 'parent_id' );
 	const initial = {
 		slug: slug ? slug.value : '',
 		parent: parent ? parent.value : '',
 	};
 
-	form.addEventListener( 'submit', ( event ) => {
+	// A jQuery handler: core re-binds its own submit handler on every click of
+	// a submit button, so it always runs after this one and sees the cancel.
+	$( '#post' ).on( 'submit.hierarchy-guard', ( event ) => {
 		const edited =
 			( slug ? slug.value : '' ) !== initial.slug ||
 			( parent ? parent.value : '' ) !== initial.parent;
@@ -6538,8 +7575,8 @@ domReady( () => {
 		const message = sprintf(
 			/* translators: %s: number of subpages, such as 12 or 1,000+. */
 			_n(
-				'Saving changes this page’s URL and the URL of %s subpage. Continue?',
-				'Saving changes this page’s URL and the URLs of %s subpages. Continue?',
+				'Saving changes this page’s URL and the URL of %s subpage. You’ll get the redirects to add in the Hierarchy box after saving. Continue?',
+				'Saving changes this page’s URL and the URLs of %s subpages. You’ll get the redirects to add in the Hierarchy box after saving. Continue?',
 				count,
 				'hierarchy-guard'
 			),
@@ -6579,6 +7616,8 @@ use WP_Screen;
  * Enqueues the compiled bundles from build/, each with the dependencies its
  * .asset.php file lists, its translations, and the plugin's settings. A
  * bundle that was never built is skipped, so a checkout without npm still runs.
+ * The list-screen bundle loads only when the screen prints something it acts
+ * on, so a Pages list without parents never loads React or the components.
  */
 final class Assets {
 
@@ -6599,6 +7638,13 @@ final class Assets {
 	private string $dir;
 
 	/**
+	 * Whether the list screen asked for its script.
+	 *
+	 * @var bool
+	 */
+	private bool $wanted = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Providers $providers Redirect plugin detection.
@@ -6615,6 +7661,28 @@ final class Assets {
 	public function register(): void {
 		add_action( 'enqueue_block_editor_assets', [ $this, 'enqueue_editor' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
+		add_action( List_Table::SCRIPT, [ $this, 'want_list_table' ] );
+		add_action( 'admin_footer', [ $this, 'enqueue_list_table' ] );
+	}
+
+	/**
+	 * Notes that the list screen printed something its script acts on.
+	 */
+	public function want_list_table(): void {
+		$this->wanted = true;
+	}
+
+	/**
+	 * Enqueues the list-screen script in the footer, if the screen asked for it.
+	 * Footer scripts and late styles enqueued here still print.
+	 */
+	public function enqueue_list_table(): void {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+		if ( ! $this->wanted || ! $screen instanceof WP_Screen || 'edit' !== $screen->base || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
+			return;
+		}
+		// Quick Edit's script defines the object the list-table script wraps.
+		$this->enqueue( 'list-table', [ 'jquery', 'inline-edit-post' ] );
 	}
 
 	/**
@@ -6629,8 +7697,7 @@ final class Assets {
 	}
 
 	/**
-	 * The list-screen script on supported list screens, and the classic-editor
-	 * script where the block editor is off.
+	 * The classic-editor script where the block editor is off.
 	 *
 	 * @param mixed $hook_suffix Admin page.
 	 */
@@ -6639,11 +7706,9 @@ final class Assets {
 		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
 		}
-		if ( 'edit.php' === $hook_suffix ) {
-			// Quick Edit's script defines the object the list-table script wraps.
-			$this->enqueue( 'list-table', [ 'jquery', 'inline-edit-post' ] );
-		} elseif ( in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true ) && ! $screen->is_block_editor() ) {
-			$this->enqueue( 'classic' );
+		if ( in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true ) && ! $screen->is_block_editor() ) {
+			// It binds a jQuery submit handler, which core's own handler runs after.
+			$this->enqueue( 'classic', [ 'jquery' ] );
 		}
 	}
 
@@ -6703,6 +7768,7 @@ final class Assets {
 			'policy'      => Settings::trash_policy(),
 			'postTypes'   => Post_Types::supported(),
 			'cap'         => Subtree::count_cap(),
+			'locale'      => str_replace( '_', '-', get_user_locale() ),
 			'restNonce'   => wp_create_nonce( 'wp_rest' ),
 			'restUrl'     => esc_url_raw( rest_url() ),
 		];
@@ -6740,19 +7806,26 @@ git commit -m "feat: build tooling, shared copy, asset loader and classic-editor
 
 **Files:**
 - Modify: `package.json`, `package-lock.json` (through npm), `webpack.config.js`
-- Create: `src/common/mount.js`, `src/common/redirects-modal.js`, `src/common/modal.scss`, `src/editor/index.js`, `src/editor/panel.js`, `src/editor/editor.scss`
+- Create: `src/common/mount.js`, `src/common/url.js`, `src/common/redirects-modal.js`, `src/common/modal.scss`, `src/editor/index.js`, `src/editor/panel.js`, `src/editor/editor.scss`
 
 **Interfaces:**
 - Consumes: Task 5's routes, Task 10's `config`, `copy`, `api`.
-- Produces: `src/common/mount.js` `open( render ): close` (renders into its own root at the end of `<body>`), `src/common/redirects-modal.js` default export `RedirectsModal( { source, onClose } )`. Task 12 uses both.
-- Produces: the `hierarchy-guard` plugin with a "Hierarchy" `PluginDocumentSettingPanel` for supported types: parent pages, a page of child pages with their counts and non-published statuses, "View all N in the list", the save warning, the notice after a save that changed URLs (with "View redirects" and, when nothing handles redirects, "Turn on redirects"), old URLs with "View redirects", and the trash sentence with a "Settings" link.
-
-The panel compares the edited slug and parent with the saved ones and warns only for a published page with subpages. After a save that isn't an autosave it reloads the hierarchy; a newest old path that wasn't there before means the save changed URLs.
+- Produces: `src/common/mount.js`: `open( render ): close`, which renders into its own root at the end of `<body>`.
+- Produces: `src/common/url.js`: `Url( { value } )`, a path in `<code>` that breaks only after a slash.
+- Produces: `src/common/redirects-modal.js`, default export `RedirectsModal( { source, onClose } )`. Task 12 uses it with `open()`.
+  - It keeps the current page on screen while the next one loads, and keeps focus on the pager.
+  - "Copy as text" shows its result, or falls back to a focused text box.
+  - It uses `ExternalLink` for the redirect plugin and puts each unresolved old URL below the table.
+- Produces: the `hierarchy-guard` editor plugin, for supported types:
+  - **Warning.** A plugin document panel starts closed and renders nothing inside, so the warning before a save lives in `PluginPostStatusInfo`, right under the Summary's Parent row. It shows only for a published page with subpages whose slug or parent is edited.
+  - **After a save.** When a save changes URLs, the plugin raises a core editor notice with the `changedStatus()` status. Its actions are "View redirects (N)" and, when nothing handles redirects, "Set up redirects". The modal renders at the plugin's root, so it opens whether the panel is open or not.
+  - **The panel.** "Hierarchy" shows parent pages (two levels up or more, since the Summary shows the parent), subpages with their counts and non-published statuses, "View all", old URLs with their state and "View redirects", and the trash sentence with "Change this in Settings".
+  - **Loading.** The hierarchy is fetched only when the panel is open or the slug or parent of a published page is edited, and again after a save that had such an edit.
 
 - [ ] **Step 1: Install the component packages**
 
 ```bash
-npm install --save-dev @wordpress/a11y@^4.57.0 @wordpress/components@^42.0.0 @wordpress/data@^10.57.0 @wordpress/editor@^15.2.0 @wordpress/element@^9.0.0 @wordpress/plugins@^7.57.0
+npm install --save-dev @wordpress/a11y@^4.57.0 @wordpress/components@^42.0.0 @wordpress/data@^10.57.0 @wordpress/editor@^15.2.0 @wordpress/element@^9.0.0 @wordpress/notices@^5.57.0 @wordpress/plugins@^7.57.0
 ```
 
 - [ ] **Step 2: Create the modal**
@@ -6783,20 +7856,86 @@ export function open( render ) {
 }
 ```
 
+Create `src/common/url.js`:
+```js
+/**
+ * A URL path that breaks only after a slash, never inside a slug.
+ */
+import { Fragment } from '@wordpress/element';
+
+/**
+ * The path in a code element.
+ *
+ * @param {Object} props       Props.
+ * @param {string} props.value Path, such as /about/team/.
+ * @return {Element} Code.
+ */
+export default function Url( { value } ) {
+	const parts = String( value ).split( '/' );
+	return (
+		<code className="hierarchy-guard-url">
+			{ parts.map( ( part, index ) => (
+				<Fragment key={ index }>
+					{ '' !== part && (
+						<span className="hierarchy-guard-url__part">
+							{ part }
+						</span>
+					) }
+					{ index < parts.length - 1 && (
+						<>
+							/<wbr />
+						</>
+					) }
+				</Fragment>
+			) ) }
+		</code>
+	);
+}
+```
+
 Create `src/common/redirects-modal.js`:
 ```js
 /**
  * The "Redirects needed" modal: old and new URLs, paged, with what to do next.
  */
 import { speak } from '@wordpress/a11y';
-import { Button, Modal, Notice, Spinner } from '@wordpress/components';
-import { useEffect, useState } from '@wordpress/element';
+import {
+	Button,
+	ExternalLink,
+	Modal,
+	Notice,
+	Spinner,
+} from '@wordpress/components';
+import { useEffect, useRef, useState } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
 import { csvUrl, fetchPairs } from './api';
 import config from './config';
-import { formatCount, pairsText, unresolvedSentence } from './copy';
+import {
+	copiedSentence,
+	formatCount,
+	pairsText,
+	unresolvedSentence,
+} from './copy';
+import Url from './url';
 
 const PER_PAGE = 20;
+
+/**
+ * "Showing 1–20 of 45".
+ *
+ * @param {Object} data A page of pairs.
+ * @return {string} Range.
+ */
+function rangeLabel( data ) {
+	const first = ( data.page - 1 ) * PER_PAGE + 1;
+	return sprintf(
+		/* translators: 1: first pair shown, 2: last pair shown, 3: pairs in all. */
+		__( 'Showing %1$s–%2$s of %3$s', 'hierarchy-guard' ),
+		formatCount( first ),
+		formatCount( first + data.pairs.length - 1 ),
+		formatCount( data.total, data.capped )
+	);
+}
 
 /**
  * The modal.
@@ -6809,61 +7948,136 @@ const PER_PAGE = 20;
 export default function RedirectsModal( { source, onClose } ) {
 	const [ page, setPage ] = useState( 1 );
 	const [ data, setData ] = useState( null );
+	const [ loading, setLoading ] = useState( true );
 	const [ error, setError ] = useState( '' );
-	const [ text, setText ] = useState( '' );
+	const [ copy, setCopy ] = useState( { busy: false, done: '', text: '' } );
+	const previous = useRef();
+	const next = useRef();
+	const pressed = useRef( '' );
+	const fallback = useRef();
 
 	useEffect( () => {
 		let live = true;
-		setData( null );
+		setLoading( true );
+		setError( '' );
 		fetchPairs( source, page, PER_PAGE )
-			.then( ( result ) => live && setData( result ) )
-			.catch(
-				( failure ) =>
-					live &&
-					setError(
-						failure.message ||
-							__(
-								'The redirects could not be loaded.',
-								'hierarchy-guard'
-							)
-					)
-			);
+			.then( ( result ) => {
+				if ( ! live ) {
+					return;
+				}
+				setData( result );
+				setLoading( false );
+				if ( result.pages > 1 ) {
+					speak( rangeLabel( result ), 'polite' );
+				}
+			} )
+			.catch( ( failure ) => {
+				if ( ! live ) {
+					return;
+				}
+				setLoading( false );
+				setError(
+					failure.message ||
+						__(
+							'The redirects couldn’t be loaded.',
+							'hierarchy-guard'
+						)
+				);
+			} );
 		return () => {
 			live = false;
 		};
 	}, [ source, page ] );
 
+	// A pager button that the new page disables would drop focus out of the modal.
+	useEffect( () => {
+		if ( ! data || loading || ! pressed.current ) {
+			return;
+		}
+		if ( 'next' === pressed.current && data.page >= data.pages ) {
+			previous.current?.focus();
+		} else if ( 'previous' === pressed.current && data.page <= 1 ) {
+			next.current?.focus();
+		}
+		pressed.current = '';
+	}, [ data, loading ] );
+
+	const turn = ( direction ) => {
+		if ( loading ) {
+			return;
+		}
+		pressed.current = direction;
+		setPage( data.page + ( 'next' === direction ? 1 : -1 ) );
+	};
+
+	useEffect( () => {
+		if ( copy.text ) {
+			fallback.current?.focus();
+		}
+	}, [ copy.text ] );
+
 	const provider = config.provider;
 	const layout = provider ? provider.csv : 'generic';
+	const name = provider && provider.name ? provider.name : '';
 
-	const copy = () =>
-		fetchPairs( source, 1, config.cap ).then( ( all ) => {
-			const lines = pairsText( all.pairs );
-			const fallback = () => setText( lines );
-			if ( window.navigator.clipboard && window.isSecureContext ) {
+	const copyAll = () => {
+		setCopy( { busy: true, done: '', text: '' } );
+		fetchPairs( source, 1, config.cap )
+			.then( ( all ) => {
+				const lines = pairsText( all.pairs );
+				const manual = () => {
+					setCopy( { busy: false, done: '', text: lines } );
+					speak(
+						__( 'Select the text and copy it.', 'hierarchy-guard' ),
+						'polite'
+					);
+				};
+				if (
+					! window.navigator.clipboard ||
+					! window.isSecureContext
+				) {
+					manual();
+					return;
+				}
+				const done = copiedSentence( all.pairs.length, all.capped );
 				window.navigator.clipboard
 					.writeText( lines )
-					.then( () =>
-						speak( __( 'Copied.', 'hierarchy-guard' ), 'polite' )
-					)
-					.catch( fallback );
-			} else {
-				fallback();
-			}
-		} );
+					.then( () => {
+						setCopy( { busy: false, done, text: '' } );
+						speak( done, 'polite' );
+						window.setTimeout(
+							() =>
+								setCopy( ( state ) => ( {
+									...state,
+									done: '',
+								} ) ),
+							3000
+						);
+					} )
+					.catch( manual );
+			} )
+			.catch( () => {
+				setCopy( { busy: false, done: '', text: '' } );
+				setError(
+					__( 'The list couldn’t be copied.', 'hierarchy-guard' )
+				);
+			} );
+	};
 
 	let intro;
 	if ( config.serving ) {
 		intro = __(
-			'Hierarchy Guard redirects these old URLs to their new pages.',
+			'These old URLs redirect to their new pages.',
 			'hierarchy-guard'
 		);
-	} else if ( provider ) {
+	} else if ( name ) {
 		intro = sprintf(
 			/* translators: %s: name of the redirect plugin. */
 			__( 'Add these in %s.', 'hierarchy-guard' ),
-			provider.name
+			name
 		);
+	} else if ( provider ) {
+		intro = __( 'Add these in your redirect plugin.', 'hierarchy-guard' );
 	} else {
 		intro = __(
 			'Nothing on this site redirects these old URLs yet.',
@@ -6887,17 +8101,21 @@ export default function RedirectsModal( { source, onClose } ) {
 					{ error }
 				</Notice>
 			) }
-			{ ! error && ! data && <Spinner /> }
+			{ ! data && loading && <Spinner /> }
 			{ data && (
 				<>
 					<p>{ intro }</p>
-					{ data.unresolved.map( ( row ) => (
-						<p key={ row.old } className="description">
-							{ unresolvedSentence( row ) }
-						</p>
-					) ) }
 					{ data.total > 0 ? (
-						<table className="widefat striped hierarchy-guard-pairs">
+						<table
+							className="widefat striped hierarchy-guard-pairs"
+							aria-busy={ loading }
+						>
+							<caption className="screen-reader-text">
+								{ __(
+									'Old URLs and their new URLs',
+									'hierarchy-guard'
+								) }
+							</caption>
 							<thead>
 								<tr>
 									<th scope="col">
@@ -6912,10 +8130,10 @@ export default function RedirectsModal( { source, onClose } ) {
 								{ data.pairs.map( ( pair ) => (
 									<tr key={ pair.old }>
 										<td>
-											<code>{ pair.old }</code>
+											<Url value={ pair.old } />
 										</td>
 										<td>
-											<code>{ pair.new }</code>
+											<Url value={ pair.new } />
 										</td>
 									</tr>
 								) ) }
@@ -6929,49 +8147,43 @@ export default function RedirectsModal( { source, onClose } ) {
 							) }
 						</p>
 					) }
+					{ data.unresolved.map( ( row ) => (
+						<p key={ row.old } className="description">
+							{ unresolvedSentence( row ) }
+						</p>
+					) ) }
 					{ data.pages > 1 && (
 						<div className="hierarchy-guard-modal__pager">
-							<span>
-								{ sprintf(
-									/* translators: 1: first pair shown, 2: last pair shown, 3: pairs in all. */
-									__(
-										'Showing %1$s–%2$s of %3$s',
-										'hierarchy-guard'
-									),
-									formatCount(
-										( data.page - 1 ) * PER_PAGE + 1
-									),
-									formatCount(
-										( data.page - 1 ) * PER_PAGE +
-											data.pairs.length
-									),
-									formatCount( data.total, data.capped )
-								) }
-							</span>
+							<span>{ rangeLabel( data ) }</span>
 							<Button
+								ref={ previous }
 								variant="secondary"
 								size="compact"
 								disabled={ data.page <= 1 }
-								onClick={ () => setPage( data.page - 1 ) }
+								isBusy={ loading && page < data.page }
+								onClick={ () => turn( 'previous' ) }
 							>
 								{ __( 'Previous', 'hierarchy-guard' ) }
 							</Button>
 							<Button
+								ref={ next }
 								variant="secondary"
 								size="compact"
 								disabled={ data.page >= data.pages }
-								onClick={ () => setPage( data.page + 1 ) }
+								isBusy={ loading && page > data.page }
+								onClick={ () => turn( 'next' ) }
 							>
 								{ __( 'Next', 'hierarchy-guard' ) }
 							</Button>
 						</div>
 					) }
-					{ text && (
+					{ copy.text && (
 						<textarea
+							ref={ fallback }
 							className="large-text code"
 							rows={ 6 }
 							readOnly
-							value={ text }
+							value={ copy.text }
 							aria-label={ __(
 								'Redirects as text',
 								'hierarchy-guard'
@@ -6980,31 +8192,29 @@ export default function RedirectsModal( { source, onClose } ) {
 						/>
 					) }
 					<div className="hierarchy-guard-modal__actions">
-						{ ! config.serving &&
-							! provider &&
-							config.settingsUrl && (
-								<Button
-									variant="primary"
-									href={ config.settingsUrl }
-								>
-									{ __(
-										'Turn on redirects',
-										'hierarchy-guard'
-									) }
-								</Button>
-							) }
 						{ ! config.serving && provider && provider.url && (
+							<ExternalLink href={ provider.url }>
+								{ name
+									? sprintf(
+											/* translators: %s: name of the redirect plugin. */
+											__( 'Open %s', 'hierarchy-guard' ),
+											name
+										)
+									: __(
+											'Open the redirect plugin',
+											'hierarchy-guard'
+										) }
+							</ExternalLink>
+						) }
+						{ data.total > 0 && (
 							<Button
-								variant="secondary"
-								href={ provider.url }
-								target="_blank"
-								rel="noopener noreferrer"
+								variant="tertiary"
+								onClick={ copyAll }
+								isBusy={ copy.busy }
+								disabled={ copy.busy }
 							>
-								{ sprintf(
-									/* translators: %s: name of the redirect plugin. */
-									__( 'Open %s', 'hierarchy-guard' ),
-									provider.name
-								) }
+								{ copy.done ||
+									__( 'Copy as text', 'hierarchy-guard' ) }
 							</Button>
 						) }
 						{ data.total > 0 && (
@@ -7013,23 +8223,31 @@ export default function RedirectsModal( { source, onClose } ) {
 								href={ csvUrl( source, layout ) }
 								download
 							>
-								{ provider
+								{ name
 									? sprintf(
 											/* translators: %s: name of the redirect plugin. */
 											__(
 												'Download CSV for %s',
 												'hierarchy-guard'
 											),
-											provider.name
+											name
 										)
 									: __( 'Download CSV', 'hierarchy-guard' ) }
 							</Button>
 						) }
-						{ data.total > 0 && (
-							<Button variant="tertiary" onClick={ copy }>
-								{ __( 'Copy as text', 'hierarchy-guard' ) }
-							</Button>
-						) }
+						{ ! config.serving &&
+							! provider &&
+							config.settingsUrl && (
+								<Button
+									variant="primary"
+									href={ config.settingsUrl }
+								>
+									{ __(
+										'Set up redirects',
+										'hierarchy-guard'
+									) }
+								</Button>
+							) }
 					</div>
 				</>
 			) }
@@ -7046,8 +8264,8 @@ Create `src/common/modal.scss`:
 	.hierarchy-guard-pairs {
 		margin: 12px 0;
 
-		code {
-			word-break: break-all;
+		.hierarchy-guard-url {
+			overflow-wrap: anywhere;
 		}
 	}
 
@@ -7059,6 +8277,15 @@ Create `src/common/modal.scss`:
 		align-items: center;
 		margin-top: 12px;
 	}
+
+	&__actions {
+		justify-content: flex-end;
+	}
+}
+
+// A slug never breaks; a long path breaks after a slash.
+.hierarchy-guard-url__part {
+	white-space: nowrap;
 }
 ```
 
@@ -7080,29 +8307,44 @@ registerPlugin( 'hierarchy-guard', { render: HierarchyPanel } );
 Create `src/editor/panel.js`:
 ```js
 /**
- * What is above and below the page being edited, a warning before a save
- * changes subpage URLs, and the redirects after it did.
+ * The Hierarchy plugin for the block editor: a warning under the Summary
+ * before a save changes subpage URLs, a notice after it did, and a panel
+ * with what is above and below the page.
  */
-import { Button, Notice, Spinner } from '@wordpress/components';
-import { useSelect } from '@wordpress/data';
+import {
+	BaseControl,
+	Button,
+	Notice,
+	Spinner,
+	VisuallyHidden,
+} from '@wordpress/components';
+import { useDispatch, useSelect } from '@wordpress/data';
 import {
 	PluginDocumentSettingPanel,
+	PluginPostStatusInfo,
 	store as editorStore,
 } from '@wordpress/editor';
 import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
+import { store as noticesStore } from '@wordpress/notices';
 import { fetchHierarchy, fetchPairs } from '../common/api';
 import config from '../common/config';
 import {
 	changedSentence,
+	changedStatus,
 	countsLine,
-	formatCount,
+	oldUrlState,
 	saveWarning,
 	subpagesLabel,
 	trashNote,
+	viewAllLabel,
 	viewRedirectsLabel,
 } from '../common/copy';
 import RedirectsModal from '../common/redirects-modal';
+import Url from '../common/url';
+
+const PANEL = 'hierarchy-guard/hierarchy-guard';
+const NOTICE = 'hierarchy-guard-urls-changed';
 
 /**
  * A title linked to its editor when the user may edit it.
@@ -7120,36 +8362,187 @@ function Title( { item } ) {
 }
 
 /**
- * The panel.
+ * A section heading with core's label styling.
  *
- * @return {Element|null} Panel, or null for unsupported types.
+ * @param {Object}  props          Props.
+ * @param {Element} props.children Text.
+ * @return {Element} Heading.
  */
-export default function HierarchyPanel() {
-	const { postId, postType, status, urlEdited, saving, autosaving, saved } =
-		useSelect( ( select ) => {
-			const editor = select( editorStore );
-			return {
-				postId: editor.getCurrentPostId(),
-				postType: editor.getCurrentPostType(),
-				status: editor.getCurrentPostAttribute( 'status' ),
-				urlEdited:
-					editor.getEditedPostAttribute( 'slug' ) !==
-						editor.getCurrentPostAttribute( 'slug' ) ||
-					( editor.getEditedPostAttribute( 'parent' ) || 0 ) !==
-						( editor.getCurrentPostAttribute( 'parent' ) || 0 ),
-				saving: editor.isSavingPost(),
-				autosaving: editor.isAutosavingPost(),
-				saved: editor.didPostSaveRequestSucceed(),
-			};
-		}, [] );
+function Heading( { children } ) {
+	return (
+		<BaseControl.VisualLabel
+			as="h3"
+			className="hierarchy-guard-panel__heading"
+		>
+			{ children }
+		</BaseControl.VisualLabel>
+	);
+}
+
+/**
+ * What the panel shows once the hierarchy is loaded.
+ *
+ * @param {Object}                 props        Props.
+ * @param {Object}                 props.data   Hierarchy from the REST route.
+ * @param {(from: string) => void} props.onView Opens the redirects of an old path.
+ * @return {Element} Sections.
+ */
+function Overview( { data, onView } ) {
+	const trash = trashNote( data );
+	return (
+		<div className="hierarchy-guard-panel__body">
+			{ data.ancestors.length > 1 && (
+				<div className="hierarchy-guard-panel__section">
+					<Heading>
+						{ __( 'Parent pages', 'hierarchy-guard' ) }
+					</Heading>
+					<p>
+						{ data.ancestors.map( ( item, index ) => (
+							<span key={ item.id }>
+								{ index > 0 && (
+									<span aria-hidden="true"> › </span>
+								) }
+								<Title item={ item } />
+							</span>
+						) ) }
+					</p>
+				</div>
+			) }
+
+			<div className="hierarchy-guard-panel__section">
+				<Heading>{ __( 'Subpages', 'hierarchy-guard' ) }</Heading>
+				{ 0 === data.children_total ? (
+					<p>{ __( 'No subpages.', 'hierarchy-guard' ) }</p>
+				) : (
+					<>
+						<p className="description">{ countsLine( data ) }</p>
+						<ul className="hierarchy-guard-panel__list">
+							{ data.children.map( ( child ) => (
+								<li key={ child.id }>
+									<Title item={ child } />
+									{ 'publish' !== child.status &&
+										' — ' + child.status_label }
+									{ child.children_count > 0 &&
+										' · ' +
+											subpagesLabel(
+												child.children_count,
+												child.children_capped
+											) }
+								</li>
+							) ) }
+						</ul>
+						{ data.has_more && (
+							<p>
+								<a href={ data.list_url }>
+									{ viewAllLabel(
+										data.descendants.count,
+										data.descendants.capped
+									) }
+								</a>
+							</p>
+						) }
+					</>
+				) }
+			</div>
+
+			{ data.old_paths.length > 0 && (
+				<div className="hierarchy-guard-panel__section">
+					<Heading>{ __( 'Old URLs', 'hierarchy-guard' ) }</Heading>
+					<ul className="hierarchy-guard-panel__list">
+						{ data.old_paths.map( ( old ) => (
+							<li key={ old.path }>
+								<Url value={ old.url } />
+								<span className="hierarchy-guard-panel__meta">
+									{ oldUrlState(
+										data.redirects.serving,
+										data.redirects.provider
+									) }
+									{ ' · ' }
+									<Button
+										variant="link"
+										onClick={ () => onView( old.path ) }
+									>
+										{ __(
+											'View redirects',
+											'hierarchy-guard'
+										) }
+										<VisuallyHidden>
+											{ sprintf(
+												/* translators: %s: an old URL. */
+												__(
+													'for %s',
+													'hierarchy-guard'
+												),
+												old.url
+											) }
+										</VisuallyHidden>
+									</Button>
+								</span>
+							</li>
+						) ) }
+					</ul>
+				</div>
+			) }
+
+			{ trash && (
+				<p className="hierarchy-guard-panel__note">
+					{ trash }{ ' ' }
+					{ config.policyUrl && (
+						<a href={ config.policyUrl }>
+							{ __(
+								'Change this in Settings',
+								'hierarchy-guard'
+							) }
+						</a>
+					) }
+				</p>
+			) }
+		</div>
+	);
+}
+
+/**
+ * The plugin.
+ *
+ * @return {Element|null} Its parts, or null for unsupported types.
+ */
+export default function HierarchyPlugin() {
+	const {
+		postId,
+		postType,
+		status,
+		urlEdited,
+		saving,
+		autosaving,
+		saved,
+		opened,
+	} = useSelect( ( select ) => {
+		const editor = select( editorStore );
+		return {
+			postId: editor.getCurrentPostId(),
+			postType: editor.getCurrentPostType(),
+			status: editor.getCurrentPostAttribute( 'status' ),
+			urlEdited:
+				editor.getEditedPostAttribute( 'slug' ) !==
+					editor.getCurrentPostAttribute( 'slug' ) ||
+				( editor.getEditedPostAttribute( 'parent' ) || 0 ) !==
+					( editor.getCurrentPostAttribute( 'parent' ) || 0 ),
+			saving: editor.isSavingPost(),
+			autosaving: editor.isAutosavingPost(),
+			saved: editor.didPostSaveRequestSucceed(),
+			opened: editor.isEditorPanelOpened( PANEL ),
+		};
+	}, [] );
+	const { createNotice, removeNotice } = useDispatch( noticesStore );
 
 	const supported = config.postTypes.includes( postType );
+	const published = 'publish' === status;
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( '' );
-	const [ changed, setChanged ] = useState( null );
 	const [ modal, setModal ] = useState( null );
+	const requested = useRef( false );
 	const newest = useRef( undefined );
-	const wasSaving = useRef( false );
+	const savingUrl = useRef( false );
 
 	const load = useCallback(
 		() =>
@@ -7157,13 +8550,18 @@ export default function HierarchyPanel() {
 				.then( ( result ) => {
 					setData( result );
 					setError( '' );
+					if ( undefined === newest.current ) {
+						newest.current = result.old_paths[ 0 ]
+							? result.old_paths[ 0 ].path
+							: null;
+					}
 					return result;
 				} )
 				.catch( ( failure ) => {
 					setError(
 						failure.message ||
 							__(
-								'The hierarchy could not be loaded.',
+								'The hierarchy couldn’t be loaded.',
 								'hierarchy-guard'
 							)
 					);
@@ -7172,257 +8570,131 @@ export default function HierarchyPanel() {
 		[ postId ]
 	);
 
+	// Load once something shows the data: the panel, or the warning before a save.
+	const needed =
+		supported && !! postId && ( opened || ( published && urlEdited ) );
 	useEffect( () => {
-		if ( ! supported || ! postId ) {
-			return;
+		if ( needed && ! requested.current ) {
+			requested.current = true;
+			load();
 		}
-		load().then( ( result ) => {
-			newest.current = result?.old_paths?.[ 0 ]?.path ?? null;
-		} );
-	}, [ supported, postId, load ] );
+	}, [ needed, load ] );
 
-	// After a save, reload; a new old path means the save changed URLs.
+	// A save that changed the slug or parent may have recorded an old URL.
 	useEffect( () => {
 		if ( saving && ! autosaving ) {
-			wasSaving.current = true;
+			savingUrl.current = savingUrl.current || ( published && urlEdited );
 			return;
 		}
-		if ( saving || ! wasSaving.current ) {
+		if ( saving || ! savingUrl.current ) {
 			return;
 		}
-		wasSaving.current = false;
+		savingUrl.current = false;
 		if ( ! saved ) {
 			return;
 		}
+		removeNotice( NOTICE );
 		load().then( ( result ) => {
-			const latest = result?.old_paths?.[ 0 ]?.path ?? null;
-			if ( latest && latest !== newest.current ) {
-				fetchPairs( { post: postId, from: latest }, 1, 1 ).then(
-					( pairs ) =>
-						setChanged( {
-							from: latest,
-							count: pairs.total,
-							capped: pairs.capped,
-						} )
-				);
+			const latest =
+				result && result.old_paths[ 0 ]
+					? result.old_paths[ 0 ].path
+					: null;
+			if ( ! latest || latest === newest.current ) {
+				return;
 			}
 			newest.current = latest;
+			fetchPairs( { post: postId, from: latest }, 1, 1 ).then(
+				( pairs ) => {
+					if ( ! pairs.total ) {
+						return;
+					}
+					const { serving, provider } = result.redirects;
+					const actions = [];
+					if ( ! serving ) {
+						actions.push( {
+							label: viewRedirectsLabel(
+								pairs.total,
+								pairs.capped
+							),
+							onClick: () =>
+								setModal( { post: postId, from: latest } ),
+						} );
+					}
+					if ( ! serving && ! provider && config.settingsUrl ) {
+						actions.push( {
+							label: __( 'Set up redirects', 'hierarchy-guard' ),
+							url: config.settingsUrl,
+						} );
+					}
+					createNotice(
+						changedStatus( serving, provider ),
+						changedSentence(
+							pairs.total,
+							pairs.capped,
+							serving,
+							provider
+						),
+						{ id: NOTICE, isDismissible: true, actions }
+					);
+				}
+			);
 		} );
-	}, [ saving, autosaving, saved, load, postId ] );
+	}, [
+		saving,
+		autosaving,
+		saved,
+		published,
+		urlEdited,
+		load,
+		postId,
+		createNotice,
+		removeNotice,
+	] );
 
 	if ( ! supported ) {
 		return null;
 	}
 
-	const published = 'publish' === status;
-	const showWarning =
-		data && published && urlEdited && data.descendants.count > 0;
-	const trash = data ? trashNote( data ) : '';
-
 	return (
-		<PluginDocumentSettingPanel
-			name="hierarchy-guard"
-			title={ __( 'Hierarchy', 'hierarchy-guard' ) }
-			className="hierarchy-guard-panel"
-		>
-			{ error && (
-				<Notice status="error" isDismissible={ false }>
-					{ error }
-				</Notice>
-			) }
-			{ ! data && ! error && <Spinner /> }
-			{ showWarning && (
-				<Notice status="warning" isDismissible={ false }>
-					{ saveWarning(
-						data.descendants.count,
-						data.descendants.capped,
-						data.redirects.serving
-					) }
-				</Notice>
-			) }
-			{ changed && changed.count > 0 && (
-				<Notice
-					status={
-						data?.redirects.serving || data?.redirects.provider
-							? 'success'
-							: 'warning'
-					}
-					onRemove={ () => setChanged( null ) }
-					actions={ [
-						...( ! data?.redirects.serving
-							? [
-									{
-										label: viewRedirectsLabel(
-											changed.count,
-											changed.capped
-										),
-										onClick: () =>
-											setModal( {
-												post: postId,
-												from: changed.from,
-											} ),
-									},
-								]
-							: [] ),
-						...( ! data?.redirects.serving &&
-						! data?.redirects.provider &&
-						config.settingsUrl
-							? [
-									{
-										label: __(
-											'Turn on redirects',
-											'hierarchy-guard'
-										),
-										url: config.settingsUrl,
-									},
-								]
-							: [] ),
-					] }
-				>
-					{ changedSentence(
-						changed.count,
-						changed.capped,
-						data?.redirects.serving,
-						data?.redirects.provider
-					) }
-				</Notice>
-			) }
-			{ data && (
-				<div className="hierarchy-guard-panel__body">
-					<div className="hierarchy-guard-panel__section">
-						<p className="hierarchy-guard-panel__label">
-							{ __( 'Parent pages', 'hierarchy-guard' ) }
-						</p>
-						{ data.ancestors.length ? (
-							<p>
-								{ data.ancestors.map( ( item, index ) => (
-									<span key={ item.id }>
-										{ index > 0 && ' / ' }
-										<Title item={ item } />
-									</span>
-								) ) }
-							</p>
-						) : (
-							<p>
-								{ __(
-									'None. This is a top-level page.',
-									'hierarchy-guard'
-								) }
-							</p>
+		<>
+			{ data && published && urlEdited && data.descendants.count > 0 && (
+				<PluginPostStatusInfo className="hierarchy-guard-save-warning">
+					<Notice status="warning" isDismissible={ false }>
+						{ saveWarning(
+							data.descendants.count,
+							data.descendants.capped,
+							data.redirects.serving
 						) }
-					</div>
-
-					<div className="hierarchy-guard-panel__section">
-						<p className="hierarchy-guard-panel__label">
-							{ __( 'Child pages', 'hierarchy-guard' ) }
-							{ data.children_total > 0 && (
-								<span className="hierarchy-guard-panel__meta description">
-									{ countsLine( data ) }
-								</span>
-							) }
-						</p>
-						{ data.children_total === 0 ? (
-							<p>{ __( 'No subpages.', 'hierarchy-guard' ) }</p>
-						) : (
-							<ul className="hierarchy-guard-panel__list">
-								{ data.children.map( ( child ) => (
-									<li key={ child.id }>
-										<Title item={ child } />
-										{ 'publish' !== child.status &&
-											' · ' + child.status_label }
-										<span className="hierarchy-guard-panel__meta description">
-											{ child.children_count > 0
-												? subpagesLabel(
-														child.children_count,
-														child.children_capped
-													)
-												: __(
-														'No subpages',
-														'hierarchy-guard'
-													) }
-										</span>
-									</li>
-								) ) }
-							</ul>
-						) }
-						{ data.has_more && (
-							<p>
-								<a href={ data.list_url }>
-									{ sprintf(
-										/* translators: %s: number of subpages at every level. */
-										__(
-											'View all %s in the list',
-											'hierarchy-guard'
-										),
-										formatCount(
-											data.descendants.count,
-											data.descendants.capped
-										)
-									) }
-								</a>
-							</p>
-						) }
-					</div>
-
-					{ data.old_paths.length > 0 && (
-						<div className="hierarchy-guard-panel__section">
-							<p className="hierarchy-guard-panel__label">
-								{ __( 'Old URLs', 'hierarchy-guard' ) }
-							</p>
-							<ul className="hierarchy-guard-panel__list">
-								{ data.old_paths.map( ( old ) => (
-									<li key={ old.path }>
-										<code>{ old.url }</code>
-										<span className="hierarchy-guard-panel__meta description">
-											{ data.redirects.serving
-												? __(
-														'Redirects here',
-														'hierarchy-guard'
-													)
-												: __(
-														'Not redirected',
-														'hierarchy-guard'
-													) }
-										</span>
-										<Button
-											variant="link"
-											onClick={ () =>
-												setModal( {
-													post: postId,
-													from: old.path,
-												} )
-											}
-										>
-											{ __(
-												'View redirects',
-												'hierarchy-guard'
-											) }
-										</Button>
-									</li>
-								) ) }
-							</ul>
-						</div>
-					) }
-
-					{ trash && (
-						<p className="hierarchy-guard-panel__note">
-							{ trash }{ ' ' }
-							{ config.policyUrl && (
-								<a href={ config.policyUrl }>
-									{ __( 'Settings', 'hierarchy-guard' ) }
-								</a>
-							) }
-						</p>
-					) }
-				</div>
+					</Notice>
+				</PluginPostStatusInfo>
 			) }
+			<PluginDocumentSettingPanel
+				name="hierarchy-guard"
+				title={ __( 'Hierarchy', 'hierarchy-guard' ) }
+				className="hierarchy-guard-panel"
+			>
+				{ error && (
+					<Notice status="error" isDismissible={ false }>
+						{ error }
+					</Notice>
+				) }
+				{ ! data && ! error && <Spinner /> }
+				{ data && (
+					<Overview
+						data={ data }
+						onView={ ( from ) =>
+							setModal( { post: postId, from } )
+						}
+					/>
+				) }
+			</PluginDocumentSettingPanel>
 			{ modal && (
 				<RedirectsModal
 					source={ modal }
 					onClose={ () => setModal( null ) }
 				/>
 			) }
-		</PluginDocumentSettingPanel>
+		</>
 	);
 }
 ```
@@ -7432,10 +8704,6 @@ Create `src/editor/editor.scss`:
 // Layout only: colours, radii and type come from the admin theme.
 .hierarchy-guard-panel {
 
-	.components-notice {
-		margin: 0 0 12px;
-	}
-
 	&__section {
 		margin-bottom: 16px;
 
@@ -7444,12 +8712,8 @@ Create `src/editor/editor.scss`:
 		}
 	}
 
-	&__label {
-		font-weight: 500;
-	}
-
-	&__meta {
-		display: block;
+	&__heading {
+		margin-top: 0;
 	}
 
 	&__list {
@@ -7460,9 +8724,18 @@ Create `src/editor/editor.scss`:
 		}
 	}
 
+	&__meta {
+		display: block;
+	}
+
 	&__note {
 		margin: 0;
 	}
+}
+
+.hierarchy-guard-save-warning .components-notice {
+	margin: 0;
+	width: 100%;
 }
 ```
 
@@ -7489,7 +8762,7 @@ Expected: the suite passes.
 
 - [ ] **Step 5: Look at it**
 
-Run `npm run build`, open a published page with subpages in the block editor on the dev site (`npm run env:start`; http://localhost:8888, admin / password) and open Settings › Page › Hierarchy. Expected: the parent pages, the child pages with "N subpages", and the trash sentence. Edit the slug: the warning "Saving changes this page’s URL and the URLs of N subpages. You’ll get the redirects to add after saving." appears. Save: a notice says how many old URLs changed, and "View redirects (N)" opens a modal listing them.
+Run `npm run build`, then open a published page with subpages in the block editor on the dev site (`npm run env:start`; http://localhost:8888, admin / password). Leave the Hierarchy panel closed and edit the slug. Expected: "Saving changes this page’s URL and the URLs of N subpages. You’ll get the redirects to add after saving." appears under the Parent row. Save: a notice at the top says how many old URLs changed, and "View redirects (N)" opens a modal listing them. Open the Hierarchy panel: it shows the subpages with "N subpages", the old URL, and the trash sentence.
 
 - [ ] **Step 6: Commit**
 
@@ -7501,71 +8774,146 @@ git commit -m "feat: redirects modal and the block editor Hierarchy panel"
 ### Task 12: The list-screen script
 
 **Files:**
-- Modify: `webpack.config.js`
+- Modify: `webpack.config.js`, `package.json`, `package-lock.json` (through npm)
 - Create: `src/list-table/index.js`, `src/list-table/trash-dialog.js`, `src/list-table/quick-edit.js`, `src/list-table/list-table.scss`
 
 **Interfaces:**
-- Consumes: Task 4's `.hierarchy-guard-cell` and `.hierarchy-guard-under`, Task 6's `trash-preview` route and `hierarchy_guard_policy` parameter, Task 8's `a.hierarchy-guard-view-redirects` and `.hierarchy-guard-nudge`, Task 10's `config`, `copy`, `api`, Task 11's `open()` and `RedirectsModal`; core's `inlineEditPost` and the `wp-notice-added` event.
-- Produces: on supported list screens, a Trash row action or a bulk "Move to Trash" whose pages have subpages opens the trash dialog. It previews every page with subpages, shows the default policy's sentence, and offers the other two policies behind "Other options"; trash-the-subpages is disabled past the cap. Confirming follows core's own link or submits core's form with `hierarchy_guard_policy`; if the preview finds no subpages any more it proceeds at once. Quick Edit warns under the slug field when the slug or parent of a published page with subpages changes, and a save that recorded an old path adds a notice with "View redirects". The outcome notice's "View redirects" opens the modal. Dismissing the nudge saves the user setting. The subtree breadcrumb moves beside the heading as a `.subtitle`, the way core shows search results.
+- Consumes:
+  - Task 4's `.hierarchy-guard-cell` and `.hierarchy-guard-under`.
+  - Task 6's `trash-preview` route and `hierarchy_guard_policy` parameter.
+  - Task 8's `a.hierarchy-guard-view-redirects`, `.hierarchy-guard-urls` and `.hierarchy-guard-nudge`.
+  - Task 10's `config`, `copy` and `api`.
+  - Task 11's `open()`, `Url` and `RedirectsModal`.
+  - Core's `inlineEditPost`, its `.inline-edit-save` bar, and the `wp-updates-notice-added` and `wp-notice-added` events.
+- Produces, on supported list screens:
+  - **Trash dialog.** A Trash row action, or a bulk "Move to Trash" from an Apply button whose selection has pages with subpages, opens the trash dialog. The title is known at the click ("Move this page to the Trash?" or "Move N pages to the Trash?"). While the preview loads it shows a sentence from the row's own data, with "Checking the subpages…".
+    - It then shows the page's own policy's sentence, announced through `aria-describedby`. The other policies sit behind "Other options" (with a chevron), with example URLs in code. Trash-the-subpages is disabled past the cap.
+    - A bulk dialog previews at most 50 pages with subpages and counts the rest from the screen.
+    - Confirming follows core's own link, or submits core's form. It adds `hierarchy_guard_policy` only when the editor picked another option.
+    - While it is busy the dialog can't be dismissed, and a cancelled preview never trashes. If the preview finds no subpages any more, it proceeds at once.
+  - **Quick Edit.** It warns in core's save bar when the slug or parent of a published page with subpages changes. It fetches the count on the first edit, speaks the warning once, and links it to the fields. A save that recorded an old path adds a notice with a "View redirects" button, styled and spoken like the editor's.
+  - **URLs notice.** It moves below core's trash notice. Its link becomes a button that opens the modal.
+  - **Nudge.** Dismissing it records the dismissal.
+  - **Breadcrumb.** The subtree breadcrumb moves beside the heading as a `.subtitle`, the way core shows search results.
 
-- [ ] **Step 1: Create the dialog**
+- [ ] **Step 1: Install the icons and create the dialog**
+
+```bash
+npm install --save-dev @wordpress/icons@^18.0.0
+```
+
+`@wordpress/icons` is bundled into the script, not loaded from WordPress.
 
 Create `src/list-table/trash-dialog.js`:
 ```js
 /**
- * The trash dialog: one sentence under the default policy, and the other
- * two policies behind "Other options".
+ * The trash dialog: one sentence under the page's policy, and the other two
+ * policies behind "Other options".
  */
 import { Button, Modal, Notice, Spinner } from '@wordpress/components';
-import { useEffect, useState } from '@wordpress/element';
-import { __, _n, sprintf } from '@wordpress/i18n';
+import {
+	createInterpolateElement,
+	useEffect,
+	useState,
+} from '@wordpress/element';
+import { __ } from '@wordpress/i18n';
+import { chevronDown, chevronUp } from '@wordpress/icons';
 import { trashPreview } from '../common/api';
 import config from '../common/config';
 import {
 	POLICIES,
 	bulkSentence,
 	deniedSentence,
+	dialogTitle,
+	initialSentence,
+	keptUrl,
 	optionDescription,
 	optionLabel,
+	previewError,
 	trashSentence,
 } from '../common/copy';
+import Url from '../common/url';
+
+export const MAX_PREVIEW = 50;
+
+/**
+ * An option's description, with any example URLs in code.
+ *
+ * @param {Object}      props        Props.
+ * @param {string}      props.policy Policy.
+ * @param {Object|null} props.page   The only page with subpages, or null.
+ * @return {Element} Description.
+ */
+function Description( { policy, page } ) {
+	const text = optionDescription( policy, page, config.cap );
+	if ( ! page || ! page.example || ! text.includes( '<from />' ) ) {
+		return text;
+	}
+	const to = 'keep' === policy ? keptUrl( page ) : page.example.to;
+	return createInterpolateElement( text, {
+		from: <Url value={ page.example.from } />,
+		to: <Url value={ to } />,
+	} );
+}
 
 /**
  * The dialog.
  *
- * @param {Object}                        props           Props.
- * @param {number[]}                      props.ids       Selected pages that have subpages.
- * @param {number}                        props.selected  Pages selected in all.
- * @param {() => void}                    props.onCancel  Closes the dialog.
- * @param {(policy: string|null) => void} props.onConfirm Trashes with a policy, or null for the default.
+ * @param {Object}                        props              Props.
+ * @param {number[]}                      props.ids          Selected pages with subpages, at most MAX_PREVIEW.
+ * @param {number}                        props.selected     Pages selected in all.
+ * @param {number}                        props.withChildren Selected pages with subpages, counted on the screen.
+ * @param {string}                        props.title        The row's title, for a single page.
+ * @param {number}                        props.children     The row's direct subpages, for a single page.
+ * @param {() => void}                    props.onCancel     Closes the dialog.
+ * @param {(policy: string|null) => void} props.onConfirm    Trashes; null keeps the page's own policy.
  * @return {Element} Modal.
  */
-export default function TrashDialog( { ids, selected, onCancel, onConfirm } ) {
+export default function TrashDialog( {
+	ids,
+	selected,
+	withChildren,
+	title,
+	children,
+	onCancel,
+	onConfirm,
+} ) {
 	const [ preview, setPreview ] = useState( null );
 	const [ error, setError ] = useState( '' );
+	const [ initial, setInitial ] = useState( config.policy );
 	const [ policy, setPolicy ] = useState( config.policy );
 	const [ expanded, setExpanded ] = useState( false );
 	const [ busy, setBusy ] = useState( false );
 
 	useEffect( () => {
+		let live = true;
 		trashPreview( ids )
 			.then( ( result ) => {
+				if ( ! live ) {
+					return;
+				}
 				if ( ! result.pages.length ) {
 					// The subpages are gone since the list loaded: nothing to ask.
+					setBusy( true );
 					onConfirm( null );
 					return;
 				}
+				const own =
+					1 === selected && 1 === result.pages.length
+						? result.pages[ 0 ].policy
+						: result.policy;
+				setInitial( own );
+				setPolicy( own );
 				setPreview( result );
 			} )
-			.catch( ( failure ) =>
-				setError(
-					failure.message ||
-						__(
-							'The subpages could not be checked.',
-							'hierarchy-guard'
-						)
-				)
-			);
+			.catch( ( failure ) => {
+				if ( live ) {
+					setError( failure.message || '' );
+				}
+			} );
+		return () => {
+			live = false;
+		};
 		// The dialog asks once, for the pages it opened with.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [] );
@@ -7574,116 +8922,123 @@ export default function TrashDialog( { ids, selected, onCancel, onConfirm } ) {
 		preview && 1 === selected && 1 === preview.pages.length
 			? preview.pages[ 0 ]
 			: null;
-	const title = single
-		? sprintf(
-				/* translators: %s: page title. */
-				__( 'Move “%s” to the Trash?', 'hierarchy-guard' ),
-				single.title
+
+	let sentence;
+	if ( single ) {
+		sentence = trashSentence( single, policy, config.cap );
+	} else if ( preview ) {
+		sentence = bulkSentence( preview, policy, withChildren, config.cap );
+	} else if ( 1 === selected ) {
+		sentence = initialSentence( title, children, policy );
+	} else {
+		sentence = '';
+	}
+
+	const denied = preview
+		? preview.pages.some( ( page ) =>
+				'trash_children' === policy ? page.denied_trash : page.denied
 			)
-		: sprintf(
-				/* translators: %s: number of selected pages. */
-				_n(
-					'Move %s page to the Trash?',
-					'Move %s pages to the Trash?',
-					selected,
-					'hierarchy-guard'
-				),
-				Number( selected ).toLocaleString()
-			);
-	const fallback = preview
-		? preview.pages.some( ( page ) => page.fallback )
 		: false;
 
 	const confirm = () => {
 		setBusy( true );
-		onConfirm( policy );
+		onConfirm( policy !== initial ? policy : null );
 	};
 
 	return (
 		<Modal
-			title={ title }
-			onRequestClose={ onCancel }
+			title={ dialogTitle( selected ) }
+			onRequestClose={ busy ? () => {} : onCancel }
+			isDismissible={ ! busy }
+			shouldCloseOnEsc={ ! busy }
+			shouldCloseOnClickOutside={ ! busy }
 			className="hierarchy-guard-dialog"
 			size="medium"
+			aria={ { describedby: 'hierarchy-guard-trash-sentence' } }
 		>
+			<div id="hierarchy-guard-trash-sentence">
+				{ sentence && <p>{ sentence }</p> }
+				{ denied && <p>{ deniedSentence( policy ) }</p> }
+			</div>
+			{ ! error && ! preview && (
+				<p className="hierarchy-guard-dialog__loading">
+					<Spinner />
+					{ __( 'Checking the subpages…', 'hierarchy-guard' ) }
+				</p>
+			) }
 			{ error && (
-				<Notice status="error" isDismissible={ false }>
-					{ error }
+				<Notice status="warning" isDismissible={ false }>
+					{ previewError( policy ) }
 				</Notice>
 			) }
-			{ ! error && ! preview && <Spinner /> }
 			{ preview && (
 				<>
-					<p>
-						{ single
-							? trashSentence( single, policy, config.cap )
-							: bulkSentence( preview, policy ) }
-					</p>
-					{ preview.pages.some( ( page ) => page.denied ) && (
-						<p>{ deniedSentence() }</p>
-					) }
 					<Button
 						variant="link"
+						icon={ expanded ? chevronUp : chevronDown }
+						iconPosition="right"
 						aria-expanded={ expanded }
 						aria-controls="hierarchy-guard-options"
 						onClick={ () => setExpanded( ! expanded ) }
 					>
 						{ __( 'Other options', 'hierarchy-guard' ) }
 					</Button>
-					{ expanded && (
-						<fieldset
-							id="hierarchy-guard-options"
-							className="hierarchy-guard-dialog__options"
-						>
-							<legend className="screen-reader-text">
-								{ __(
-									'What happens to the subpages',
-									'hierarchy-guard'
-								) }
-							</legend>
-							{ POLICIES.map( ( value ) => {
-								const id = `hierarchy-guard-policy-${ value }`;
-								const disabled =
-									'trash_children' === value && fallback;
-								return (
-									<div
-										key={ value }
-										className="hierarchy-guard-dialog__option"
+					<fieldset
+						id="hierarchy-guard-options"
+						className="hierarchy-guard-dialog__options"
+						hidden={ ! expanded }
+					>
+						<legend className="screen-reader-text">
+							{ __(
+								'What happens to the subpages',
+								'hierarchy-guard'
+							) }
+						</legend>
+						{ POLICIES.map( ( value ) => {
+							const id = `hierarchy-guard-policy-${ value }`;
+							const disabled =
+								'trash_children' === value &&
+								!! single &&
+								true === single.fallback;
+							return (
+								<div
+									key={ value }
+									className="hierarchy-guard-dialog__option"
+								>
+									<input
+										type="radio"
+										id={ id }
+										name="hierarchy-guard-policy"
+										value={ value }
+										checked={ policy === value }
+										disabled={ disabled || busy }
+										aria-describedby={ `${ id }-description` }
+										onChange={ () => setPolicy( value ) }
+									/>
+									<label htmlFor={ id }>
+										{ optionLabel( value, single ) }
+									</label>
+									<p
+										id={ `${ id }-description` }
+										className="description"
 									>
-										<input
-											type="radio"
-											id={ id }
-											name="hierarchy-guard-policy"
-											value={ value }
-											checked={ policy === value }
-											disabled={ disabled }
-											aria-describedby={ `${ id }-description` }
-											onChange={ () =>
-												setPolicy( value )
-											}
+										<Description
+											policy={ value }
+											page={ single }
 										/>
-										<label htmlFor={ id }>
-											{ optionLabel( value, single ) }
-										</label>
-										<p
-											id={ `${ id }-description` }
-											className="description"
-										>
-											{ optionDescription(
-												value,
-												single,
-												config.cap
-											) }
-										</p>
-									</div>
-								);
-							} ) }
-						</fieldset>
-					) }
+									</p>
+								</div>
+							);
+						} ) }
+					</fieldset>
 				</>
 			) }
-			<div className="hierarchy-guard-modal__actions hierarchy-guard-dialog__actions">
-				<Button variant="tertiary" onClick={ onCancel }>
+			<div className="hierarchy-guard-modal__actions">
+				<Button
+					variant="tertiary"
+					onClick={ onCancel }
+					disabled={ busy }
+				>
 					{ __( 'Cancel', 'hierarchy-guard' ) }
 				</Button>
 				<Button
@@ -7709,10 +9064,12 @@ Create `src/list-table/quick-edit.js`:
  * The Quick Edit warning when the slug or parent of a published page with
  * subpages changes, and the redirects after such a save.
  */
+import { speak } from '@wordpress/a11y';
 import { fetchHierarchy, fetchPairs } from '../common/api';
 import config from '../common/config';
 import {
 	changedSentence,
+	changedStatus,
 	quickEditWarning,
 	viewRedirectsLabel,
 } from '../common/copy';
@@ -7722,51 +9079,67 @@ import RedirectsModal from '../common/redirects-modal';
 /**
  * Rows whose Quick Edit is open, with what they had when it opened.
  *
- * @type {Map<number, {slug: string, parent: string, newest: string|null}>}
+ * @type {Map<number, {slug: string, parent: string, newest: string|null|undefined}>}
  */
 const watched = new Map();
 
 /**
- * Prints a notice under the heading saying the save changed URLs.
+ * Tells core's notice script to add a dismiss button. WordPress 6.6 listens
+ * for the first event, 6.7 and later for both.
+ */
+function makeDismissible() {
+	window
+		.jQuery( window.document )
+		.trigger( 'wp-updates-notice-added' )
+		.trigger( 'wp-notice-added' );
+}
+
+/**
+ * Prints and speaks a notice under the heading saying the save changed URLs.
  *
  * @param {number} postId Saved post.
  * @param {string} from   The old path the save recorded.
  */
 function announce( postId, from ) {
 	fetchPairs( { post: postId, from }, 1, 1 ).then( ( pairs ) => {
-		if ( ! pairs.total ) {
+		const end = window.document.querySelector( '.wp-header-end' );
+		if ( ! pairs.total || ! end ) {
 			return;
 		}
-		const end = document.querySelector( '.wp-header-end' );
-		if ( ! end ) {
-			return;
-		}
-		const notice = document.createElement( 'div' );
-		notice.className = 'notice notice-info is-dismissible';
-		const text = document.createElement( 'p' );
-		text.textContent =
-			changedSentence(
-				pairs.total,
-				pairs.capped,
-				config.serving,
-				config.provider
-			) + ' ';
+		const sentence = changedSentence(
+			pairs.total,
+			pairs.capped,
+			config.serving,
+			config.provider
+		);
+		const notice = window.document.createElement( 'div' );
+		notice.className = `notice notice-${ changedStatus(
+			config.serving,
+			config.provider
+		) } is-dismissible hierarchy-guard-urls`;
+		const text = window.document.createElement( 'p' );
+		text.textContent = sentence + ' ';
 		if ( ! config.serving ) {
-			const link = document.createElement( 'a' );
-			link.href = '#';
-			link.textContent = viewRedirectsLabel( pairs.total, pairs.capped );
-			link.addEventListener( 'click', ( event ) => {
-				event.preventDefault();
+			const button = window.document.createElement( 'button' );
+			button.type = 'button';
+			button.className = 'button-link';
+			button.setAttribute( 'aria-haspopup', 'dialog' );
+			button.textContent = viewRedirectsLabel(
+				pairs.total,
+				pairs.capped
+			);
+			button.addEventListener( 'click', () => {
 				const source = { post: postId, from };
 				open( ( close ) => (
 					<RedirectsModal source={ source } onClose={ close } />
 				) );
 			} );
-			text.appendChild( link );
+			text.appendChild( button );
 		}
 		notice.appendChild( text );
 		end.parentNode.insertBefore( notice, end.nextSibling );
-		window.jQuery( document ).trigger( 'wp-notice-added' );
+		makeDismissible();
+		speak( sentence, 'polite' );
 	} );
 }
 
@@ -7776,10 +9149,10 @@ function announce( postId, from ) {
  * @param {number} postId Post being edited.
  */
 function attach( postId ) {
-	const cell = document.querySelector(
+	const cell = window.document.querySelector(
 		`#post-${ postId } .hierarchy-guard-cell`
 	);
-	const form = document.getElementById( `edit-${ postId }` );
+	const form = window.document.getElementById( `edit-${ postId }` );
 	if (
 		! cell ||
 		! form ||
@@ -7789,47 +9162,67 @@ function attach( postId ) {
 		return;
 	}
 	const slug = form.querySelector( 'input[name="post_name"]' );
-	const field = slug ? slug.closest( 'label' ) : null;
-	if ( ! field ) {
+	const bar = form.querySelector( '.inline-edit-save' );
+	if ( ! slug || ! bar ) {
 		return;
 	}
 	const parent = form.querySelector( 'select[name="post_parent"]' );
+	const before = { slug: slug.value, parent: parent ? parent.value : '' };
+	watched.set( postId, { ...before, newest: undefined } );
 
-	const initial = { slug: slug.value, parent: parent ? parent.value : '' };
-	const box = document.createElement( 'div' );
-	box.className = 'notice notice-warning inline hierarchy-guard-quick-edit';
+	const box = window.document.createElement( 'div' );
+	box.id = `hierarchy-guard-quick-edit-${ postId }`;
+	box.className =
+		'notice notice-warning notice-alt inline hierarchy-guard-quick-edit';
 	box.hidden = true;
-	box.setAttribute( 'role', 'status' );
-	box.appendChild( document.createElement( 'p' ) );
-	// Right under the slug, where the change is made.
-	field.after( box );
+	box.appendChild( window.document.createElement( 'p' ) );
+	bar.insertBefore( box, bar.firstChild );
 
 	let descendants = null;
+	let requested = false;
+	let spoken = false;
+	const fields = [ slug, parent ].filter( Boolean );
+
 	const update = () => {
 		const edited =
-			slug.value !== initial.slug ||
-			( parent ? parent.value : '' ) !== initial.parent;
-		box.hidden = ! edited || ! descendants || ! descendants.count;
-		if ( ! box.hidden ) {
+			slug.value !== before.slug ||
+			( parent ? parent.value : '' ) !== before.parent;
+		if ( edited && ! requested ) {
+			// Ask for the count the first time it is needed, not on every open.
+			requested = true;
+			fetchHierarchy( postId ).then( ( data ) => {
+				descendants = data.descendants;
+				const row = watched.get( postId );
+				if ( row ) {
+					row.newest = data.old_paths[ 0 ]
+						? data.old_paths[ 0 ].path
+						: null;
+				}
+				update();
+			} );
+		}
+		const show = edited && !! descendants && descendants.count > 0;
+		box.hidden = ! show;
+		fields.forEach( ( field ) =>
+			show
+				? field.setAttribute( 'aria-describedby', box.id )
+				: field.removeAttribute( 'aria-describedby' )
+		);
+		if ( show ) {
 			box.firstChild.textContent = quickEditWarning(
 				descendants.count,
 				descendants.capped
 			);
+			if ( ! spoken ) {
+				spoken = true;
+				speak( box.firstChild.textContent, 'polite' );
+			}
 		}
 	};
 	slug.addEventListener( 'input', update );
 	if ( parent ) {
 		parent.addEventListener( 'change', update );
 	}
-
-	fetchHierarchy( postId ).then( ( data ) => {
-		descendants = data.descendants;
-		watched.set( postId, {
-			...initial,
-			newest: data.old_paths[ 0 ] ? data.old_paths[ 0 ].path : null,
-		} );
-		update();
-	} );
 }
 
 /**
@@ -7854,11 +9247,11 @@ export default function bindQuickEdit() {
 		return result;
 	};
 
-	$( document ).on( 'ajaxSuccess', ( event, xhr, settings ) => {
+	$( window.document ).on( 'ajaxSuccess', ( event, xhr, settings ) => {
 		if ( 'string' !== typeof settings.data ) {
 			return;
 		}
-		const params = new URLSearchParams( settings.data );
+		const params = new window.URLSearchParams( settings.data );
 		const postId = Number( params.get( 'post_ID' ) );
 		const before = watched.get( postId );
 		if ( 'inline-save' !== params.get( 'action' ) || ! before ) {
@@ -7889,14 +9282,14 @@ Create `src/list-table/index.js`:
 ```js
 /**
  * The list screen: the trash dialog, the Quick Edit warning, the redirects
- * modal behind the outcome notice, the filter subtitle and the nudge.
+ * modal behind the URLs notice, the filter subtitle and the nudge.
  */
 import domReady from '@wordpress/dom-ready';
 import { dismissNudge } from '../common/api';
 import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
 import bindQuickEdit from './quick-edit';
-import TrashDialog from './trash-dialog';
+import TrashDialog, { MAX_PREVIEW } from './trash-dialog';
 import '../common/modal.scss';
 import './list-table.scss';
 
@@ -7909,21 +9302,38 @@ const POLICY_PARAM = 'hierarchy_guard_policy';
  * @return {number} Count.
  */
 function childCount( id ) {
-	const cell = document.querySelector(
+	const cell = window.document.querySelector(
 		`#post-${ id } .hierarchy-guard-cell`
 	);
 	return cell ? Number( cell.dataset.children || 0 ) : 0;
 }
 
 /**
- * Moves the "Subpages of …" sentence beside the heading, the way core shows search results.
+ * A row's title as the list shows it.
+ *
+ * @param {number} id Post ID.
+ * @return {string} Title.
  */
-function moveSubtitle() {
-	const under = document.querySelector( '.hierarchy-guard-under' );
-	const end = document.querySelector( '.wp-header-end' );
+function rowTitle( id ) {
+	const link = window.document.querySelector( `#post-${ id } .row-title` );
+	return link ? link.textContent.trim() : '';
+}
+
+/**
+ * Moves the "Subpages of …" sentence beside the heading, the way core shows
+ * search results, and the URLs notice under core's trash notice.
+ */
+function arrangeHeader() {
+	const end = window.document.querySelector( '.wp-header-end' );
+	const under = window.document.querySelector( '.hierarchy-guard-under' );
 	if ( under && end ) {
 		under.classList.add( 'subtitle' );
 		end.parentNode.insertBefore( under, end );
+	}
+	const urls = window.document.querySelector( '.hierarchy-guard-urls' );
+	const message = window.document.getElementById( 'message' );
+	if ( urls && message ) {
+		message.after( urls );
 	}
 }
 
@@ -7931,14 +9341,15 @@ function moveSubtitle() {
  * Asks before the row action trashes a page with subpages.
  */
 function bindRowTrash() {
-	document.addEventListener( 'click', ( event ) => {
+	window.document.addEventListener( 'click', ( event ) => {
 		const link = event.target.closest( '#the-list .row-actions .trash a' );
 		if ( ! link || event.defaultPrevented ) {
 			return;
 		}
 		const row = link.closest( 'tr' );
 		const id = row ? Number( row.id.replace( 'post-', '' ) ) : 0;
-		if ( ! id || ! childCount( id ) ) {
+		const children = id ? childCount( id ) : 0;
+		if ( ! children ) {
 			return;
 		}
 		event.preventDefault();
@@ -7946,9 +9357,12 @@ function bindRowTrash() {
 			<TrashDialog
 				ids={ [ id ] }
 				selected={ 1 }
+				withChildren={ 1 }
+				title={ rowTitle( id ) }
+				children={ children }
 				onCancel={ close }
 				onConfirm={ ( policy ) => {
-					const url = new URL( link.href );
+					const url = new window.URL( link.href );
 					if ( policy ) {
 						url.searchParams.set( POLICY_PARAM, policy );
 					}
@@ -7963,16 +9377,21 @@ function bindRowTrash() {
  * Asks before the bulk action trashes pages with subpages.
  */
 function bindBulkTrash() {
-	const form = document.getElementById( 'posts-filter' );
+	const form = window.document.getElementById( 'posts-filter' );
 	if ( ! form ) {
 		return;
 	}
 	form.addEventListener( 'submit', ( event ) => {
-		const top = form.querySelector( 'select[name="action"]' );
-		const bottom = form.querySelector( 'select[name="action2"]' );
-		const action =
-			top && '-1' !== top.value ? top.value : bottom && bottom.value;
-		if ( 'trash' !== action ) {
+		// Only the Apply buttons run a bulk action; Filter and Search submit the same form.
+		const submitter = event.submitter;
+		if (
+			! submitter ||
+			! [ 'doaction', 'doaction2' ].includes( submitter.id )
+		) {
+			return;
+		}
+		const action = form.querySelector( 'select[name="action"]' );
+		if ( ! action || 'trash' !== action.value ) {
 			return;
 		}
 		const selected = Array.from(
@@ -7985,12 +9404,17 @@ function bindBulkTrash() {
 		event.preventDefault();
 		open( ( close ) => (
 			<TrashDialog
-				ids={ parents }
+				ids={ parents.slice( 0, MAX_PREVIEW ) }
 				selected={ selected.length }
+				withChildren={ parents.length }
+				title={ 1 === selected.length ? rowTitle( selected[ 0 ] ) : '' }
+				children={
+					1 === selected.length ? childCount( selected[ 0 ] ) : 0
+				}
 				onCancel={ close }
 				onConfirm={ ( policy ) => {
 					if ( policy ) {
-						const input = document.createElement( 'input' );
+						const input = window.document.createElement( 'input' );
 						input.type = 'hidden';
 						input.name = POLICY_PARAM;
 						input.value = policy;
@@ -8004,27 +9428,32 @@ function bindBulkTrash() {
 }
 
 /**
- * Opens the redirects modal from the outcome notice's link.
+ * Turns the URLs notice's download link into the button that opens the modal.
  */
 function bindViewRedirects() {
-	document.addEventListener( 'click', ( event ) => {
-		const link = event.target.closest( 'a.hierarchy-guard-view-redirects' );
-		if ( ! link ) {
-			return;
-		}
-		event.preventDefault();
-		const source = { change: link.dataset.change };
-		open( ( close ) => (
-			<RedirectsModal source={ source } onClose={ close } />
-		) );
-	} );
+	window.document
+		.querySelectorAll( 'a.hierarchy-guard-view-redirects' )
+		.forEach( ( link ) => {
+			const button = window.document.createElement( 'button' );
+			button.type = 'button';
+			button.className = 'button-link hierarchy-guard-view-redirects';
+			button.setAttribute( 'aria-haspopup', 'dialog' );
+			button.textContent = link.dataset.label || link.textContent;
+			const source = { change: link.dataset.change };
+			button.addEventListener( 'click', () =>
+				open( ( close ) => (
+					<RedirectsModal source={ source } onClose={ close } />
+				) )
+			);
+			link.replaceWith( button );
+		} );
 }
 
 /**
  * Remembers that the nudge was dismissed.
  */
 function bindNudge() {
-	document.addEventListener( 'click', ( event ) => {
+	window.document.addEventListener( 'click', ( event ) => {
 		if (
 			event.target.closest( '.hierarchy-guard-nudge .notice-dismiss' )
 		) {
@@ -8034,7 +9463,7 @@ function bindNudge() {
 }
 
 domReady( () => {
-	moveSubtitle();
+	arrangeHeader();
 	bindRowTrash();
 	bindBulkTrash();
 	bindViewRedirects();
@@ -8050,6 +9479,16 @@ Create `src/list-table/list-table.scss`:
 
 	&__options {
 		margin: 12px 0 0;
+	}
+
+	&__loading {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+
+		.components-spinner {
+			margin: 0;
+		}
 	}
 
 	&__option {
@@ -8068,13 +9507,13 @@ Create `src/list-table/list-table.scss`:
 		}
 	}
 
-	&__actions {
-		justify-content: flex-end;
-	}
 }
 
-.hierarchy-guard-quick-edit {
-	margin: 8px 0 0;
+// Core's save bar wraps; the warning takes a line of its own above the buttons.
+.inline-edit-save .hierarchy-guard-quick-edit {
+	flex-basis: 100%;
+	box-sizing: border-box;
+	margin: 0 0 8px;
 }
 
 // Core gives Author and Date fixed widths and leaves the rest to Title.
@@ -8108,12 +9547,12 @@ Expected: the suite passes.
 
 - [ ] **Step 5: Look at it**
 
-On the dev site's Pages list, click Trash on a page with subpages. Expected: a dialog "Move “Title” to the Trash?" with one sentence; "Other options" shows the three policies. Cancel closes it; "Move to Trash" trashes and lands on the outcome notice, whose "View redirects (N)" opens the modal. Open Quick Edit on a published page with subpages and change its slug: the warning appears under the slug field.
+On the dev site's Pages list, click Trash on a page with subpages. Expected: a dialog "Move this page to the Trash?" with one sentence; "Other options" shows the three policies. Cancel closes it. "Move to Trash" trashes and lands on core's notice with Undo, with a second notice under it whose "View redirects (N)" button opens the modal. Open Quick Edit on a published page with subpages and change its slug: the warning appears above Update.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add webpack.config.js src
+git add package.json package-lock.json webpack.config.js src
 git commit -m "feat: trash dialog, Quick Edit warning and redirects modal on the list screen"
 ```
 
@@ -8138,8 +9577,8 @@ Shows the parent and child structure of pages in wp-admin, warns before a slug, 
 
 - **Pages list.** A Hierarchy column shows each page's parent and its number of subpages. The number, and the "View subpages" row action, narrow the list to that page's subtree; the heading then says which subtree is shown, with each ancestor one click away. Large subtrees list their first 1,000 pages.
 - **Trashing from the list.** Trashing a page with subpages, from its row or in bulk, opens a dialog that says what happens to the subpages and offers the other two choices. Quick Edit warns when a changed slug or parent would move subpages to new URLs.
-- **After a trash.** The notice says what happened to the subpages and how many URLs changed, with Undo. "View redirects" lists each old URL and its new one, links to the detected redirect plugin, downloads a CSV in its import layout, or copies the list as text. Without JavaScript the link downloads the CSV. The list stays available for 30 minutes.
-- **Editor.** The block editor's Hierarchy panel shows the parent pages, the subpages, and the page's old URLs, warns before a save changes subpage URLs, and offers the redirects after it. The classic editor gets the same information in a box, and asks before saving such a change.
+- **After a trash.** Core's notice says what happened to the subpages, with Undo. A second notice says how many old URLs changed and what handles them: a warning when nothing redirects them. "View redirects" lists each old URL and its new one, links to the detected redirect plugin, downloads a CSV in its import layout, or copies the list as text. Without JavaScript the link downloads the CSV. The list stays available for 30 minutes.
+- **Editor.** The block editor warns under the page's Summary before a save changes subpage URLs, and offers the redirects in a notice after it. Its Hierarchy panel shows the parent pages, the subpages and the page's old URLs. The classic editor gets the same information in a box, with a CSV of each old URL's redirects, and asks before saving such a change.
 ```
 
 Replace:
@@ -8203,13 +9642,13 @@ Expected: `./composer.json is valid` (the description is not part of the lock fi
 
 With `npm run build` done and the dev site running, build a tree: a published top-level page "Studio" with subpages "Team" and "History", "Team" with "Ada" (published) and "Bo" (draft), and "Ada" with "Lab". Turn built-in redirects off and use no redirect plugin. Report what you see for each:
 
-1. Pages list: the Hierarchy column reads "2 subpages" for Studio and "Studio · 2 subpages" for Team; Team's row has "View subpages"; a dismissible notice offers to turn on redirects.
-2. Click "2 subpages" on Team: the list shows Ada, Bo and Lab, and "Subpages of Studio › Team · Clear" sits beside the heading.
-3. Trash Team from its row: the dialog says "“Team” has 2 subpages (3 pages in total). They’ll move up under “Studio” and get new URLs." Confirm: the notice reads "“Team” moved to the Trash. 2 subpages moved up under “Studio”. 2 old URLs now show “Page not found”. Turn on redirects · View redirects (2) Undo".
+1. Pages list: the Hierarchy column reads "2 subpages" for Studio and "Studio · 2 subpages" for Team; Team's row has "View subpages". Once any old URL is recorded, a dismissible notice offers to set up redirects.
+2. Click "2 subpages" on Team: the list shows Ada, Bo and Lab, and "Subpages of Studio › Team · Show all pages" sits beside the heading.
+3. Trash Team from its row: the dialog "Move this page to the Trash?" says "“Team” has 2 subpages directly under it, 3 in all. They’ll move up under “Studio” and get new URLs." Confirm. Core's notice reads "“Team” moved to the Trash. 2 subpages moved up under “Studio”. Undo". Under it, a warning notice reads "2 old URLs now show “Page not found”. Set up redirects · View redirects (2)".
 4. "View redirects (2)": the modal lists `/studio/team/ada/ → /studio/ada/` and `/studio/team/ada/lab/ → /studio/ada/lab/` (with your slugs), says Team's own URL is in the Trash, and "Download CSV" downloads them. Click Undo: "“Team” restored from the Trash. 2 subpages moved back under “Team”."
-5. Bulk-select Team, Ada and History, choose Move to Trash: the dialog says "2 of the selected pages have subpages …". Pick "Leave the subpages where they are" under Other options and confirm: Bo stays under Team. Undo.
-6. Open Studio in Quick Edit and change its slug: the warning "Changing this moves 5 subpages to new URLs." appears under the slug field. Save: a notice "5 old URLs now show “Page not found”. View redirects (5)" appears. (Studio, History, Team, Ada and Lab are published; Bo is a draft.) Change the slug back.
-7. Open Team in the block editor: the Hierarchy panel lists Studio, then Ada ("1 subpage") and "Bo · Draft". Change the slug and save: the panel says how many old URLs changed, with "View redirects".
+5. Bulk-select Team, Ada and History, choose Move to Trash and click Apply: the dialog says "2 of the selected pages have subpages, …". Pick "Leave subpages where they are" under Other options and confirm: Bo stays under Team. Undo. Choosing Move to Trash and clicking Filter instead opens no dialog.
+6. Open Studio in Quick Edit and change its slug: "Saving changes this page’s URL and the URLs of 5 subpages." appears above Update. Save: a warning notice "5 old URLs now show “Page not found”. View redirects (5)" appears and is spoken. (Studio, History, Team, Ada and Lab are published; Bo is a draft.) Change the slug back.
+7. Open Team in the block editor with the Hierarchy panel closed. Change the slug: the warning appears under the Parent row. Save: a notice at the top says how many old URLs changed, and its "View redirects" opens the modal. Open the panel: it lists "Ada · 1 subpage" and "Bo — Draft", and the old URL.
 8. Settings › Writing: the trash-policy help reads "Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time."
 
 Delete the test pages afterwards.
@@ -8223,11 +9662,11 @@ git commit -m "docs: describe the admin UI"
 
 ## Self-Review
 
-**Spec coverage.** Editor sidebar panel with parent pages, child pages ("N direct · M in total"), status only when not published, "View all", the warning when the slug or parent differs from the saved value on a page with subpages, previous URLs and their state, and the trash sentence with a Settings link: Tasks 5 and 11. Classic editor read-only box and a plain confirmation on submit: Tasks 9 and 10. Hierarchy column with the parent as a link and the subpage count as a link to the subtree, from one query per screen: Task 4. Subtree filter reachable from the count and a "View subpages" row action, its state beside the heading, a sort order so core paginates normally, capped at 1,000: Tasks 4 and 12. Trash dialog for row and bulk trash with one sentence under the default policy, "Other options", example URLs, the bulk sentence, the permission note, and the choice travelling with the request: Tasks 6 and 12. Quick Edit inline warning: Task 12. Outcome notice with Undo and "View redirects", in three variants by what handles redirects, scoped to the list screen and shown once: Task 8. Redirects modal, computed on demand and paged, with the provider's deep link, a CSV in its import layout and "Copy as text": Tasks 2, 3, 5, 7 and 11. A one-time dismissible nudge on the Pages screen when nothing handles redirects: Tasks 8 and 12. Batch progress notice: Task 8. REST: one read-only hierarchy route behind `edit_post`, children paged, counts direct, totals capped, and the change pairs and CSV routes: Tasks 5 and 7. Plan 2's hand-offs: the dialog's choice through `hierarchy_guard_trash_policy` (Task 6), the outcome notice replacing `Trash_Notice` and reading `Change_Log::latest()` and the queue (Task 8), the spec's trash-policy help text with the flipped assertion, the widened Description, the guarded `$provider['name']` and the leaking `SettingsSectionTest` globals (Tasks 8 and 13). Out of this plan by design: the Tree view (plan 4), the DataViews field and trash action, the `hierarchy_guard` REST page field, the editor snackbar, readme.txt, uninstall and the release zip (plan 5). The spec's parent dropdown is replaced by the breadcrumb (see Spec above).
+**Spec coverage.** Editor sidebar panel with parent pages, child pages ("N direct · M in total"), status only when not published, "View all", previous URLs and their state, and the trash sentence with a Settings link: Tasks 5 and 11. The warning when the slug or parent differs from the saved value on a page with subpages sits under the Summary instead of inside the panel, because a closed panel renders nothing: Task 11. Classic editor read-only box and a plain confirmation on submit: Tasks 9 and 10. Hierarchy column with the parent as a link and the subpage count as a link to the subtree, from one query per screen: Task 4. Subtree filter reachable from the count and a "View subpages" row action, its state beside the heading, a sort order so core paginates normally, capped at 1,000: Tasks 4 and 12. Trash dialog for row and bulk trash with one sentence under the default policy, "Other options", example URLs, the bulk sentence, the permission note, and the choice travelling with the request: Tasks 6 and 12. Quick Edit inline warning: Task 12. Outcome notice with Undo and "View redirects", in three variants by what handles redirects, scoped to the list screen and shown once: Task 8. Core's notice keeps what happened and Undo, and the URLs get a notice of their own whose style matches the situation (the spec's warning when nothing handles redirects). Redirects modal, computed on demand and paged, with the provider's deep link, a CSV in its import layout and "Copy as text": Tasks 2, 3, 5, 7 and 11. A one-time dismissible nudge on the Pages screen when nothing handles redirects: Tasks 8 and 12. Batch progress notice: Task 8. REST: one read-only hierarchy route behind `edit_post`, children paged, counts direct, totals capped, and the change pairs and CSV routes: Tasks 5 and 7. Plan 2's hand-offs: the dialog's choice through `hierarchy_guard_trash_policy` (Task 6), the outcome notice replacing `Trash_Notice` and reading `Change_Log::latest()` and the queue (Task 8), the spec's trash-policy help text with the flipped assertion, the widened Description, the guarded `$provider['name']` and the leaking `SettingsSectionTest` globals (Tasks 8 and 13). Out of this plan by design: the Tree view (plan 4), the DataViews field and trash action, the `hierarchy_guard` REST page field, the editor snackbar, readme.txt, uninstall and the release zip (plan 5). The spec's parent dropdown is replaced by the breadcrumb (see Spec above).
 
 **Placeholder scan.** No TBD or TODO. Every code step carries complete code taken from the verified prototype; the two install steps name exact versions.
 
-**Type consistency.** A pairs block (`post_type`, `old`, `head`, `reason`, `children` of `id`, `parent`, `segment`, `status`) is built only by `Pairs::post_block()` and `Pairs::change_blocks()` and read only by `Pairs`. `Pairs::page()` returns `pairs`, `unresolved`, `total`, `capped`, `page` and `pages`, which `RedirectsModal` reads. `Overview::describe()` keys match the panel (`ancestors`, `children`, `children_total`, `children_capped`, `has_more`, `descendants`, `old_paths`, `redirects`, `trash_policy`, `trash_to`, `list_url`), `Meta_Box`, `trashNote()` and `countsLine()`. The trash preview's `pages[]` keys (`title`, `path`, `children`, `descendants`, `fallback`, `to`, `example`, `denied`) match `trashSentence()`, `bulkSentence()`, `optionLabel()` and `optionDescription()`. The `data-children` and `data-status` attributes printed by `List_Table` are what the list-table script reads; `data-descendants`, `data-capped` and `data-status` printed by `Meta_Box` are what the classic script reads. `Assets::config()` keys match `src/common/config.js` defaults.
+**Type consistency.** A pairs block (`old`, `head`, `reason`, `base`, `from`, `incomplete`, `children` of `id`, `parent`, `segment`, `status`) is built only by `Pairs::post_block()` and `Pairs::change_blocks()` and read only by `Pairs`. The collected pairs (`post_type`, `pairs`, `unresolved`, `capped`) come only from `collect_post()` and `collect_change()` and are read by `page()`, `all()` and `count()`. `Pairs::page()` returns `pairs`, `unresolved`, `total`, `capped`, `page` and `pages`, which `RedirectsModal` reads. `Overview::describe()` keys match the panel (`ancestors`, `children`, `children_total`, `children_capped`, `has_more`, `descendants`, `old_paths`, `redirects`, `trash_policy`, `trash_to`, `list_url`), `Meta_Box`, `trashNote()` and `countsLine()`. The trash preview's `pages[]` keys (`title`, `path`, `policy`, `children`, `descendants`, `fallback`, `to`, `example`, `denied`, `denied_trash`) and its `more` match `trashSentence()`, `bulkSentence()`, `keptUrl()`, `optionLabel()`, `optionDescription()` and the dialog. The `data-children` and `data-status` attributes printed by `List_Table` are what the list-table script reads; `data-descendants`, `data-capped` and `data-status` printed by `Meta_Box` are what the classic script reads. `Assets::config()` keys match `src/common/config.js` defaults.
 
 **Review Focus.** All five named tests exist: two in Task 2 and one each in Tasks 4, 6 and 7.
 
@@ -8235,7 +9674,7 @@ git commit -m "docs: describe the admin UI"
 
 ## Hand-offs to plan 4 (Tree view)
 
-- Add "Tree" to the views row through `views_edit-{type}` next to All and Published, as a view of the same list screen. Reuse `List_Table::filter_url()` for "View subpages" links and `Subtree::child_counts()` for each level's counts, one query per level.
+- Add "Tree" to the views row through `views_edit-{type}` next to All and Published, as a view of the same list screen. Reuse `List_Table::filter_url()` for "View subpages" links, `Subtree::ordered_children()` to read each level without sorting a large parent's children, and `Subtree::child_counts()` for each level's counts. Fire `hierarchy_guard_list_script` when the tree prints, so the list-table bundle loads.
 - Children load on demand from `GET hierarchy-guard/v1/posts/{id}/hierarchy?children_page=N` (10 per page today). The tree probably needs a larger page and a lighter response; add a parameter rather than changing the panel's response.
 - The list-table bundle (`src/list-table/`) is where the tree grid behaviour can live, or add a `tree` entry to `webpack.config.js`; `Assets::enqueue()` takes any built bundle.
 - Without JavaScript the toggles are links that reload the view opened at that node, as the spec says.
@@ -8244,5 +9683,5 @@ git commit -m "docs: describe the admin UI"
 
 - The `hierarchy_guard` field on the REST page object: for a list of pages, compute counts with `Subtree::child_counts()` once for the response, not once per object. It carries the change ID after a DataViews trash, for the snackbar and `RedirectsModal` (`{ change }` source).
 - The DataViews trash action calls `Trash_Handler::undo()` for its Undo.
-- Uninstall removes the `hierarchy_guard_nudge_dismissed` user meta along with plan 2's markers, jobs, locks and transients.
+- Uninstall removes plan 2's markers, jobs, locks and transients and the `hierarchy_guard_change_` transients; the nudge's dismissal lives in core's `dismissed_wp_pointers` and needs nothing.
 - readme.txt documents the list column, the dialog, the modal and the panel, and the release zip runs `npm ci && npm run build` (the `.distignore` already keeps `build/` and drops `src/` and `webpack.config.js`).
