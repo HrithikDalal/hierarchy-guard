@@ -84,8 +84,10 @@ final class Overview {
 			'old_paths'       => $this->old_paths( $post ),
 			'redirects'       => [
 				// The server redirects only to a page anyone can view, outside the trash.
-				'serving'  => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
-				'provider' => null === $provider ? null : [
+				'serving'      => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
+				// The pairs list only pages the server redirects to, so it serves them whenever it serves the type.
+				'pairs_served' => Settings::serve_redirects() && is_post_type_viewable( $type ),
+				'provider'     => null === $provider ? null : [
 					'name' => (string) ( $provider['name'] ?? '' ),
 					'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
 					'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
@@ -193,9 +195,12 @@ final class Overview {
 	 * home URL. A path the post is at again, as after a trash moved it back,
 	 * is its URL, not an old one.
 	 *
-	 * Each has a state: `in_use` when another live page holds the path, `trash`
-	 * when a page in the trash holds it, `none` when this page is not viewable or
-	 * sits under the trash so nothing can redirect here, and `ok` otherwise.
+	 * Each has a state: `in_use` when another live page is at the path or is
+	 * the newest live page to hold it, which the resolver sends it to; `none`
+	 * when that newest holder sits under the trash, which the resolver passes
+	 * over; `trash` when a page in the trash holds it; `none` when this page
+	 * is not viewable or sits under the trash so nothing can redirect here;
+	 * and `ok` otherwise.
 	 *
 	 * @param WP_Post $post Post.
 	 * @return array<int,array{path:string,url:string,state:string}>
@@ -205,21 +210,24 @@ final class Overview {
 		$type      = (string) $post->post_type;
 		$current   = Paths::uri( $post );
 		$reachable = is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( $current );
+		$paths     = array_values( array_diff( array_reverse( $this->ledger->paths_for( $post_id ) ), [ $current ] ) );
 
 		$out = [];
-		foreach ( array_slice( array_reverse( $this->ledger->paths_for( $post_id ) ), 0, self::MAX_OLD_PATHS ) as $path ) {
-			if ( $current === $path ) {
-				continue;
-			}
+		foreach ( array_slice( $paths, 0, self::MAX_OLD_PATHS ) as $path ) {
 			$url = Paths::url( $type, $path );
 			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
 			if ( '' === $url ) {
 				continue;
 			}
-			$owner = get_page_by_path( $path, OBJECT, $type );
+			$owner  = get_page_by_path( $path, OBJECT, $type );
+			$holder = $this->ledger->find( $type, $path );
+			$other  = null !== $holder && $holder > 0 && $holder !== $post_id ? get_post( $holder ) : null;
 			if ( $owner instanceof WP_Post && (int) $owner->ID !== $post_id && is_post_publicly_viewable( $owner ) ) {
 				// A live page at the old path is reached before any redirect.
 				$state = 'in_use';
+			} elseif ( $other instanceof WP_Post ) {
+				// The resolver follows the newest live page to hold the path, and passes over one under the trash.
+				$state = Paths::has_trashed_segment( Paths::uri( $other ) ) ? 'none' : 'in_use';
 			} elseif ( Ledger::held_in_trash( $type, $path ) ) {
 				$state = 'trash';
 			} elseif ( ! $reachable ) {

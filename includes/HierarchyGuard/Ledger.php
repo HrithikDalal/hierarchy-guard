@@ -310,7 +310,21 @@ final class Ledger {
 	 * @return bool
 	 */
 	public static function held_in_trash( string $post_type, string $path ): bool {
-		return [] !== self::trash_holders( $post_type, $path );
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Seek on the meta_key index that stops at the first page in the trash: a 404 on an exact old parent path, and one per old URL shown.
+		return null !== $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT 1 FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
 	}
 
 	/**
