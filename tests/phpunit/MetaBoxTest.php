@@ -134,4 +134,69 @@ final class MetaBoxTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( 'View all 13 in the list', $this->html( $this->ids['about'] ) );
 	}
+
+	public function test_a_capped_count_in_the_trash_sentence_is_a_lower_bound(): void {
+		$this->page( 'extra', $this->ids['about'] );
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_KEEP );
+
+		$html = $this->html( $this->ids['about'] );
+
+		remove_all_filters( 'hierarchy_guard_count_cap' );
+		remove_all_filters( 'hierarchy_guard_trash_policy' );
+		$this->assertStringContainsString( 'Trashing this page leaves its 2+ subpages where they are.', $html );
+	}
+
+	public function test_an_old_url_of_a_page_nobody_can_view_is_not_redirected(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['about'],
+				'post_name'   => 'about-us',
+				'post_status' => 'private',
+			]
+		);
+
+		$html = $this->html( $this->ids['about'] );
+		$this->assertStringContainsString( '<code>/company/about/</code> · Not redirected · <a href="', $html );
+		$this->assertStringNotContainsString( 'Redirects here', $html );
+	}
+
+	public function test_an_old_url_another_published_page_now_uses_is_marked_so(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		$this->page( 'about', $this->ids['company'] );
+
+		$this->assertStringContainsString( '<code>/company/about/</code> · Used by another page · <a href="', $this->html( $this->ids['about'] ) );
+	}
+
+	public function test_an_old_url_names_the_redirect_plugin_that_can_add_it(): void {
+		add_filter(
+			'hierarchy_guard_redirect_providers',
+			static function ( array $providers ): array {
+				$providers['custom'] = [
+					'name'   => 'Custom Redirects',
+					'active' => true,
+					'url'    => admin_url( 'admin.php?page=custom-redirects' ),
+					'csv'    => 'generic',
+				];
+				return $providers;
+			}
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+
+		$html = $this->html( $this->ids['about'] );
+
+		remove_all_filters( 'hierarchy_guard_redirect_providers' );
+		$this->assertStringContainsString( '<code>/company/about/</code> · Add in Custom Redirects · <a href="', $html );
+	}
 }

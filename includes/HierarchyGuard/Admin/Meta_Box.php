@@ -127,9 +127,19 @@ final class Meta_Box {
 
 		if ( [] !== $data['old_paths'] ) {
 			echo '<p><strong>' . esc_html__( 'Old URLs', 'hierarchy-guard' ) . '</strong></p><ul class="hierarchy-guard-box__old">';
-			$state  = $data['redirects']['serving'] ? __( 'Redirects here', 'hierarchy-guard' ) : __( 'Not redirected', 'hierarchy-guard' );
-			$layout = null !== $data['redirects']['provider'] ? Csv::layout( (string) $data['redirects']['provider']['csv'] ) : 'generic';
+			$provider = $data['redirects']['provider'];
+			$layout   = null !== $provider ? Csv::layout( (string) $provider['csv'] ) : 'generic';
 			foreach ( $data['old_paths'] as $old ) {
+				if ( $old['in_use'] ) {
+					$state = __( 'Used by another page', 'hierarchy-guard' );
+				} elseif ( $data['redirects']['serving'] ) {
+					$state = __( 'Redirects here', 'hierarchy-guard' );
+				} elseif ( null !== $provider && '' !== $provider['name'] ) {
+					/* translators: %s: name of the redirect plugin. */
+					$state = sprintf( __( 'Add in %s', 'hierarchy-guard' ), $provider['name'] );
+				} else {
+					$state = __( 'Not redirected', 'hierarchy-guard' );
+				}
 				printf(
 					'<li><code>%1$s</code> · %2$s · <a href="%3$s" aria-label="%4$s" download>%5$s</a></li>',
 					esc_html( (string) $old['url'] ),
@@ -189,27 +199,29 @@ final class Meta_Box {
 	 * @return string
 	 */
 	public static function trash_sentence( array $data ): string {
-		$children = (int) $data['children_total'];
+		$children        = (int) $data['children_total'];
+		$children_capped = (bool) ( $data['children_capped'] ?? false );
 		if ( 0 === $children ) {
 			return '';
 		}
-		$all = (int) $data['descendants']['count'];
+		$all        = (int) $data['descendants']['count'];
+		$all_capped = (bool) ( $data['descendants']['capped'] ?? false );
 
 		switch ( $data['trash_policy'] ) {
 			case Settings::POLICY_TRASH_CHILDREN:
 				/* translators: %s: number of subpages at every level. */
-				return sprintf( _n( 'Trashing this page moves its %s subpage to the Trash too.', 'Trashing this page moves its %s subpages to the Trash too.', $all, 'hierarchy-guard' ), number_format_i18n( $all ) );
+				return sprintf( _n( 'Trashing this page moves its %s subpage to the Trash too.', 'Trashing this page moves its %s subpages to the Trash too.', $all, 'hierarchy-guard' ), Subtree::format_count( $all, $all_capped ) );
 			case Settings::POLICY_KEEP:
 				/* translators: %s: number of direct subpages. */
-				return sprintf( _n( 'Trashing this page leaves its %s subpage where it is.', 'Trashing this page leaves its %s subpages where they are.', $children, 'hierarchy-guard' ), number_format_i18n( $children ) );
+				return sprintf( _n( 'Trashing this page leaves its %s subpage where it is.', 'Trashing this page leaves its %s subpages where they are.', $children, 'hierarchy-guard' ), Subtree::format_count( $children, $children_capped ) );
 		}
 
 		if ( null !== $data['trash_to'] ) {
 			/* translators: 1: number of direct subpages, 2: title of the page they would move under. */
-			return sprintf( _n( 'Trashing this page moves its %1$s subpage under “%2$s”.', 'Trashing this page moves its %1$s subpages under “%2$s”.', $children, 'hierarchy-guard' ), number_format_i18n( $children ), $data['trash_to']['title'] );
+			return sprintf( _n( 'Trashing this page moves its %1$s subpage under “%2$s”.', 'Trashing this page moves its %1$s subpages under “%2$s”.', $children, 'hierarchy-guard' ), Subtree::format_count( $children, $children_capped ), $data['trash_to']['title'] );
 		}
 		/* translators: %s: number of direct subpages. */
-		return sprintf( _n( 'Trashing this page makes its %s subpage a top-level page.', 'Trashing this page makes its %s subpages top-level pages.', $children, 'hierarchy-guard' ), number_format_i18n( $children ) );
+		return sprintf( _n( 'Trashing this page makes its %s subpage a top-level page.', 'Trashing this page makes its %s subpages top-level pages.', $children, 'hierarchy-guard' ), Subtree::format_count( $children, $children_capped ) );
 	}
 
 	/**

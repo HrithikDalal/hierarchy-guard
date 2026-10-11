@@ -167,6 +167,31 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( '/company/about-us/', $data['old_paths'][0]['url'] );
 	}
 
+	public function test_an_old_path_a_published_page_now_owns_is_in_use(): void {
+		$this->rename( $this->ids['about'], 'about-us' );
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		$this->assertFalse( $this->get( $route )->get_data()['old_paths'][0]['in_use'] );
+
+		$this->page( 'about', $this->ids['company'] );
+
+		$this->assertTrue( $this->get( $route )->get_data()['old_paths'][0]['in_use'] );
+	}
+
+	public function test_a_page_nobody_can_view_is_not_served_redirects(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		$this->assertTrue( $this->get( $route )->get_data()['redirects']['serving'] );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['about'],
+				'post_status' => 'private',
+			]
+		);
+
+		$this->assertFalse( $this->get( $route )->get_data()['redirects']['serving'] );
+	}
+
 	public function test_the_trash_policy_shows_the_fallback_for_a_large_subtree(): void {
 		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_TRASH_CHILDREN );
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );

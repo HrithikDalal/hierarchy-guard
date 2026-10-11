@@ -82,7 +82,8 @@ final class Overview {
 			],
 			'old_paths'       => $this->old_paths( $id, $type ),
 			'redirects'       => [
-				'serving'  => Settings::serve_redirects(),
+				// The server redirects only to a page anyone can view.
+				'serving'  => Settings::serve_redirects() && is_post_publicly_viewable( $post ),
 				'provider' => null === $provider ? null : [
 					'name' => (string) ( $provider['name'] ?? '' ),
 					'url'  => (string) ( $provider['url'] ?? '' ),
@@ -190,7 +191,7 @@ final class Overview {
 	 *
 	 * @param int    $post_id Post ID.
 	 * @param string $type    Post type name.
-	 * @return array<int,array{path:string,url:string}>
+	 * @return array<int,array{path:string,url:string,in_use:bool}>
 	 */
 	private function old_paths( int $post_id, string $type ): array {
 		$out = [];
@@ -198,9 +199,12 @@ final class Overview {
 			$url = Paths::url( $type, $path );
 			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
 			if ( '' !== $url ) {
+				$owner = get_page_by_path( $path, OBJECT, $type );
 				$out[] = [
-					'path' => $path,
-					'url'  => Paths::relative( $url ),
+					'path'   => $path,
+					'url'    => Paths::relative( $url ),
+					// A live page at the old path is reached before any redirect.
+					'in_use' => $owner instanceof WP_Post && (int) $owner->ID !== $post_id && is_post_publicly_viewable( $owner ),
 				];
 			}
 		}
