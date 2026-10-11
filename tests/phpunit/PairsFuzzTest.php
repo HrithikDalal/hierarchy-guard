@@ -1,0 +1,811 @@
+<?php
+/**
+ * Seeded random histories against the resolver: every pair listed is one the
+ * site serves, and every old URL the site serves to a page is listed somewhere.
+ *
+ * @package HierarchyGuard
+ */
+
+declare( strict_types=1 );
+
+namespace HierarchyGuard\Tests;
+
+// phpcs:disable WordPress.WP.AlternativeFunctions.rand_mt_rand,WordPress.WP.AlternativeFunctions.rand_seeding_mt_srand -- A seeded history must replay from its seed.
+
+use HierarchyGuard\Batch\Queue;
+use HierarchyGuard\Ledger;
+use HierarchyGuard\Paths;
+use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Pairs;
+use HierarchyGuard\Redirects\Resolver;
+use HierarchyGuard\Settings;
+use HierarchyGuard\Trash\Change_Log;
+use HierarchyGuard\Trash\Markers;
+use HierarchyGuard\Trash\Trash_Handler;
+use WP_Post;
+use WP_UnitTestCase;
+
+/**
+ * Each history starts from Company › { About › { Team › Leadership, History },
+ * Services } and a top-level Studio, all published, and runs a few random
+ * renames, moves, new pages, trashes, restores and deletes, each in a request
+ * of its own and small enough to run inline. Then it collects every list the
+ * admin screens offer: each live page's pairs for each of its old paths, and
+ * the admin's latest change.
+ *
+ * - Correct: every listed pair's old URL is a 404 the resolver sends to that pair's page.
+ * - Complete: every URL a live page had at the end of a step, and has no
+ *   more, that is a 404 the resolver sends to that page is on some list.
+ *
+ * The resolver runs only on a 404, so a URL a published page uses now is
+ * served by that page and is no redirect at all, on either side.
+ *
+ * A served old URL no list has is excluded only when it belongs to one of the
+ * engine classes named at excluded(): the ledger, the trash flow or core keep
+ * nothing a bounded read of the pairs could list it from. Each exclusion is
+ * counted, and printed with its seed when HG_FUZZ_REPORT is set.
+ *
+ * Reproduce one history: --filter 'PairsFuzzTest.*seed 17"'.
+ *
+ * @covers \HierarchyGuard\Redirects\Pairs
+ */
+final class PairsFuzzTest extends WP_UnitTestCase {
+
+	use Trash_Fixtures;
+
+	/**
+	 * Histories run.
+	 */
+	private const SEEDS = 150;
+
+	/**
+	 * Steps per history.
+	 */
+	private const STEPS = 8;
+
+	/**
+	 * Slugs a rename or a new page may take, so collisions happen and pages
+	 * come to sit at other pages' old paths.
+	 */
+	private const POOL = [ 'about', 'team', 'history', 'services', 'studio', 'leadership', 'alpha' ];
+
+	/**
+	 * Pages the history created, in creation order, labelled.
+	 *
+	 * @var array<int,string>
+	 */
+	private array $made = [];
+
+	/**
+	 * Every path each page had at the end of a step, oldest first.
+	 *
+	 * @var array<int,string[]>
+	 */
+	private array $history = [];
+
+	/**
+	 * What the history did, one line per step.
+	 *
+	 * @var string[]
+	 */
+	private array $steps = [];
+
+	/**
+	 * The step at which each page's history entry was recorded, alongside $history.
+	 *
+	 * @var array<int,int[]>
+	 */
+	private array $when = [];
+
+	/**
+	 * Pages deleted for good.
+	 *
+	 * @var int[]
+	 */
+	private array $deleted = [];
+
+	/**
+	 * The step at which a restore last moved each page back under the page restored.
+	 *
+	 * @var array<int,int>
+	 */
+	private array $restored = [];
+
+	private int $step = 0;
+
+	/**
+	 * Served old URLs no list has, by engine class, for the report.
+	 *
+	 * @var array<string,string[]>
+	 */
+	private static array $excluded = [];
+
+	private int $seed = 0;
+
+	private int $fresh = 0;
+
+	private int $admin;
+
+	private Pairs $pairs;
+
+	private Change_Log $changes;
+
+	public function set_up(): void {
+		parent::set_up();
+		delete_option( Settings::OPTION );
+		delete_option( Ledger::ROOT_OPTION );
+		Post_Types::reset();
+		Change_Log::reset_request();
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->admin = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $this->admin );
+		// A restored page comes back with the status it had, so every page stays published.
+		add_filter( 'wp_untrash_post_status', 'wp_untrash_post_set_previous_status', 10, 3 );
+		$this->pairs   = new Pairs();
+		$this->changes = new Change_Log();
+	}
+
+	public function tear_down(): void {
+		$this->end_core_bulk();
+		wp_unschedule_hook( Queue::HOOK );
+		$this->set_permalink_structure( '' );
+		parent::tear_down();
+	}
+
+	public static function tear_down_after_class(): void {
+		if ( getenv( 'HG_FUZZ_REPORT' ) ) {
+			foreach ( self::$excluded as $class => $lines ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- A test report on stderr.
+				fwrite( STDERR, sprintf( "%s: %d URLs\n  %s\n", $class, count( $lines ), implode( "\n  ", $lines ) ) );
+			}
+		}
+		parent::tear_down_after_class();
+	}
+
+	/**
+	 * The seeds, one history each.
+	 *
+	 * @return array<string,array{int}>
+	 */
+	public function seeds(): array {
+		$out = [];
+		for ( $seed = 1; $seed <= self::SEEDS; $seed++ ) {
+			$out[ 'seed ' . $seed ] = [ $seed ];
+		}
+		return $out;
+	}
+
+	/**
+	 * One seeded history.
+	 *
+	 * @dataProvider seeds
+	 *
+	 * @param int $seed Seed for mt_rand().
+	 */
+	public function test_a_history_lists_what_the_resolver_serves( int $seed ): void {
+		$this->seed = $seed;
+		mt_srand( $seed );
+		$company = $this->make( 'Company', 'company' );
+		$about   = $this->make( 'About', 'about', $company );
+		$team    = $this->make( 'Team', 'team', $about );
+		$this->make( 'Leadership', 'leadership', $team );
+		$this->make( 'History', 'history', $about );
+		$this->make( 'Services', 'services', $company );
+		$this->make( 'Studio', 'studio' );
+		$this->remember();
+
+		for ( $i = 0; $i < self::STEPS; $i++ ) {
+			$this->step = $i + 1;
+			Change_Log::reset_request();
+			$this->handler()->reset_request_budget();
+			$this->steps[] = $this->act();
+			if ( [] !== ( new Queue() )->roots() ) {
+				$this->fail( 'Everything runs inline. ' . $this->story( $seed ) );
+			}
+			$this->remember();
+		}
+
+		$this->assertSame( [], $this->violations(), $this->story( $seed ) );
+	}
+
+	/**
+	 * Runs one random step.
+	 *
+	 * @return string What it did.
+	 */
+	private function act(): string {
+		for ( $try = 0; $try < 50; $try++ ) {
+			$roll = mt_rand( 1, 100 );
+			if ( $roll <= 24 ) {
+				$line = $this->rename();
+			} elseif ( $roll <= 48 ) {
+				$line = $this->move();
+			} elseif ( $roll <= 60 ) {
+				$line = $this->create();
+			} elseif ( $roll <= 78 ) {
+				$line = $this->trash();
+			} elseif ( $roll <= 87 ) {
+				$line = $this->restore();
+			} elseif ( $roll <= 94 ) {
+				$line = $this->delete();
+			} else {
+				$line = $this->bulk_trash();
+			}
+			if ( null !== $line ) {
+				return $line;
+			}
+		}
+		return 'nothing';
+	}
+
+	/**
+	 * Renames a live page, to a fresh slug or to one from the pool.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function rename(): ?string {
+		$live = $this->live();
+		if ( [] === $live ) {
+			return null;
+		}
+		$id   = $this->pick( $live );
+		$slug = mt_rand( 0, 1 ) ? self::POOL[ mt_rand( 0, count( self::POOL ) - 1 ) ] : 'fresh-' . ( ++$this->fresh );
+		$from = $this->path( $id );
+		wp_update_post(
+			[
+				'ID'        => $id,
+				'post_name' => $slug,
+			]
+		);
+		return sprintf( 'rename %s %s to %s: %s', $this->made[ $id ], $from, $slug, $this->path( $id ) );
+	}
+
+	/**
+	 * Moves a live page under another live page that is not its descendant, or to the top level.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function move(): ?string {
+		$live = $this->live();
+		if ( [] === $live ) {
+			return null;
+		}
+		$id      = $this->pick( $live );
+		$current = (int) get_post( $id )->post_parent;
+		$parents = array_values(
+			array_filter(
+				array_merge( [ 0 ], $live ),
+				fn( int $candidate ): bool => $candidate !== $id && $candidate !== $current && ( 0 === $candidate || ! in_array( $id, array_map( 'intval', get_post_ancestors( $candidate ) ), true ) )
+			)
+		);
+		if ( [] === $parents ) {
+			return null;
+		}
+		$parent = $this->pick( $parents );
+		$from   = $this->path( $id );
+		wp_update_post(
+			[
+				'ID'          => $id,
+				'post_parent' => $parent,
+			]
+		);
+		return sprintf( 'move %s %s under %s: %s', $this->made[ $id ], $from, 0 === $parent ? 'the top level' : $this->made[ $parent ], $this->path( $id ) );
+	}
+
+	/**
+	 * Creates a published page with a pool slug under a live page.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function create(): ?string {
+		$live = $this->live();
+		if ( [] === $live ) {
+			return null;
+		}
+		$parent = $this->pick( $live );
+		$slug   = self::POOL[ mt_rand( 0, count( self::POOL ) - 1 ) ];
+		$id     = $this->make( 'New' . ( count( $this->made ) + 1 ), $slug, $parent );
+		return sprintf( 'create %s under %s: %s', $this->made[ $id ], $this->made[ $parent ], $this->path( $id ) );
+	}
+
+	/**
+	 * Puts a live page in the trash.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function trash(): ?string {
+		$live = $this->live();
+		if ( [] === $live ) {
+			return null;
+		}
+		$id   = $this->pick( $live );
+		$from = $this->path( $id );
+		wp_trash_post( $id );
+		return sprintf( 'trash %s %s', $this->made[ $id ], $from );
+	}
+
+	/**
+	 * Trashes a live page and one of its subpages in one bulk request of the
+	 * Pages list, the subpage's row first or the parent's.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function bulk_trash(): ?string {
+		$parents = array_values( array_filter( $this->live(), fn( int $id ): bool => [] !== $this->children( $id ) ) );
+		if ( [] === $parents ) {
+			return null;
+		}
+		$parent = $this->pick( $parents );
+		$child  = $this->pick( $this->children( $parent ) );
+		$ids    = mt_rand( 0, 1 ) ? [ $child, $parent ] : [ $parent, $child ];
+		$line   = sprintf( 'bulk trash %s %s', $this->made[ $ids[0] ], $this->made[ $ids[1] ] );
+
+		$this->start_core_bulk( 'trash', $ids );
+		foreach ( $ids as $id ) {
+			wp_trash_post( $id );
+		}
+		$this->end_core_bulk();
+		return $line;
+	}
+
+	/**
+	 * Restores a page from the trash.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function restore(): ?string {
+		$trashed = $this->in_trash();
+		if ( [] === $trashed ) {
+			return null;
+		}
+		$id      = $this->pick( $trashed );
+		$parents = [];
+		foreach ( array_keys( $this->made ) as $page ) {
+			$post             = get_post( $page );
+			$parents[ $page ] = $post instanceof WP_Post ? (int) $post->post_parent : -1;
+		}
+		wp_untrash_post( $id );
+		foreach ( $parents as $page => $parent ) {
+			$post = get_post( $page );
+			if ( $page !== $id && $parent >= 0 && $post instanceof WP_Post && (int) $post->post_parent !== $parent ) {
+				$this->restored[ $page ] = $this->step;
+			}
+		}
+		return sprintf( 'restore %s: %s', $this->made[ $id ], $this->path( $id ) );
+	}
+
+	/**
+	 * Deletes a page in the trash for good.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function delete(): ?string {
+		$trashed = $this->in_trash();
+		if ( [] === $trashed ) {
+			return null;
+		}
+		$id              = $this->pick( $trashed );
+		$this->deleted[] = $id;
+		wp_delete_post( $id, true );
+		return sprintf( 'delete %s', $this->made[ $id ] );
+	}
+
+	/**
+	 * Every violation of the two rules, one line each.
+	 *
+	 * @return string[]
+	 */
+	private function violations(): array {
+		$resolver = new Resolver( new Ledger() );
+		$out      = [];
+		$listed   = [];
+
+		foreach ( $this->lists() as $name => $collected ) {
+			foreach ( $collected['pairs'] as $pair ) {
+				$served = $this->served( $resolver, $pair['old'] );
+				if ( $served !== $pair['id'] ) {
+					$out[] = sprintf( 'A: %s lists /%s/ -> %s, the site serves %s [%s]', $name, $pair['old'], $this->name( $pair['id'] ), $this->name( $served ), $this->describe( $pair['old'] ) );
+				}
+			}
+			foreach ( $this->pairs->all( $collected ) as $row ) {
+				$listed[ $row['old'] ] = true;
+			}
+		}
+
+		foreach ( $this->history as $id => $paths ) {
+			$post = get_post( $id );
+			if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status ) {
+				continue;
+			}
+			$current = Paths::uri( $post );
+			if ( Paths::has_trashed_segment( $current ) ) {
+				continue;
+			}
+			foreach ( array_unique( $paths ) as $path ) {
+				if ( $path === $current || $this->served( $resolver, $path ) !== $id || isset( $listed[ Paths::relative( Paths::url( 'page', $path ) ) ] ) ) {
+					continue;
+				}
+				$class = $this->excluded( $path, $id );
+				if ( '' !== $class ) {
+					self::$excluded[ $class ][] = sprintf( 'seed %d: /%s/ -> %s [%s]', $this->seed, $path, $this->made[ $id ], $this->describe( $path ) );
+					continue;
+				}
+				$out[] = sprintf( 'B: the site serves /%s/ -> %s, no list has it [%s]', $path, $this->made[ $id ], $this->describe( $path ) );
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The engine class a served old URL no list has belongs to, or none.
+	 *
+	 * - `root-list`: the resolver rewrites a prefix through the root list
+	 *   (Ledger::ROOT_OPTION), which the trash flow writes for subpages moved
+	 *   to the top level. No post holds that path, so only its trash change
+	 *   could list it, and a change keeps only the root's own path, and its
+	 *   markers only while the root is in the trash. Not excluded when the
+	 *   prefix is the own path of a root of the latest change still in the trash.
+	 * - `deleted-below`: the URL runs through the path of a page deleted for
+	 *   good, below the old path the resolver rewrote first. The markers of its
+	 *   trash go with it (Operations::step_cleanup()), and core moves the
+	 *   subpages it still had up without a record (wp_delete_post()), so the
+	 *   tree under it then cannot be rebuilt.
+	 * - `left-subtree`: the resolver reaches the page through the entry of a
+	 *   page that has left the pages the list of the old path it rewrote first
+	 *   walks (or the page itself has): the post's subtree, or the subpages a
+	 *   page in the trash moved up when it wrote the path on the post. Finding
+	 *   a page that left them means looking ledger entries up by path prefix,
+	 *   which the ledger's hashed keys cannot do.
+	 * - `restored-back`: since the page had the URL, a restore moved it, or a
+	 *   page above it, back under the page restored. Within an hour of the move
+	 *   up the restore records no interim path (Operations::INTERIM_AGE), and it
+	 *   deletes the markers, so where it lived meanwhile is not recorded.
+	 * - `pruned-return`: since the page had the URL, it, or a page above it,
+	 *   came back to a path it had had, and the ledger dropped its entry for
+	 *   that path (Ledger::prune()), so where it lived before is not recorded.
+	 *
+	 * @param string $path Normalized path the resolver sends to the page.
+	 * @param int    $id   The page.
+	 * @return string The class, or an empty string.
+	 */
+	private function excluded( string $path, int $id ): string {
+		$rounds = $this->rounds( $path );
+		if ( [] === $rounds ) {
+			return '';
+		}
+
+		$change = $this->changes->latest( $this->admin );
+		$roots  = [];
+		foreach ( (array) ( $change['roots'] ?? [] ) as $root ) {
+			if ( 'trash' === ( $change['action'] ?? '' ) && Settings::POLICY_REPARENT === ( $root['policy'] ?? '' ) && 'trash' === get_post_status( (int) $root['root'] ) ) {
+				$roots[ Paths::normalize( (string) $root['path'] ) ] = (int) $root['root'];
+			}
+		}
+		foreach ( $rounds as [ $prefix, $holder ] ) {
+			if ( 0 === $holder && ! isset( $roots[ $prefix ] ) ) {
+				return 'root-list';
+			}
+		}
+
+		[ $prefix, $first ] = $rounds[0];
+		foreach ( $this->deleted as $deleted ) {
+			foreach ( $this->history[ $deleted ] ?? [] as $was ) {
+				if ( strlen( $was ) > strlen( $prefix ) && str_starts_with( $path, $was . '/' ) ) {
+					return 'deleted-below';
+				}
+			}
+		}
+
+		// The pages the list of the old path the resolver rewrote first walks: the
+		// post's subtree, or the subpages moved up by the page in the trash that
+		// wrote it on the post as its alias, or by the change's root.
+		$movers = $first > 0 ? array_filter( Ledger::trash_holders( 'page', $prefix ), fn( int $holder ): bool => $this->wrote( $holder, $first, $prefix ) ) : [ $roots[ $prefix ] ];
+		$tops   = [ $first ];
+		if ( [] !== $movers ) {
+			$tops = [];
+			foreach ( $movers as $mover ) {
+				foreach ( Markers::rows( Markers::moved_key( $mover ), 1000 ) as $row ) {
+					$tops[] = $row['post_id'];
+				}
+			}
+		}
+		$inside = static function ( int $page ) use ( $tops ): bool {
+			return [] !== array_intersect( $tops, array_merge( [ $page ], array_map( 'intval', get_post_ancestors( $page ) ) ) );
+		};
+		if ( ! $inside( $id ) ) {
+			return 'left-subtree';
+		}
+		foreach ( array_slice( $rounds, 1 ) as [ , $holder ] ) {
+			if ( $holder > 0 && ! $inside( $holder ) ) {
+				return 'left-subtree';
+			}
+		}
+
+		// When the page first had the URL, and what moved on the way since without a record.
+		$since = $this->when[ $id ][ (int) array_search( $path, $this->history[ $id ], true ) ];
+		$pages = array_unique( array_merge( [ $id ], array_map( 'intval', get_post_ancestors( $id ) ), array_filter( array_column( $rounds, 1 ) ) ) );
+		foreach ( $pages as $page ) {
+			if ( ( $this->restored[ $page ] ?? 0 ) > $since ) {
+				return 'restored-back';
+			}
+		}
+		foreach ( $pages as $page ) {
+			$had = [];
+			foreach ( $this->history[ $page ] ?? [] as $i => $was ) {
+				if ( isset( $had[ $was ] ) && $this->when[ $page ][ $i ] > $since ) {
+					return 'pruned-return';
+				}
+				$had[ $was ] = true;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Whether a page in the trash wrote an old path on a post as its alias.
+	 *
+	 * @param int    $holder Page in the trash.
+	 * @param int    $post   Post.
+	 * @param string $path   Normalized path.
+	 * @return bool
+	 */
+	private function wrote( int $holder, int $post, string $path ): bool {
+		foreach ( (array) get_post_meta( $holder, Markers::ALIASES, true ) as $alias ) {
+			$to  = is_array( $alias ) ? (int) ( $alias['to'] ?? 0 ) : 0;
+			$was = is_array( $alias ) ? Paths::normalize( (string) ( $alias['path'] ?? '' ) ) : '';
+			if ( $to === $post && $was === $path ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The resolver's rounds for a path, as Resolver::rewrite_once() takes them:
+	 * the prefix it rewrote and the post that holds it, 0 for the root list.
+	 * Only used to name the engine class of a served URL no list has.
+	 *
+	 * @param string $path Normalized path.
+	 * @return array<int,array{0:string,1:int,2:string}> Prefix, holder and the path it was rewritten to.
+	 */
+	private function rounds( string $path ): array {
+		$ledger = new Ledger();
+		$out    = [];
+		$seen   = [];
+		for ( $round = 0; $round < Resolver::MAX_ROUNDS && '' !== $path && ! isset( $seen[ $path ] ); $round++ ) {
+			$seen[ $path ] = true;
+			$segments      = explode( '/', $path );
+			$candidate     = null;
+			for ( $length = count( $segments ); $length >= 1 && null === $candidate; $length-- ) {
+				$prefix = implode( '/', array_slice( $segments, 0, $length ) );
+				$hit    = $ledger->find( 'page', $prefix );
+				if ( null === $hit ) {
+					continue;
+				}
+				$base = '';
+				if ( $hit > 0 ) {
+					$post = get_post( $hit );
+					if ( ! $post instanceof WP_Post || 'trash' === $post->post_status || Paths::has_trashed_segment( Paths::uri( $post ) ) ) {
+						continue;
+					}
+					if ( count( $segments ) === $length && Ledger::held_in_trash( 'page', $prefix ) ) {
+						return $out;
+					}
+					$base = Paths::uri( $post );
+				}
+				$candidate = trim( $base . '/' . implode( '/', array_slice( $segments, $length ) ), '/' );
+				$out[]     = [ $prefix, $hit, $candidate ];
+			}
+			if ( null === $candidate ) {
+				break;
+			}
+			$target = get_page_by_path( $candidate, OBJECT, [ 'page' ] );
+			if ( $target instanceof WP_Post && is_post_publicly_viewable( $target ) && ! Paths::has_trashed_segment( Paths::uri( $target ) ) ) {
+				break;
+			}
+			$path = $candidate;
+		}
+		return $out;
+	}
+
+	/**
+	 * The resolver's rounds for a path, for a failure message.
+	 *
+	 * @param string $path Normalized path.
+	 * @return string
+	 */
+	private function describe( string $path ): string {
+		return implode(
+			' ; ',
+			array_map( fn( array $round ): string => sprintf( '%s via %s to %s', $round[0], 0 === $round[1] ? 'the root list' : $this->name( $round[1] ), $round[2] ), $this->rounds( $path ) )
+		);
+	}
+
+	/**
+	 * Every list the admin screens offer: each live page's pairs for each of
+	 * its old paths, and the admin's latest change.
+	 *
+	 * @return array<string,array<string,mixed>> Collected pairs by list.
+	 */
+	private function lists(): array {
+		$ledger = new Ledger();
+		$out    = [];
+		foreach ( array_keys( $this->made ) as $id ) {
+			$post = get_post( $id );
+			if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status ) {
+				continue;
+			}
+			foreach ( $ledger->paths_for( $id ) as $from ) {
+				$out[ sprintf( '%s at /%s/', $this->made[ $id ], $from ) ] = $this->pairs->collect_post( $post, $from );
+			}
+		}
+		$change = $this->changes->latest( $this->admin );
+		if ( null !== $change ) {
+			$out['the latest change'] = $this->pairs->collect_change( $change );
+		}
+		return $out;
+	}
+
+	/**
+	 * The page a request for a path is redirected to: none when a published
+	 * page is at the path, since only a 404 reaches the resolver.
+	 *
+	 * @param Resolver $resolver Resolver.
+	 * @param string   $path     Normalized path.
+	 * @return int Page ID, 0 for none.
+	 */
+	private function served( Resolver $resolver, string $path ): int {
+		$there = get_page_by_path( $path, OBJECT, 'page' );
+		if ( $there instanceof WP_Post && is_post_publicly_viewable( $there ) ) {
+			return 0;
+		}
+		$target = $resolver->resolve( 'page', $path );
+		return $target instanceof WP_Post ? (int) $target->ID : 0;
+	}
+
+	/**
+	 * Creates a published page.
+	 *
+	 * @param string $label     Label for the story.
+	 * @param string $slug      Slug.
+	 * @param int    $parent_id Parent page ID.
+	 * @return int Page ID.
+	 */
+	private function make( string $label, string $slug, int $parent_id = 0 ): int {
+		$id                = $this->page( $slug, $parent_id );
+		$this->made[ $id ] = $label . '#' . $id;
+		return $id;
+	}
+
+	/**
+	 * Adds each live page's path to its history.
+	 */
+	private function remember(): void {
+		foreach ( $this->live() as $id ) {
+			$path = $this->path( $id );
+			$seen = $this->history[ $id ] ?? [];
+			if ( end( $seen ) !== $path ) {
+				$this->history[ $id ][] = $path;
+				$this->when[ $id ][]    = $this->step;
+			}
+		}
+	}
+
+	/**
+	 * Published pages of the history that sit outside the trash.
+	 *
+	 * @return int[]
+	 */
+	private function live(): array {
+		return array_values(
+			array_filter(
+				array_keys( $this->made ),
+				fn( int $id ): bool => 'publish' === get_post_status( $id ) && ! Paths::has_trashed_segment( $this->path( $id ) )
+			)
+		);
+	}
+
+	/**
+	 * Pages of the history in the trash.
+	 *
+	 * @return int[]
+	 */
+	private function in_trash(): array {
+		return array_values( array_filter( array_keys( $this->made ), static fn( int $id ): bool => 'trash' === get_post_status( $id ) ) );
+	}
+
+	/**
+	 * Live subpages of a page.
+	 *
+	 * @param int $parent_id Page ID.
+	 * @return int[]
+	 */
+	private function children( int $parent_id ): array {
+		return array_values( array_filter( $this->live(), static fn( int $id ): bool => (int) get_post( $id )->post_parent === $parent_id ) );
+	}
+
+	/**
+	 * A random element.
+	 *
+	 * @param int[] $ids Choices.
+	 * @return int
+	 */
+	private function pick( array $ids ): int {
+		return $ids[ mt_rand( 0, count( $ids ) - 1 ) ];
+	}
+
+	/**
+	 * A page's path now.
+	 *
+	 * @param int $id Page ID.
+	 * @return string
+	 */
+	private function path( int $id ): string {
+		$post = get_post( $id );
+		return $post instanceof WP_Post ? Paths::uri( $post ) : '';
+	}
+
+	/**
+	 * A page's label, or none.
+	 *
+	 * @param int $id Page ID, 0 for none.
+	 * @return string
+	 */
+	private function name( int $id ): string {
+		return 0 === $id ? 'nothing' : ( $this->made[ $id ] ?? '#' . $id );
+	}
+
+	/**
+	 * The seed, what the history did, the state it left and every list, for a failure message.
+	 *
+	 * @param int $seed Seed.
+	 * @return string
+	 */
+	private function story( int $seed ): string {
+		$ledger = new Ledger();
+		$lines  = [ 'seed ' . $seed . ':' ];
+		foreach ( $this->steps as $i => $step ) {
+			$lines[] = sprintf( '  %d. %s', $i + 1, $step );
+		}
+		$lines[] = 'state:';
+		foreach ( $this->made as $id => $label ) {
+			$status  = (string) get_post_status( $id );
+			$lines[] = sprintf(
+				'  %s %s /%s/ history [%s] ledger [%s]',
+				$label,
+				'' !== $status ? $status : 'deleted',
+				$this->path( $id ),
+				implode( ', ', $this->history[ $id ] ?? [] ),
+				implode( ', ', $ledger->paths_for( $id ) )
+			);
+		}
+		$roots   = get_option( Ledger::ROOT_OPTION, [] );
+		$lines[] = '  root list [' . implode( ', ', (array) ( $roots['page'] ?? [] ) ) . ']';
+		$lines[] = 'lists:';
+		foreach ( $this->lists() as $name => $collected ) {
+			$lines[] = sprintf(
+				'  %s: %s | unresolved %s',
+				$name,
+				implode( ', ', array_map( fn( array $pair ): string => $pair['old'] . ' > ' . $this->name( $pair['id'] ), $collected['pairs'] ) ),
+				implode( ', ', array_map( static fn( array $row ): string => $row['old'] . ' (' . $row['reason'] . ')', $collected['unresolved'] ) )
+			);
+		}
+		return implode( "\n", $lines ) . "\n";
+	}
+
+	/**
+	 * The handler the plugin registered.
+	 *
+	 * @return Trash_Handler
+	 */
+	private function handler(): Trash_Handler {
+		global $wp_filter;
+		foreach ( $wp_filter['trashed_post']->callbacks[10] ?? [] as $callback ) {
+			if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Trash_Handler ) {
+				return $callback['function'][0];
+			}
+		}
+		$this->fail( 'No Trash_Handler registered on trashed_post.' );
+	}
+}
