@@ -72,7 +72,7 @@ final class Plugin {
 
 		$pairs    = new Redirects\Pairs();
 		$overview = new Overview( $ledger, $providers );
-		( new Admin\Trash_Notice( $log ) )->register();
+		( new Admin\Notices( $log, $queue, $pairs, $providers ) )->register();
 		( new Admin\List_Table() )->register();
 		( new REST\Hierarchy_Controller( $overview, $ledger, $pairs ) )->register();
 		( new REST\Csv_Download() )->register();

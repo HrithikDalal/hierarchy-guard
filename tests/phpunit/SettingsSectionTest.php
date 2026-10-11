@@ -30,6 +30,12 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$this->section = new Settings_Section( new Providers() );
 	}
 
+	public function tear_down(): void {
+		// add() writes core's settings globals; later tests must not see this section.
+		unset( $GLOBALS['wp_settings_sections']['writing'][ Settings_Section::SECTION ], $GLOBALS['wp_settings_fields']['writing'][ Settings_Section::SECTION ] );
+		parent::tear_down();
+	}
+
 	public function test_section_and_fields_register_on_the_writing_page(): void {
 		global $wp_settings_sections, $wp_settings_fields;
 
@@ -153,12 +159,44 @@ final class SettingsSectionTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 
 		$this->assertSame( 3, substr_count( $html, 'type="radio"' ) );
+		$this->assertStringContainsString( '<fieldset id="hierarchy-guard-trash-policy">', $html, 'The target of the editor panel’s Settings link.' );
 		$this->assertMatchesRegularExpression( '/value="keep"\s+checked/', $html );
 		$this->assertStringContainsString( 'Move subpages up one level', $html );
 		$this->assertStringContainsString( 'Trash the subpages too', $html );
 		$this->assertStringContainsString( 'Leave subpages where they are', $html );
-		$this->assertStringContainsString( 'Applies whenever a page with subpages is moved to the trash, including from the editor, the REST API, and WP-CLI.', $html );
+		$this->assertStringContainsString( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.', $html );
 		$this->assertStringNotContainsString( 'The trash is turned off', $html, 'This test site keeps its trash.' );
-		$this->assertStringNotContainsString( 'Pages list', $html, 'No claims about UI that does not exist yet.' );
+	}
+
+	public function test_a_provider_without_a_name_gets_a_generic_sentence(): void {
+		$filter = static fn(): array => [
+			'custom' => [
+				'active' => true,
+				'url'    => '',
+				'csv'    => 'generic',
+			],
+		];
+		add_filter( 'hierarchy_guard_redirect_providers', $filter );
+		ob_start();
+		$this->section->render_serve_redirects();
+		$html = (string) ob_get_clean();
+		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
+
+		$this->assertStringContainsString( 'A redirect plugin is active and can handle these.', $html );
+	}
+
+	public function test_the_redirects_checkbox_is_the_target_of_turn_on_redirects_links(): void {
+		ob_start();
+		$this->section->render_serve_redirects();
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'id="hierarchy-guard-redirects"', $html );
+		$this->assertStringEndsWith( 'options-writing.php#hierarchy-guard-redirects', Settings_Section::redirects_url() );
+	}
+
+	public function test_the_settings_globals_do_not_leak_into_the_next_test(): void {
+		global $wp_settings_sections;
+
+		$this->assertArrayNotHasKey( Settings_Section::SECTION, $wp_settings_sections['writing'] ?? [], 'tear_down() removed what an earlier add() registered.' );
 	}
 }

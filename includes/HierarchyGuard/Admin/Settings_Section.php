@@ -46,6 +46,24 @@ final class Settings_Section {
 	}
 
 	/**
+	 * The Redirects field on Settings › Writing, for "Set up redirects" links.
+	 *
+	 * @return string
+	 */
+	public static function redirects_url(): string {
+		return admin_url( 'options-writing.php#hierarchy-guard-redirects' );
+	}
+
+	/**
+	 * The trash-policy field on Settings › Writing, for "Settings" links.
+	 *
+	 * @return string
+	 */
+	public static function policy_url(): string {
+		return admin_url( 'options-writing.php#hierarchy-guard-trash-policy' );
+	}
+
+	/**
 	 * Registers the option with its sanitize callback and defaults.
 	 */
 	public function register_option(): void {
@@ -113,7 +131,7 @@ final class Settings_Section {
 			Settings::POLICY_KEEP           => __( 'Leave subpages where they are', 'hierarchy-guard' ),
 		];
 
-		echo '<fieldset><legend class="screen-reader-text"><span>' . esc_html__( 'Trashing a page with subpages', 'hierarchy-guard' ) . '</span></legend>';
+		echo '<fieldset id="hierarchy-guard-trash-policy"><legend class="screen-reader-text"><span>' . esc_html__( 'Trashing a page with subpages', 'hierarchy-guard' ) . '</span></legend>';
 		foreach ( $options as $value => $label ) {
 			printf(
 				'<label><input type="radio" name="%1$s[trash_policy]" value="%2$s" %3$s> %4$s</label><br>',
@@ -124,7 +142,7 @@ final class Settings_Section {
 			);
 		}
 
-		$help = __( 'Applies whenever a page with subpages is moved to the trash, including from the editor, the REST API, and WP-CLI.', 'hierarchy-guard' );
+		$help = __( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.', 'hierarchy-guard' );
 		if ( ! EMPTY_TRASH_DAYS ) {
 			$help .= ' ' . __( 'The trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
 		}
@@ -139,15 +157,18 @@ final class Settings_Section {
 		$provider = $this->providers->detect();
 
 		printf(
-			'<label><input type="checkbox" name="%1$s[serve_redirects]" value="1" %2$s> %3$s</label>',
+			'<label><input type="checkbox" id="hierarchy-guard-redirects" name="%1$s[serve_redirects]" value="1" %2$s> %3$s</label>',
 			esc_attr( Settings::OPTION ),
 			checked( Settings::serve_redirects(), true, false ),
 			esc_html__( 'Redirect old URLs to their new pages', 'hierarchy-guard' )
 		);
 
-		if ( null !== $provider ) {
+		$name = null !== $provider ? trim( (string) ( $provider['name'] ?? '' ) ) : '';
+		if ( null !== $provider && '' !== $name ) {
 			/* translators: %s: name of the detected redirect plugin. */
-			$help = sprintf( __( '%s is active and can handle these. URL changes are recorded either way.', 'hierarchy-guard' ), $provider['name'] );
+			$help = sprintf( __( '%s is active and can handle these. URL changes are recorded either way.', 'hierarchy-guard' ), $name );
+		} elseif ( null !== $provider ) {
+			$help = __( 'A redirect plugin is active and can handle these. URL changes are recorded either way.', 'hierarchy-guard' );
 		} else {
 			$help = __( 'No redirect plugin was found. Turn this on so old URLs reach their new pages. URL changes are recorded either way.', 'hierarchy-guard' );
 		}
