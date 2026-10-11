@@ -485,6 +485,42 @@ final class PairsTest extends WP_UnitTestCase {
 		return get_num_queries() - $queries;
 	}
 
+	public function test_a_child_trashed_before_its_parent_in_one_bulk_action_keeps_its_pairs(): void {
+		$orders = [
+			'child first'  => true,
+			'parent first' => false,
+		];
+		foreach ( $orders as $order => $child_first ) {
+			Change_Log::reset_request();
+			$b   = $this->page( 'b', $this->ids['company'] );
+			$a   = $this->page( 'a', $b );
+			$kid = $this->page( 'kid', $a );
+			$ids = $child_first ? [ $a, $b ] : [ $b, $a ];
+
+			$this->start_core_bulk( 'trash', $ids );
+			foreach ( $ids as $id ) {
+				wp_trash_post( $id );
+			}
+			$this->end_core_bulk();
+			$change = $this->log->latest( $this->admin );
+
+			$collected = $this->pairs->collect_change( $change );
+			$this->assertSame( [ '/company/b/a/kid/ -> /company/kid/' ], $this->lines( $collected ), $order );
+			$this->assert_the_resolver_agrees( $collected );
+			$this->assertSame( (int) $this->ids['company'], (int) get_post( $kid )->post_parent, $order );
+			$this->assertNotNull( ( new Notices( $this->log, new Queue(), new Pairs(), new Providers() ) )->urls_notice( $change ), $order );
+
+			wp_delete_post( $a, true );
+			$collected = $this->pairs->collect_change( $change );
+			$this->assertContains( '/company/b/a/kid/ -> /company/kid/', $this->lines( $collected ), $order . ', once the child is deleted for good' );
+			$this->assert_the_resolver_agrees( $collected );
+
+			foreach ( [ $kid, $b ] as $id ) {
+				wp_delete_post( $id, true );
+			}
+		}
+	}
+
 	public function test_after_a_delete_a_subpage_renamed_after_the_trash_keeps_its_original_slug(): void {
 		wp_trash_post( $this->ids['about'] );
 		$change = $this->log->latest( $this->admin );

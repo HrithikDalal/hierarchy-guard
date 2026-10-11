@@ -105,6 +105,10 @@ final class Pairs {
 	 * original slugs. Once it is deleted for good its old path leads to the
 	 * page its subpages moved under, and its first-level pages are the IDs its
 	 * change entry kept that still live there, at their slugs from before the move.
+	 * When a later root of the same bulk action took that page to the trash and
+	 * moved the subpages up again, they sit under its nearest ancestor not in
+	 * the trash: that is where their new URLs start. The old path itself still
+	 * leads to the page in the trash, as the resolver sees it.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
 	 * @return array<int,array<string,mixed>> Blocks.
@@ -128,21 +132,36 @@ final class Pairs {
 		$statuses = self::statuses( array_keys( $roots ) );
 		$trashed  = array_keys( array_filter( $statuses, static fn( string $status ): bool => 'trash' === $status ) );
 		$moved    = self::moved_children( $trashed, $type );
-		$kept     = self::kept_children( array_diff_key( $roots, $statuses ), $type );
 
-		$blocks = [];
+		$parents = [];
+		$under   = [];
 		foreach ( $roots as $root_id => $root ) {
 			$status = $statuses[ $root_id ] ?? '';
 			if ( '' !== $status && 'trash' !== $status ) {
+				unset( $roots[ $root_id ] );
 				continue;
 			}
-			$to       = (int) $root['to'];
-			$parent   = $to > 0 ? get_post( $to ) : null;
+			$to     = (int) $root['to'];
+			$parent = $to > 0 ? get_post( $to ) : null;
+			if ( $parent instanceof WP_Post && 'trash' === $parent->post_status ) {
+				// A root trashed later in the same bulk action moved these subpages up again.
+				$to     = Subtree::nearest_live_ancestor( $parent );
+				$parent = $to > 0 ? get_post( $to ) : null;
+			}
+			$under[ $root_id ]   = array_merge( $root, [ 'to' => $to ] );
+			$parents[ $root_id ] = $parent instanceof WP_Post ? $parent : null;
+		}
+		$kept = self::kept_children( array_diff_key( $under, $statuses ), $type );
+
+		$blocks = [];
+		foreach ( $roots as $root_id => $root ) {
+			$status   = $statuses[ $root_id ] ?? '';
+			$parent   = $parents[ $root_id ];
 			$blocks[] = [
 				'old'        => Paths::normalize( (string) $root['path'] ),
-				'head'       => '' === $status ? $to : 0,
+				'head'       => '' === $status ? (int) $root['to'] : 0,
 				'reason'     => 'trash' === $status ? 'trash' : '',
-				'base'       => $parent instanceof WP_Post ? Paths::uri( $parent ) : '',
+				'base'       => null !== $parent ? Paths::uri( $parent ) : '',
 				'from'       => 0,
 				'children'   => 'trash' === $status ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
 				'incomplete' => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
@@ -477,15 +496,32 @@ final class Pairs {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- Range on the meta_key index, one placeholder per key, bounded by LIMIT.
 		$markers = $wpdb->get_results( $wpdb->prepare( "SELECT meta_key, post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key IN ( {$placeholders} ) LIMIT %d", ...array_merge( array_keys( $keys ), [ Subtree::count_cap() + 1 ] ) ), ARRAY_A );
 
+		$found = [];
+		foreach ( (array) $markers as $marker ) {
+			$found[ (int) $marker['post_id'] ][ $keys[ (string) $marker['meta_key'] ] ] = Markers::decode_moved( (string) $marker['meta_value'] );
+		}
+		if ( [] === $found ) {
+			return [];
+		}
+
+		$root_ids = array_map( 'intval', $root_ids );
 		$root_of  = [];
 		$original = [];
-		foreach ( (array) $markers as $marker ) {
-			$id              = (int) $marker['post_id'];
-			$root_of[ $id ]  = $keys[ (string) $marker['meta_key'] ];
-			$original[ $id ] = Markers::decode_moved( (string) $marker['meta_value'] )['original'];
-		}
-		if ( [] === $root_of ) {
-			return [];
+		foreach ( $found as $id => $moves ) {
+			$root = (int) array_key_first( $moves );
+			if ( count( $moves ) > 1 ) {
+				// Two roots of one bulk trash moved it: it left the first, whose
+				// move took it up to another root and which no other move led to.
+				$tos = array_map( static fn( array $moved ): int => (int) $moved['to'], $moves );
+				foreach ( $moves as $candidate => $moved ) {
+					if ( in_array( (int) $moved['to'], $root_ids, true ) && ! in_array( (int) $candidate, $tos, true ) ) {
+						$root = (int) $candidate;
+						break;
+					}
+				}
+			}
+			$root_of[ $id ]  = $root;
+			$original[ $id ] = (string) $moves[ $root ]['original'];
 		}
 
 		$out = [];
