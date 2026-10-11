@@ -14,12 +14,15 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Overview;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Live_View;
 use HierarchyGuard\Redirects\Pairs;
+use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Redirects\Rules;
+use HierarchyGuard\Redirects\Server;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
@@ -30,17 +33,28 @@ use WP_UnitTestCase;
 /**
  * Each history starts from Company › { About › { Team › Leadership, History },
  * Services } and a top-level Studio, all published, and runs a few random
- * renames, moves, new pages, trashes, restores and deletes, each in a request
- * of its own and small enough to run inline. Then it collects every list the
- * admin screens offer: each live page's pairs for each of its old paths, and
- * the admin's latest change.
+ * renames, moves, moves with a rename in one save, new pages, trashes,
+ * restores and deletes, each in a request of its own and small enough to run
+ * inline. It also makes pages drafts or private and publishes them again,
+ * adds draft twins (a draft at a published page's path: core keeps a draft's
+ * slug as it is), blog posts named as a page's old one-segment path and
+ * attachments named as the last segment of an old two-segment path. Then it
+ * collects every list the admin screens offer: each live page's pairs for
+ * each of its old paths, and the admin's latest change.
  *
- * - Correct: every listed pair's old URL is a 404 the resolver sends to that pair's page.
+ * - Correct: every listed pair's old URL is a 404 the resolver sends to that
+ *   pair's page, and a logged-out request for it is redirected there by the
+ *   Server on a real main query.
  * - Complete: every URL a live page had at the end of a step, and has no
  *   more, that is a 404 the resolver sends to that page is on some list.
+ * - Told: each live page's old URLs read `ok` exactly when the resolver sends
+ *   them to that page.
  *
- * The resolver runs only on a 404, so a URL a published page uses now is
- * served by that page and is no redirect at all, on either side.
+ * The resolver runs only on a 404, so a URL a published page, a blog post or
+ * an attachment uses now is served by it and is no redirect at all, on
+ * either side. Only a page with no subpage at all is made a draft or private,
+ * and nothing is put under one: a published page under a draft (P7, declined:
+ * the resolver's prefix walk can stop at the draft) never arises.
  *
  * A served old URL no list has is excluded only when it belongs to one of the
  * engine classes named at excluded(): the ledger, the trash flow or core keep
@@ -50,6 +64,8 @@ use WP_UnitTestCase;
  * Reproduce one history: --filter 'PairsFuzzTest.*seed 17"'.
  *
  * @covers \HierarchyGuard\Redirects\Pairs
+ * @covers \HierarchyGuard\Redirects\Batch_Resolver
+ * @covers \HierarchyGuard\Overview
  */
 final class PairsFuzzTest extends WP_UnitTestCase {
 
@@ -100,6 +116,13 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	private array $when = [];
 
 	/**
+	 * The step at which each ledger entry of each page first showed up.
+	 *
+	 * @var array<int,array<string,int>>
+	 */
+	private array $entered = [];
+
+	/**
 	 * Pages deleted for good.
 	 *
 	 * @var int[]
@@ -114,6 +137,27 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	private array $restored = [];
 
 	private int $step = 0;
+
+	/**
+	 * The blog posts and attachments the history added, for the story.
+	 *
+	 * @var string[]
+	 */
+	private array $others = [];
+
+	/**
+	 * Real requests made, for the report.
+	 *
+	 * @var int
+	 */
+	private static int $requests = 0;
+
+	/**
+	 * Steps run, by kind, for the report.
+	 *
+	 * @var array<string,int>
+	 */
+	private static array $kinds = [];
 
 	/**
 	 * Served old URLs no list has, by engine class, for the report.
@@ -134,7 +178,8 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 
 	public function set_up(): void {
 		parent::set_up();
-		delete_option( Settings::OPTION );
+		// The Server answers the real requests only while it serves redirects.
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		delete_option( Ledger::ROOT_OPTION );
 		Post_Types::reset();
 		Change_Log::reset_request();
@@ -156,6 +201,8 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 
 	public static function tear_down_after_class(): void {
 		if ( getenv( 'HG_FUZZ_REPORT' ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- A test report on stderr.
+			fwrite( STDERR, sprintf( "real requests: %d\nsteps: %s\n", self::$requests, wp_json_encode( self::$kinds ) ) );
 			foreach ( self::$excluded as $class => $lines ) {
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- A test report on stderr.
 				fwrite( STDERR, sprintf( "%s: %d URLs\n  %s\n", $class, count( $lines ), implode( "\n  ", $lines ) ) );
@@ -171,7 +218,10 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 */
 	public function seeds(): array {
 		$out = [];
-		for ( $seed = 1; $seed <= self::SEEDS; $seed++ ) {
+		// HG_FUZZ_SEEDS runs more histories, to explore; the suite runs SEEDS.
+		$count = (int) getenv( 'HG_FUZZ_SEEDS' );
+		$count = $count > 0 ? $count : self::SEEDS;
+		for ( $seed = 1; $seed <= $count; $seed++ ) {
 			$out[ 'seed ' . $seed ] = [ $seed ];
 		}
 		return $out;
@@ -200,7 +250,9 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			$this->step = $i + 1;
 			Change_Log::reset_request();
 			$this->handler()->reset_request_budget();
-			$this->steps[] = $this->act();
+			$this->steps[]        = $this->act();
+			$kind                 = (string) preg_replace( '/ (?:[A-Z]\w*#|#|\/).*$/', '', (string) end( $this->steps ) );
+			self::$kinds[ $kind ] = ( self::$kinds[ $kind ] ?? 0 ) + 1;
 			if ( [] !== ( new Queue() )->roots() ) {
 				$this->fail( 'Everything runs inline. ' . $this->story( $seed ) );
 			}
@@ -217,7 +269,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 */
 	private function act(): string {
 		for ( $try = 0; $try < 50; $try++ ) {
-			$roll = mt_rand( 1, 100 );
+			$roll = mt_rand( 1, 132 );
 			if ( $roll <= 24 ) {
 				$line = $this->rename();
 			} elseif ( $roll <= 48 ) {
@@ -230,8 +282,20 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				$line = $this->restore();
 			} elseif ( $roll <= 94 ) {
 				$line = $this->delete();
-			} else {
+			} elseif ( $roll <= 100 ) {
 				$line = $this->bulk_trash();
+			} elseif ( $roll <= 108 ) {
+				$line = $this->move( true );
+			} elseif ( $roll <= 114 ) {
+				$line = $this->unpublish();
+			} elseif ( $roll <= 118 ) {
+				$line = $this->republish();
+			} elseif ( $roll <= 124 ) {
+				$line = $this->twin();
+			} elseif ( $roll <= 128 ) {
+				$line = $this->blog_post();
+			} else {
+				$line = $this->attachment();
 			}
 			if ( null !== $line ) {
 				return $line;
@@ -263,11 +327,13 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Moves a live page under another live page that is not its descendant, or to the top level.
+	 * Moves a live page under another live page that is not its descendant, or
+	 * to the top level; with $rename, renames it in the same save, as Quick Edit does.
 	 *
+	 * @param bool $rename Whether the same save renames it.
 	 * @return string|null What it did, or null when it could not.
 	 */
-	private function move(): ?string {
+	private function move( bool $rename = false ): ?string {
 		$live = $this->live();
 		if ( [] === $live ) {
 			return null;
@@ -285,13 +351,15 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		}
 		$parent = $this->pick( $parents );
 		$from   = $this->path( $id );
-		wp_update_post(
-			[
-				'ID'          => $id,
-				'post_parent' => $parent,
-			]
-		);
-		return sprintf( 'move %s %s under %s: %s', $this->made[ $id ], $from, 0 === $parent ? 'the top level' : $this->made[ $parent ], $this->path( $id ) );
+		$update = [
+			'ID'          => $id,
+			'post_parent' => $parent,
+		];
+		if ( $rename ) {
+			$update['post_name'] = mt_rand( 0, 1 ) ? self::POOL[ mt_rand( 0, count( self::POOL ) - 1 ) ] : 'fresh-' . ( ++$this->fresh );
+		}
+		wp_update_post( $update );
+		return sprintf( '%s %s %s under %s%s: %s', $rename ? 'move and rename' : 'move', $this->made[ $id ], $from, 0 === $parent ? 'the top level' : $this->made[ $parent ], $rename ? ' to ' . $update['post_name'] : '', $this->path( $id ) );
 	}
 
 	/**
@@ -393,7 +461,141 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Every violation of the two rules, one line each.
+	 * Makes a published page with no subpage at all a draft or private, so no
+	 * published page ever sits under one (P7).
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function unpublish(): ?string {
+		$leaves = array_values(
+			array_filter(
+				$this->live(),
+				static fn( int $id ): bool => [] === get_posts(
+					[
+						'post_parent' => $id,
+						'post_type'   => 'page',
+						'post_status' => array_keys( get_post_stati() ),
+						'fields'      => 'ids',
+						'numberposts' => 1,
+					]
+				)
+			)
+		);
+		if ( [] === $leaves ) {
+			return null;
+		}
+		$id     = $this->pick( $leaves );
+		$status = mt_rand( 0, 1 ) ? 'draft' : 'private';
+		wp_update_post(
+			[
+				'ID'          => $id,
+				'post_status' => $status,
+			]
+		);
+		return sprintf( 'make %s %s %s', $this->made[ $id ], $status, $this->path( $id ) );
+	}
+
+	/**
+	 * Publishes a draft or private page again.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function republish(): ?string {
+		$hidden = array_values( array_filter( array_keys( $this->made ), static fn( int $id ): bool => in_array( get_post_status( $id ), [ 'draft', 'private' ], true ) ) );
+		if ( [] === $hidden ) {
+			return null;
+		}
+		$id = $this->pick( $hidden );
+		wp_update_post(
+			[
+				'ID'          => $id,
+				'post_status' => 'publish',
+			]
+		);
+		return sprintf( 'publish %s: %s', $this->made[ $id ], $this->path( $id ) );
+	}
+
+	/**
+	 * Adds a draft at a live page's path: core keeps a draft's slug as it is,
+	 * so two pages share the full path, the draft the later.
+	 *
+	 * @return string|null What it did, or null when it could not.
+	 */
+	private function twin(): ?string {
+		$live = $this->live();
+		if ( [] === $live ) {
+			return null;
+		}
+		$of                = $this->pick( $live );
+		$post              = get_post( $of );
+		$id                = $this->page( (string) $post->post_name, (int) $post->post_parent, 'draft' );
+		$this->made[ $id ] = 'Draft' . ( count( $this->made ) + 1 ) . '#' . $id;
+		return sprintf( 'draft %s at %s, beside %s', $this->made[ $id ], $this->path( $id ), $this->made[ $of ] );
+	}
+
+	/**
+	 * Publishes a blog post named as a page's old one-segment path, or with a pool slug.
+	 *
+	 * @return string|null What it did.
+	 */
+	private function blog_post(): ?string {
+		$slug           = $this->old_segment( 1 );
+		$id             = self::factory()->post->create(
+			[
+				'post_type'   => 'post',
+				'post_name'   => $slug,
+				'post_status' => 'publish',
+			]
+		);
+		$this->others[] = sprintf( 'post #%d /%s/', $id, get_post( $id )->post_name );
+		return sprintf( 'blog post #%d %s', $id, get_post( $id )->post_name );
+	}
+
+	/**
+	 * Attaches a file to a live page, named as the last segment of an old
+	 * two-segment path, or with a pool slug.
+	 *
+	 * @return string|null What it did.
+	 */
+	private function attachment(): ?string {
+		$live           = $this->live();
+		$parent         = [] !== $live ? $this->pick( $live ) : 0;
+		$slug           = $this->old_segment( 2 );
+		$id             = self::factory()->attachment->create(
+			[
+				'post_name'      => $slug,
+				'post_title'     => $slug,
+				'post_parent'    => $parent,
+				'post_mime_type' => 'image/jpeg',
+				'file'           => $slug . '.jpg',
+			]
+		);
+		$this->others[] = sprintf( 'attachment #%d %s under %s', $id, get_post( $id )->post_name, $this->name( $parent ) );
+		return sprintf( 'attachment #%d %s under %s', $id, get_post( $id )->post_name, $this->name( $parent ) );
+	}
+
+	/**
+	 * The last segment of a path of so many segments some page had and has no
+	 * more, or a pool slug.
+	 *
+	 * @param int $length Segments.
+	 * @return string
+	 */
+	private function old_segment( int $length ): string {
+		$olds = [];
+		foreach ( $this->history as $id => $paths ) {
+			foreach ( $paths as $path ) {
+				if ( substr_count( $path, '/' ) + 1 === $length && $path !== $this->path( $id ) ) {
+					$olds[] = (string) substr( (string) strrchr( '/' . $path, '/' ), 1 );
+				}
+			}
+		}
+		$olds = array_values( array_unique( $olds ) );
+		return [] !== $olds && mt_rand( 0, 3 ) > 0 ? $olds[ mt_rand( 0, count( $olds ) - 1 ) ] : self::POOL[ mt_rand( 0, count( self::POOL ) - 1 ) ];
+	}
+
+	/**
+	 * Every violation of the three rules, one line each.
 	 *
 	 * @return string[]
 	 */
@@ -401,6 +603,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		$resolver = new Resolver( new Ledger() );
 		$out      = [];
 		$listed   = [];
+		$asked    = [];
 
 		foreach ( $this->lists() as $name => $collected ) {
 			foreach ( $collected['pairs'] as $pair ) {
@@ -408,12 +611,14 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				if ( $served !== $pair['id'] ) {
 					$out[] = sprintf( 'A: %s lists /%s/ -> %s, the site serves %s [%s]', $name, $pair['old'], $this->name( $pair['id'] ), $this->name( $served ), $this->describe( $pair['old'] ) );
 				}
+				$asked[ $pair['old'] ][ $pair['id'] ] = $name;
 			}
 			foreach ( $this->pairs->all( $collected ) as $row ) {
 				$listed[ $row['old'] ] = true;
 			}
 		}
 
+		$doubts = [];
 		foreach ( $this->history as $id => $paths ) {
 			$post = get_post( $id );
 			if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status ) {
@@ -424,7 +629,15 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				continue;
 			}
 			foreach ( array_unique( $paths ) as $path ) {
-				if ( $path === $current || $this->served( $resolver, $path ) !== $id || isset( $listed[ Paths::relative( Paths::url( 'page', $path ) ) ] ) ) {
+				if ( $path === $current || isset( $listed[ Paths::relative( Paths::url( 'page', $path ) ) ] ) ) {
+					continue;
+				}
+				if ( $this->served( $resolver, $path ) !== $id ) {
+					// A blog post or an attachment the 404 test says is shown there: a real request says whether it is.
+					$there = get_page_by_path( $path, OBJECT, 'page' );
+					if ( ! ( $there instanceof WP_Post && is_post_publicly_viewable( $there ) ) && $this->resolved( $resolver, $path ) === $id ) {
+						$doubts[ $path ] = $id;
+					}
 					continue;
 				}
 				$class = $this->excluded( $path, $id );
@@ -436,7 +649,55 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			}
 		}
 
+		$overview = new Overview( new Ledger(), new Providers() );
+		foreach ( array_keys( $this->made ) as $id ) {
+			$post = get_post( $id );
+			if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
+				continue;
+			}
+			foreach ( $overview->describe( $post )['old_paths'] as $row ) {
+				$served = $this->served( $resolver, $row['path'] );
+				if ( ( 'ok' === $row['state'] ) !== ( $served === $id ) ) {
+					$out[] = sprintf( 'C: %s says /%s/ is %s, the site serves %s [%s]', $this->made[ $id ], $row['path'], $row['state'], $this->name( $served ), $this->describe( $row['path'] ) );
+				}
+			}
+		}
+
+		// Last, real requests: each resets the query globals and flushes the object cache.
+		$user = get_current_user_id();
+		wp_set_current_user( 0 );
+		$server = new Server( new Resolver( new Ledger() ) );
+		foreach ( $asked as $old => $ids ) {
+			$got = $this->request( $server, (string) $old );
+			foreach ( $ids as $id => $name ) {
+				++self::$requests;
+				if ( Paths::relative( (string) get_permalink( $id ) ) !== $got ) {
+					$out[] = sprintf( 'A: %s lists /%s/ -> %s, a request for it gets %s', $name, $old, $this->name( $id ), '' !== $got ? $got : 'no redirect' );
+				}
+			}
+		}
+		foreach ( $doubts as $path => $id ) {
+			++self::$requests;
+			if ( Paths::relative( (string) get_permalink( $id ) ) === $this->request( $server, (string) $path ) ) {
+				$out[] = sprintf( 'B: a request for /%s/ is redirected to %s, no list has it [%s]', $path, $this->made[ $id ], $this->describe( (string) $path ) );
+			}
+		}
+		wp_set_current_user( $user );
+
 		return $out;
+	}
+
+	/**
+	 * Where the Server redirects a logged-out request for a path, on a real main query.
+	 *
+	 * @param Server $server Server.
+	 * @param string $path   Normalized path.
+	 * @return string The target relative to the home URL, or an empty string for none.
+	 */
+	private function request( Server $server, string $path ): string {
+		$this->go_to( Paths::url( 'page', $path ) );
+		$target = $server->target_for_current_request();
+		return null === $target ? '' : Paths::relative( $target['url'] );
 	}
 
 	/**
@@ -466,6 +727,15 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 * - `pruned-return`: since the page had the URL, it, or a page above it,
 	 *   came back to a path it had had, and the ledger dropped its entry for
 	 *   that path (Ledger::prune()), so where it lived before is not recorded.
+	 * - `second-stay`: the post whose entry the resolver rewrites first was at
+	 *   that path twice, and the page had the URL during the second stay.
+	 *   Ledger::record() writes a path once per post, so only the first stay is
+	 *   dated, and the pages under the path are rebuilt as they were then.
+	 * - `restore-kept-url`: since the page had the URL, a restore that could
+	 *   not move it, or a page above it, back recorded the URL it had before
+	 *   the trash on it (Operations::keep_original_url()), dated at the restore,
+	 *   and deleted the markers that dated the move. That entry reads as a move
+	 *   made at the restore.
 	 *
 	 * @param string $path Normalized path the resolver sends to the page.
 	 * @param int    $id   The page.
@@ -541,7 +811,47 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				$had[ $was ] = true;
 			}
 		}
+
+		if ( $first > 0 ) {
+			// The first post's stays at the path: a second one is dated by nothing.
+			$stays = [];
+			foreach ( $this->history[ $first ] ?? [] as $i => $was ) {
+				if ( $was === $prefix && ( 0 === $i || $this->history[ $first ][ $i - 1 ] !== $prefix ) ) {
+					$stays[] = $this->when[ $first ][ $i ];
+				}
+			}
+			if ( count( $stays ) > 1 && $since >= $stays[1] ) {
+				return 'second-stay';
+			}
+		}
+
+		// An entry a restore wrote on a page on the way, for a path it had left before, since the page had the URL.
+		foreach ( $pages as $page ) {
+			foreach ( $this->entered[ $page ] ?? [] as $entry => $step ) {
+				if ( $step > $since && str_starts_with( $this->steps[ $step - 1 ] ?? '', 'restore ' ) && $this->path_at( $page, $step - 1 ) !== $entry ) {
+					return 'restore-kept-url';
+				}
+			}
+		}
 		return '';
+	}
+
+	/**
+	 * A page's path at the end of a step, from its history.
+	 *
+	 * @param int $id   Page ID.
+	 * @param int $step Step, 0 for the start.
+	 * @return string
+	 */
+	private function path_at( int $id, int $step ): string {
+		$path = '';
+		foreach ( $this->history[ $id ] ?? [] as $i => $was ) {
+			if ( $this->when[ $id ][ $i ] > $step ) {
+				break;
+			}
+			$path = $was;
+		}
+		return $path;
 	}
 
 	/**
@@ -592,8 +902,8 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Every list the admin screens offer: each live page's pairs for each of
-	 * its old paths, and the admin's latest change.
+	 * Every list the admin screens offer: each page's pairs for each of its
+	 * old paths, drafts and private pages too, and the admin's latest change.
 	 *
 	 * @return array<string,array<string,mixed>> Collected pairs by list.
 	 */
@@ -602,7 +912,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		$out    = [];
 		foreach ( array_keys( $this->made ) as $id ) {
 			$post = get_post( $id );
-			if ( ! $post instanceof WP_Post || 'publish' !== $post->post_status ) {
+			if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
 				continue;
 			}
 			foreach ( $ledger->paths_for( $id ) as $from ) {
@@ -617,18 +927,29 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The page a request for a path is redirected to: none when a published
-	 * page is at the path, since only a 404 reaches the resolver.
+	 * The page a request for a path is redirected to: none when WordPress
+	 * shows something there, as Rules::is_404() tells it on the live ledger,
+	 * since only a 404 reaches the resolver.
 	 *
 	 * @param Resolver $resolver Resolver.
 	 * @param string   $path     Normalized path.
 	 * @return int Page ID, 0 for none.
 	 */
 	private function served( Resolver $resolver, string $path ): int {
-		$there = get_page_by_path( $path, OBJECT, 'page' );
-		if ( $there instanceof WP_Post && is_post_publicly_viewable( $there ) ) {
+		if ( ! ( new Live_View( new Ledger() ) )->is_404( $path, 'page' ) ) {
 			return 0;
 		}
+		return $this->resolved( $resolver, $path );
+	}
+
+	/**
+	 * The page the resolver sends a path to, 404 or not.
+	 *
+	 * @param Resolver $resolver Resolver.
+	 * @param string   $path     Normalized path.
+	 * @return int Page ID, 0 for none.
+	 */
+	private function resolved( Resolver $resolver, string $path ): int {
 		$target = $resolver->resolve( 'page', $path );
 		return $target instanceof WP_Post ? (int) $target->ID : 0;
 	}
@@ -657,6 +978,12 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			if ( end( $seen ) !== $path ) {
 				$this->history[ $id ][] = $path;
 				$this->when[ $id ][]    = $this->step;
+			}
+		}
+		$ledger = new Ledger();
+		foreach ( array_keys( $this->made ) as $id ) {
+			foreach ( $ledger->paths_for( $id ) as $entry ) {
+				$this->entered[ $id ][ $entry ] = $this->entered[ $id ][ $entry ] ?? $this->step;
 			}
 		}
 	}
@@ -748,6 +1075,9 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				implode( ', ', $this->history[ $id ] ?? [] ),
 				implode( ', ', $ledger->paths_for( $id ) )
 			);
+		}
+		foreach ( $this->others as $other ) {
+			$lines[] = '  ' . $other;
 		}
 		$roots   = get_option( Ledger::ROOT_OPTION, [] );
 		$lines[] = '  root list [' . implode( ', ', (array) ( $roots['page'] ?? [] ) ) . ']';

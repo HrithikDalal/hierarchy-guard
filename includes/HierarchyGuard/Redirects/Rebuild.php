@@ -51,6 +51,13 @@ final class Rebuild {
 	private array $kids = [];
 
 	/**
+	 * The pages in the trash, by ID, during one rewind.
+	 *
+	 * @var array<int,mixed>
+	 */
+	private array $virtual = [];
+
+	/**
 	 * The pages put at a new place since moved() was last asked.
 	 *
 	 * @var array<int,true>
@@ -206,7 +213,7 @@ final class Rebuild {
 	 */
 	public static function rewind( array $places, array $history, int $date, int $anchor, string $old ): array {
 		[ $events, $wrote ] = self::events( $places, $history, $date );
-		$state              = new self( $places );
+		$state              = new self( $places, $history['virtual'] );
 		$none               = [];
 		foreach ( $events as $event ) {
 			$state->take_back( $event, $wrote, $old, $anchor, $none );
@@ -256,8 +263,12 @@ final class Rebuild {
 			$pending[ $anchor ][ $k ] = true;
 		}
 
-		$state  = new self( $places );
-		$rank   = array_flip( $order );
+		$state = new self( $places, $history['virtual'] );
+		// A page the walk reached twice ranks where it was first reached.
+		$rank = [];
+		foreach ( $order as $at => $id ) {
+			$rank[ $id ] = $rank[ $id ] ?? $at;
+		}
 		$held   = [];
 		$spans  = [];
 		$points = [];
@@ -415,10 +426,12 @@ final class Rebuild {
 	/**
 	 * A rewind's pages, each at its place now.
 	 *
-	 * @param array<int,array{parent:int,above:string,slug:string}> $places Each page's place now, by ID.
+	 * @param array<int,array{parent:int,above:string,slug:string}> $places  Each page's place now, by ID.
+	 * @param array<int,mixed>                                      $virtual The pages in the trash, by ID.
 	 */
-	private function __construct( array $places ) {
-		$this->places = $places;
+	private function __construct( array $places, array $virtual = [] ) {
+		$this->places  = $places;
+		$this->virtual = $virtual;
 		foreach ( $places as $id => $place ) {
 			// The pages by the last segment of their slug, so a path is looked up among a few.
 			$this->named[ basename( $place['slug'] ) ][ $id ] = true;
@@ -596,12 +609,17 @@ final class Rebuild {
 	 * @return int
 	 */
 	private function at( string $path, int $id ): int {
+		$trashed = 0;
 		foreach ( array_keys( $this->named[ basename( $path ) ] ?? [] ) as $other ) {
 			if ( $other !== $id && $this->path( $other ) === $path && ! $this->below( $other, $id ) ) {
-				return $other;
+				// A page in the trash stands where it was before its trash; a page outside it at the same path was there then.
+				if ( ! isset( $this->virtual[ $other ] ) ) {
+					return $other;
+				}
+				$trashed = 0 !== $trashed ? $trashed : $other;
 			}
 		}
-		return 0;
+		return $trashed;
 	}
 
 	/**
@@ -636,8 +654,9 @@ final class Rebuild {
 			$this->set( $id, [ 'slug' => $place['slug'] ] + $this->places[ $id ] );
 			return;
 		}
-		// Moved, and maybe renamed in the same save: to the top level, or under
-		// the tracked page at the parent path then.
+		// Moved, and maybe renamed in the same save: to the top level, under the
+		// tracked page at the parent path then or, when the pages between are
+		// not tracked, under the nearest tracked page above it.
 		$parent = '' !== $place['above'] ? $this->at( $place['above'], $id ) : 0;
 		if ( '' === $place['above'] || $parent > 0 ) {
 			$this->set(
@@ -650,15 +669,6 @@ final class Rebuild {
 			);
 			return;
 		}
-		// With no page there, a slug changed other than by a move making it
-		// unique was renamed where it was, under a parent whose path then the
-		// ledger lost, as when a page moved back to a path prunes its entry.
-		$slug = $this->places[ $id ]['slug'];
-		if ( $slug !== $place['slug'] && 1 !== preg_match( '/^' . preg_quote( $place['slug'], '/' ) . '-\d+$/', $slug ) ) {
-			$this->set( $id, [ 'slug' => $place['slug'] ] + $this->places[ $id ] );
-			return;
-		}
-		// Moved: under the nearest tracked page above that path.
 		$this->set( $id, $place );
 		$segments = explode( '/', $place['above'] );
 		for ( $length = count( $segments ) - 1; $length >= 1; $length-- ) {

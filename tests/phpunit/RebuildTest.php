@@ -131,6 +131,79 @@ final class RebuildTest extends TestCase {
 				),
 				[ [ 'company/about/team', 3 ] ],
 			],
+			'a subpage moved and renamed in one save, from under a page nobody tracks' => [
+				self::block( 'company/about', 5, 'alpha/fresh-1' ),
+				self::tree( [ self::node( 8, 5, 'history' ), self::node( 7, 5, 'fresh-4' ) ] ),
+				self::history(
+					[
+						4 => self::place( 0, 'alpha' ),
+						5 => self::place( 4, 'fresh-1' ),
+					],
+					[
+						4 => [ self::entry( 4, 'company' ), self::entry( 5, 'studio-2' ) ],
+						5 => [ self::entry( 3, 'company/about' ) ],
+						// Leadership left Team, which is not tracked, for About under a new slug in one save.
+						7 => [ self::entry( 6, 'alpha/fresh-1/team/leadership' ), self::entry( 12, 'alpha/fresh-1/fresh-2' ) ],
+					]
+				),
+				[ [ 'company/about/history', 8 ], [ 'company/about/team/leadership', 7 ] ],
+			],
+			'a page in the trash at the path a live page has now' => [
+				self::block( 'company/about', 10, 'studio', 0 ),
+				self::tree(
+					[
+						self::node( 9, 10, 'services' ) + [ 'holder' => 4 ],
+						[ 'segment' => 'team' ] + self::node( 6, 10, 'alpha' ) + [ 'holder' => 4 ],
+					],
+					[ 9 => [ self::node( 7, 9, 'leadership' ) ] ]
+				),
+				self::history(
+					[
+						10 => self::place( 0, 'studio' ),
+						// Company is in the trash, at its slug from before: Team was renamed to that slug since.
+						4  => self::place( 10, 'alpha' ),
+						5  => self::place( 4, 'about' ),
+					],
+					[
+						4  => [ self::entry( 13, 'company/about' ), self::entry( 16, 'company' ), self::entry( 22, 'studio/alpha' ) ],
+						5  => [ self::entry( 14, 'company/about' ) ],
+						10 => [ self::entry( 21, 'studio/alpha' ), self::entry( 23, 'company/about' ), self::entry( 24, 'company' ) ],
+						6  => [ self::entry( 27, 'studio/team' ) ],
+						7  => [ self::entry( 28, 'studio/alpha/leadership' ) ],
+					],
+					[
+						6 => [ self::marker( 12, 5, 'team' ), self::marker( 20, 4, 'team' ) ],
+						9 => [ self::marker( 26, 4, 'services' ) ],
+					],
+					[
+						4 => [
+							'aliases' => [
+								[
+									'to'   => 10,
+									'path' => 'studio/alpha',
+								],
+								[
+									'to'   => 10,
+									'path' => 'company/about',
+								],
+								[
+									'to'   => 10,
+									'path' => 'company',
+								],
+							],
+						],
+						5 => [
+							'aliases' => [
+								[
+									'to'   => 4,
+									'path' => 'company/about',
+								],
+							],
+						],
+					]
+				),
+				[ [ 'company/about/services', 9 ], [ 'company/about/team/leadership', 7 ], [ 'company/about/team', 6 ] ],
+			],
 		];
 	}
 
@@ -180,6 +253,12 @@ final class RebuildTest extends TestCase {
 		$out['six pages in the trash and the post, with renames between'] = [
 			self::block( 'company/about', 2, 'company/about-us' ),
 			self::tree( $tops ),
+			self::history( $places, $entries, $markers, $virtual ),
+		];
+		// A subpage a page in the trash moved up is also walked under another: it ranks where it is first reached.
+		$out['a page the walk reaches twice'] = [
+			self::block( 'company/about', 2, 'company/about-us' ),
+			self::tree( $tops, [ 51 => [ $tops[3] ] ] ),
 			self::history( $places, $entries, $markers, $virtual ),
 		];
 		return $out;
