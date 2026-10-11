@@ -147,7 +147,13 @@ final class Changes_Controller {
 	private function change( string $change_id ) {
 		$change = $this->log->latest( get_current_user_id() );
 		if ( null === $change || $change_id !== $change['id'] ) {
-			return new WP_Error( 'hierarchy_guard_change_gone', __( 'These redirects are no longer available. They are kept for 30 minutes after a page is trashed.', 'hierarchy-guard' ), [ 'status' => 404 ] );
+			$minutes = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
+			$message = __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ' . sprintf(
+				/* translators: %s: number of minutes. */
+				_n( 'They are kept for %s minute.', 'They are kept for %s minutes.', $minutes, 'hierarchy-guard' ),
+				number_format_i18n( $minutes )
+			);
+			return new WP_Error( 'hierarchy_guard_change_gone', $message, [ 'status' => 404 ] );
 		}
 		return $change;
 	}

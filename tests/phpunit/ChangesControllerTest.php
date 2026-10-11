@@ -103,4 +103,10 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 	public function test_an_unknown_csv_layout_is_refused(): void {
 		$this->assertSame( 400, $this->get( '/changes/' . $this->change_id . '/csv', [ 'format' => 'excel' ] )->get_status() );
 	}
+
+	public function test_the_gone_message_says_how_long_the_change_is_kept(): void {
+		$response = $this->get( '/changes/' . wp_generate_uuid4() . '/pairs' );
+
+		$this->assertSame( 'These redirects are no longer available. They are kept for 30 minutes.', $response->get_data()['message'] );
+	}
 }
