@@ -310,14 +310,26 @@ final class Ledger {
 	 * @return bool
 	 */
 	public static function held_in_trash( string $post_type, string $path ): bool {
+		return self::trash_holder( $post_type, $path ) > 0;
+	}
+
+	/**
+	 * The post in the trash that holds this path, or 0. The trash flow records
+	 * a trashed page's own paths on it, so this is the page that left the path.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return int Post ID, or 0 when no post in the trash holds the path.
+	 */
+	public static function trash_holder( string $post_type, string $path ): int {
 		global $wpdb;
 
 		$path = Paths::normalize( $path );
 		if ( '' === $path ) {
-			return false;
+			return 0;
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; only for a 404 on an exact old parent path.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index: a 404 on an exact old parent path, and at most one per old path listed or collected.
 		$id = $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
@@ -326,7 +338,7 @@ final class Ledger {
 			)
 		);
 
-		return null !== $id;
+		return null !== $id ? (int) $id : 0;
 	}
 
 	/**
