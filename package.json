@@ -15,10 +15,17 @@
 		"test:php": "wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard vendor/bin/phpunit"
 	},
 	"devDependencies": {
+		"@wordpress/a11y": "^4.57.0",
 		"@wordpress/api-fetch": "^7.57.0",
+		"@wordpress/components": "^42.0.0",
+		"@wordpress/data": "^10.57.0",
 		"@wordpress/dom-ready": "^4.57.0",
+		"@wordpress/editor": "^15.2.0",
+		"@wordpress/element": "^9.0.0",
 		"@wordpress/env": "^10.0.0",
 		"@wordpress/i18n": "^6.30.0",
+		"@wordpress/notices": "^5.57.0",
+		"@wordpress/plugins": "^7.57.0",
 		"@wordpress/scripts": "36.1.0",
 		"@wordpress/url": "^4.57.0",
 		"vite": "^8.3.4",

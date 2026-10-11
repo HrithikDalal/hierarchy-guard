@@ -1,0 +1,29 @@
+// Layout only: colours, radii and type come from the admin theme.
+.hierarchy-guard-modal {
+
+	.hierarchy-guard-pairs {
+		margin: 12px 0;
+
+		.hierarchy-guard-url {
+			overflow-wrap: anywhere;
+		}
+	}
+
+	&__pager,
+	&__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		align-items: center;
+		margin-top: 12px;
+	}
+
+	&__actions {
+		justify-content: flex-end;
+	}
+}
+
+// A slug never breaks; a long path breaks after a slash.
+.hierarchy-guard-url__part {
+	white-space: nowrap;
+}
