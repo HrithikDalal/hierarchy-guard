@@ -166,7 +166,7 @@ export function initialSentence( title, children, policy ) {
 			_n(
 				'“%1$s” has %2$s subpage.',
 				'“%1$s” has %2$s subpages.',
-				children,
+				Math.min( children, config.cap ),
 				'hierarchy-guard'
 			),
 			title,
@@ -611,12 +611,18 @@ export function viewRedirectsLabel( count, capped ) {
  *
  * @param {boolean}     serving  Whether built-in redirects reach this page.
  * @param {Object|null} provider Detected redirect plugin.
- * @param {boolean}     inUse    Whether a live page now uses the old URL.
+ * @param {string}      state    The old URL's state from the REST route: `in_use`, `trash`, `none` or `ok`.
  * @return {string} Short state.
  */
-export function oldUrlState( serving, provider, inUse = false ) {
-	if ( inUse ) {
+export function oldUrlState( serving, provider, state = 'ok' ) {
+	if ( 'in_use' === state ) {
 		return __( 'Used by another page', 'hierarchy-guard' );
+	}
+	if ( 'trash' === state ) {
+		return __( 'In the trash', 'hierarchy-guard' );
+	}
+	if ( 'none' === state ) {
+		return __( 'Not redirected', 'hierarchy-guard' );
 	}
 	if ( serving ) {
 		return __( 'Redirects here', 'hierarchy-guard' );
@@ -695,10 +701,21 @@ export function trashNote( data ) {
 /**
  * Why an old URL has no new one.
  *
- * @param {Object} row Unresolved row from the pairs route.
+ * @param {Object}  row   Unresolved row from the pairs route.
+ * @param {boolean} lower Whether to say "trash" in lower case, as the block editor does.
  * @return {string} Sentence.
  */
-export function unresolvedSentence( row ) {
+export function unresolvedSentence( row, lower = false ) {
+	if ( 'trash' === row.reason && lower ) {
+		return sprintf(
+			/* translators: %s: an old URL. */
+			__(
+				'%s is in the trash, so it has no new URL.',
+				'hierarchy-guard'
+			),
+			row.old
+		);
+	}
 	if ( 'trash' === row.reason ) {
 		return sprintf(
 			/* translators: %s: an old URL. */

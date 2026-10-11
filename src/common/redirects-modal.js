@@ -45,10 +45,11 @@ function rangeLabel( data ) {
  *
  * @param {Object}     props         Props.
  * @param {Object}     props.source  Either { change } or { post, from }.
+ * @param {boolean}    props.editor  Whether the block editor shows it, which says "trash" in lower case.
  * @param {() => void} props.onClose Closes the modal.
  * @return {Element} Modal.
  */
-export default function RedirectsModal( { source, onClose } ) {
+export default function RedirectsModal( { source, editor = false, onClose } ) {
 	const [ page, setPage ] = useState( 1 );
 	const [ data, setData ] = useState( null );
 	const [ loading, setLoading ] = useState( true );
@@ -207,7 +208,7 @@ export default function RedirectsModal( { source, onClose } ) {
 			{ ! data && loading && <Spinner /> }
 			{ data && (
 				<>
-					<p>{ intro }</p>
+					{ data.total > 0 && <p>{ intro }</p> }
 					{ data.total > 0 ? (
 						<table
 							className="widefat striped hierarchy-guard-pairs"
@@ -252,7 +253,7 @@ export default function RedirectsModal( { source, onClose } ) {
 					) }
 					{ data.unresolved.map( ( row ) => (
 						<p key={ row.old } className="description">
-							{ unresolvedSentence( row ) }
+							{ unresolvedSentence( row, editor ) }
 						</p>
 					) ) }
 					{ data.pages > 1 && (

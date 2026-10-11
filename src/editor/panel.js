@@ -123,7 +123,9 @@ function Overview( { data, onView } ) {
 								</li>
 							) ) }
 						</ul>
-						{ data.has_more && (
+						{ ( data.has_more ||
+							data.descendants.capped ||
+							data.descendants.count > data.children.length ) && (
 							<p>
 								<a href={ data.list_url }>
 									{ viewAllLabel(
@@ -148,7 +150,7 @@ function Overview( { data, onView } ) {
 									{ oldUrlState(
 										data.redirects.serving,
 										data.redirects.provider,
-										old.in_use
+										old.state
 									) }
 									{ ' · ' }
 									<Button
@@ -269,7 +271,12 @@ export default function HierarchyPlugin() {
 	useEffect( () => {
 		if ( needed && ! requested.current ) {
 			requested.current = true;
-			load();
+			load().then( ( result ) => {
+				// A failed first load is asked again at the next trigger.
+				if ( ! result ) {
+					requested.current = false;
+				}
+			} );
 		}
 	}, [ needed, load ] );
 
@@ -287,12 +294,14 @@ export default function HierarchyPlugin() {
 			return;
 		}
 		removeNotice( NOTICE );
+		// Without a baseline, any old URL on the page is new to this session.
+		const baseline = newest.current;
 		load().then( ( result ) => {
 			const latest =
 				result && result.old_paths[ 0 ]
 					? result.old_paths[ 0 ].path
 					: null;
-			if ( ! latest || latest === newest.current ) {
+			if ( ! latest || latest === baseline ) {
 				return;
 			}
 			newest.current = latest;
@@ -409,6 +418,7 @@ export default function HierarchyPlugin() {
 			{ modal && (
 				<RedirectsModal
 					source={ modal }
+					editor
 					onClose={ () => setModal( null ) }
 				/>
 			) }

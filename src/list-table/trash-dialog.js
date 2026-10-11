@@ -71,7 +71,7 @@ export default function TrashDialog( {
 	onConfirm,
 } ) {
 	const [ preview, setPreview ] = useState( null );
-	const [ error, setError ] = useState( '' );
+	const [ failed, setFailed ] = useState( false );
 	const [ initial, setInitial ] = useState( config.policy );
 	const [ policy, setPolicy ] = useState( config.policy );
 	const [ expanded, setExpanded ] = useState( false );
@@ -98,9 +98,9 @@ export default function TrashDialog( {
 				setPolicy( own );
 				setPreview( result );
 			} )
-			.catch( ( failure ) => {
+			.catch( () => {
 				if ( live ) {
-					setError( failure.message || '' );
+					setFailed( true );
 				}
 			} );
 		return () => {
@@ -160,13 +160,13 @@ export default function TrashDialog( {
 				{ sentence && <p>{ sentence }</p> }
 				{ denied && <p>{ deniedSentence( policy ) }</p> }
 			</div>
-			{ ! error && ! preview && (
+			{ ! failed && ! preview && (
 				<p className="hierarchy-guard-dialog__loading">
 					<Spinner />
 					{ __( 'Checking the subpages…', 'hierarchy-guard' ) }
 				</p>
 			) }
-			{ error && (
+			{ failed && (
 				<Notice status="warning" isDismissible={ false }>
 					{ previewError( policy ) }
 				</Notice>
@@ -245,7 +245,7 @@ export default function TrashDialog( {
 					variant="primary"
 					isDestructive
 					isBusy={ busy }
-					disabled={ ( ! preview && ! error ) || busy }
+					disabled={ ( ! preview && ! failed ) || busy }
 					onClick={ confirm }
 				>
 					{ __( 'Move to Trash', 'hierarchy-guard' ) }

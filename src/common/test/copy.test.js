@@ -1,7 +1,8 @@
 /**
  * The sentences the scripts show.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import config from '../config';
 import {
 	bulkSentence,
 	classicConfirm,
@@ -41,6 +42,11 @@ const team = {
 	denied: false,
 	denied_trash: false,
 };
+
+beforeAll( () => {
+	// Numbers print the same under any machine locale.
+	config.locale = 'en-US';
+} );
 
 describe( 'counts', () => {
 	it( 'formats a capped count with a plus', () => {
@@ -262,9 +268,11 @@ describe( 'warnings and outcomes', () => {
 			'Add in Redirection'
 		);
 		expect( oldUrlState( false, null ) ).toBe( 'Not redirected' );
-		expect( oldUrlState( true, null, true ) ).toBe(
+		expect( oldUrlState( true, null, 'in_use' ) ).toBe(
 			'Used by another page'
 		);
+		expect( oldUrlState( true, null, 'trash' ) ).toBe( 'In the trash' );
+		expect( oldUrlState( true, null, 'none' ) ).toBe( 'Not redirected' );
 	} );
 
 	it( 'says what trashing the page would do, by policy', () => {
@@ -304,6 +312,9 @@ describe( 'warnings and outcomes', () => {
 		expect(
 			unresolvedSentence( { old: '/about/', reason: 'trash' } )
 		).toBe( '/about/ is in the Trash, so it has no new URL.' );
+		expect(
+			unresolvedSentence( { old: '/about/', reason: 'trash' }, true )
+		).toBe( '/about/ is in the trash, so it has no new URL.' );
 		expect(
 			unresolvedSentence( { old: '/about/', reason: 'in_use' } )
 		).toBe(

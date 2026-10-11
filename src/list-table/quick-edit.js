@@ -62,6 +62,18 @@ function printNotice( status, sentence, source, label ) {
 			) );
 		} );
 		text.appendChild( button );
+		if ( ! config.serving && ! config.provider && config.settingsUrl ) {
+			// Set apart the way the server notice sets its link apart.
+			const divider = window.document.createElement( 'span' );
+			divider.setAttribute( 'aria-hidden', 'true' );
+			divider.textContent = ' ·';
+			const setup = window.document.createElement( 'a' );
+			setup.href = config.settingsUrl;
+			setup.textContent = __( 'Set up redirects', 'hierarchy-guard' );
+			text.appendChild( divider );
+			text.appendChild( window.document.createTextNode( ' ' ) );
+			text.appendChild( setup );
+		}
 	}
 	notice.appendChild( text );
 	end.parentNode.insertBefore( notice, end.nextSibling );
