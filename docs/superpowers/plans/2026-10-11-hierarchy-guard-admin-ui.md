@@ -28,7 +28,7 @@
 - Pairs: a pair is a published page's old URL and its current one, both relative to the home URL (`/about/team/`). An old path whose head has no target is "unresolved", with reason `trash`, `unpublished` or `none`; one a live page uses now is unresolved with reason `in_use`, because a redirect plugin would hide that page. An old path with no URL form (plain permalinks, a type without a permastruct), one that leads where it already is, and one whose pages now sit under the trash have no pairs. Pairs are never stored. CSV layouts: `redirection` and `srm` are `source,target,regex,code` with `0` and `301`; `generic` is `source,target,code`; CRLF line ends, a header row, RFC 4180 quoting, and a leading apostrophe on a cell starting with `=`, `+`, `-`, `@`, tab or CR. A CSV response carries the `X-Hierarchy-Guard-Csv` header and is printed as is; download links carry `_wpnonce` for `wp_rest`.
 - Trash dialog: the chosen policy travels as `hierarchy_guard_policy` on core's own row-action link (`post.php?action=trash`) or bulk form (`edit.php`, `action` or `action2` `trash`). It applies only after core's nonce verifies again (`trash-post_{id}`, `bulk-posts`) and only to the IDs the request names, through the `hierarchy_guard_trash_policy` filter.
 - Subtree filter: query var `hierarchy_guard_under` (an ID). The filtered list is the capped walk's IDs as `post__in`, sorted by menu order then title as an array, so core renders paginated rows instead of loading every page for its tree.
-- Settings anchors: `#hierarchy-guard-redirects` on the Redirects checkbox and `#hierarchy-guard-trash-policy` on the trash-policy fieldset. "Turn on redirects" and "Settings" links appear only for users with `manage_options`.
+- Settings anchors: `#hierarchy-guard-redirects` on the Redirects checkbox and `#hierarchy-guard-trash-policy` on the trash-policy fieldset. "Set up redirects" and "Settings" links appear only for users with `manage_options`.
 - The redirects nudge: shown on supported list screens to users with `manage_options` while built-in redirects are off, no redirect plugin is detected, and the ledger holds at least one old URL; not on a load that shows a URLs notice. Dismissed through core's `dismiss-wp-pointer` Ajax action as pointer `hierarchy_guard_nudge` (user meta `dismissed_wp_pointers`).
 - Block editor: a plugin document panel starts closed and renders nothing inside, so nothing a user must see lives only in the panel. The save warning uses `PluginPostStatusInfo`; the message after a save is a core editor notice.
 
@@ -5559,7 +5559,7 @@ Replace:
 with:
 ```php
 	/**
-	 * The Redirects field on Settings › Writing, for "Turn on redirects" links.
+	 * The Redirects field on Settings › Writing, for "Set up redirects" links.
 	 *
 	 * @return string
 	 */
