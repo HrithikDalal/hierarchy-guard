@@ -14,6 +14,7 @@ use HierarchyGuard\Overview;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
+use HierarchyGuard\Trash\Change_Log;
 use WP_UnitTestCase;
 
 /**
@@ -40,7 +41,7 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->set_permalink_structure( '/%postname%/' );
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
 		$this->ids = $this->make_tree();
-		$this->box = new Meta_Box( new Overview( new Providers() ) );
+		$this->box = new Meta_Box( new Overview( new Providers(), new Change_Log() ) );
 	}
 
 	public function tear_down(): void {

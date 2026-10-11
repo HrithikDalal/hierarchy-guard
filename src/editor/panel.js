@@ -1,10 +1,10 @@
 /**
  * The Hierarchy plugin for the block editor: a warning under the Summary
- * before a save changes subpage URLs, and a panel with what is above and
- * below the page.
+ * before a save changes subpage URLs, a notice with that change's redirects
+ * after it did, and a panel with what is above and below the page.
  */
 import { BaseControl, Notice, Spinner } from '@wordpress/components';
-import { useSelect } from '@wordpress/data';
+import { useDispatch, useSelect } from '@wordpress/data';
 import {
 	PluginDocumentSettingPanel,
 	PluginPostStatusInfo,
@@ -12,7 +12,9 @@ import {
 } from '@wordpress/editor';
 import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
-import { fetchHierarchy } from '../common/api';
+import { store as noticesStore } from '@wordpress/notices';
+import { fetchHierarchy, fetchPairs } from '../common/api';
+import { changeNotice, newChange } from '../common/change-notice';
 import config from '../common/config';
 import {
 	countsLine,
@@ -21,8 +23,10 @@ import {
 	trashNote,
 	viewAllLabel,
 } from '../common/copy';
+import RedirectsModal from '../common/redirects-modal';
 
 const PANEL = 'hierarchy-guard/hierarchy-guard';
+const NOTICE = 'hierarchy-guard-urls-changed';
 
 /**
  * A title linked to its editor when the user may edit it.
@@ -173,12 +177,16 @@ export default function HierarchyPlugin() {
 			opened: editor.isEditorPanelOpened( PANEL ),
 		};
 	}, [] );
+	const { createNotice, removeNotice } = useDispatch( noticesStore );
 
 	const supported = config.postTypes.includes( postType );
 	const published = 'publish' === status;
 	const [ data, setData ] = useState( null );
 	const [ error, setError ] = useState( '' );
+	const [ modal, setModal ] = useState( null );
 	const requested = useRef( false );
+	// The page's latest change as first loaded: a save's change is the one after it.
+	const baseline = useRef( undefined );
 	const savingUrl = useRef( false );
 
 	const load = useCallback(
@@ -187,6 +195,9 @@ export default function HierarchyPlugin() {
 				.then( ( result ) => {
 					setData( result );
 					setError( '' );
+					if ( undefined === baseline.current ) {
+						baseline.current = result.latest_change || null;
+					}
 					return result;
 				} )
 				.catch( ( failure ) => {
@@ -217,7 +228,8 @@ export default function HierarchyPlugin() {
 		}
 	}, [ needed, load ] );
 
-	// A save that changed the slug or parent moved the page: show where it is now.
+	// A save that changed the slug or parent moved the page: show where it
+	// is now, and the redirects of the change it recorded.
 	useEffect( () => {
 		if ( saving && ! autosaving ) {
 			savingUrl.current = savingUrl.current || ( published && urlEdited );
@@ -227,10 +239,78 @@ export default function HierarchyPlugin() {
 			return;
 		}
 		savingUrl.current = false;
-		if ( saved ) {
-			load();
+		if ( ! saved ) {
+			return;
 		}
-	}, [ saving, autosaving, saved, published, urlEdited, load ] );
+		removeNotice( NOTICE );
+		// Without a baseline, any latest change on the page is new to this session.
+		const before = baseline.current;
+		load().then( ( result ) => {
+			const change = result
+				? newChange( before, result.latest_change )
+				: null;
+			if ( ! change ) {
+				return;
+			}
+			baseline.current = change;
+			const source = { change };
+			const view = () =>
+				setModal( { source, redirects: result.redirects } );
+			fetchPairs( source, 1, 1 )
+				.then( ( pairs ) => {
+					const notice = changeNotice( pairs, result.redirects );
+					if ( ! notice ) {
+						return;
+					}
+					const actions = [];
+					if ( notice.view ) {
+						actions.push( { label: notice.view, onClick: view } );
+					}
+					if ( notice.setup ) {
+						actions.push( {
+							label: __( 'Set up redirects', 'hierarchy-guard' ),
+							url: config.settingsUrl,
+						} );
+					}
+					createNotice( notice.status, notice.sentence, {
+						id: NOTICE,
+						isDismissible: true,
+						actions,
+					} );
+				} )
+				.catch( () => {
+					createNotice(
+						'warning',
+						__(
+							'This save changed URLs, but their redirects couldn’t be loaded.',
+							'hierarchy-guard'
+						),
+						{
+							id: NOTICE,
+							isDismissible: true,
+							actions: [
+								{
+									label: __(
+										'View redirects',
+										'hierarchy-guard'
+									),
+									onClick: view,
+								},
+							],
+						}
+					);
+				} );
+		} );
+	}, [
+		saving,
+		autosaving,
+		saved,
+		published,
+		urlEdited,
+		load,
+		createNotice,
+		removeNotice,
+	] );
 
 	if ( ! supported ) {
 		return null;
@@ -262,6 +342,14 @@ export default function HierarchyPlugin() {
 				{ ! data && ! error && <Spinner /> }
 				{ data && <Overview data={ data } /> }
 			</PluginDocumentSettingPanel>
+			{ modal && (
+				<RedirectsModal
+					source={ modal.source }
+					redirects={ modal.redirects }
+					editor
+					onClose={ () => setModal( null ) }
+				/>
+			) }
 		</>
 	);
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * The outcome notice after a trash or restore, background progress, and the redirects nudge.
+ * The outcome notice after a trash, a restore or a URL-changing save, background progress, and the redirects nudge.
  *
  * @package HierarchyGuard
  */
@@ -20,14 +20,17 @@ use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Change_Log;
+use WP_Post;
 use WP_Screen;
 
 /**
  * Trashing from the editor or the Pages list lands on core's "moved to the
  * Trash" notice. This adds what happened to the subpages to it once per
  * change, keeping core's Undo link last, and prints the URLs the trash
- * changed as a notice of its own, styled by what handles them. While a
- * background batch runs, the list screen says how far it got.
+ * changed as a notice of its own, styled by what handles them. A save in
+ * the classic editor that changed URLs gets the same URLs notice on the
+ * edit screen it lands on. While a background batch runs, the list screen
+ * says how far it got.
  */
 final class Notices {
 
@@ -150,13 +153,13 @@ final class Notices {
 	}
 
 	/**
-	 * The notice about the URLs a trash changed: its type and its HTML.
+	 * The notice about the URLs a trash or a save changed: its type and its HTML.
 	 *
-	 * @param array<string,mixed> $change A trash change.
+	 * @param array<string,mixed> $change A trash or save change.
 	 * @return array{type:string,message:string}|null Null when no URL changed.
 	 */
 	public function urls_notice( array $change ): ?array {
-		if ( 'trash' !== ( $change['action'] ?? '' ) ) {
+		if ( ! in_array( $change['action'] ?? '', [ 'trash', 'save' ], true ) ) {
 			return null;
 		}
 		$count = $this->pairs->count( $this->pairs->collect_change( $change ) );
@@ -228,11 +231,19 @@ final class Notices {
 	}
 
 	/**
-	 * Prints the URLs notice, background progress and the redirects nudge on supported list screens.
+	 * Prints the URLs notice, background progress and the redirects nudge on
+	 * supported list screens, and a save's URLs notice on the classic edit screen.
 	 */
 	public function render(): void {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-		if ( ! $screen instanceof WP_Screen || 'edit' !== $screen->base || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
+		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
+			return;
+		}
+		if ( 'post' === $screen->base ) {
+			$this->render_save( $screen );
+			return;
+		}
+		if ( 'edit' !== $screen->base ) {
 			return;
 		}
 
@@ -279,6 +290,40 @@ final class Notices {
 				]
 			);
 		}
+	}
+
+	/**
+	 * Prints the URLs notice of the user's latest change on the classic edit
+	 * screen, once, when that change is a save of the post being edited. Its
+	 * link downloads the CSV, which needs no script. The block editor raises
+	 * its own notice.
+	 *
+	 * @param WP_Screen $screen Edit screen.
+	 */
+	private function render_save( WP_Screen $screen ): void {
+		$post = get_post();
+		if ( $screen->is_block_editor() || ! $post instanceof WP_Post ) {
+			return;
+		}
+		$user   = get_current_user_id();
+		$change = $this->log->latest( $user );
+		if ( null === $change || 'save' !== $change['action'] || ! empty( $change['shown'] ) || ! isset( $change['roots'][ (int) $post->ID ] ) ) {
+			return;
+		}
+
+		$notice = $this->urls_notice( $change );
+		$this->log->mark_shown( $user, (string) $change['id'] );
+		if ( null === $notice ) {
+			return;
+		}
+		wp_admin_notice(
+			$notice['message'],
+			[
+				'type'               => $notice['type'],
+				'dismissible'        => true,
+				'additional_classes' => [ 'hierarchy-guard-urls' ],
+			]
+		);
 	}
 
 	/**

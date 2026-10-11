@@ -52,7 +52,7 @@ final class NoticesTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		unset( $GLOBALS['typenow'], $_REQUEST['ids'] );
+		unset( $GLOBALS['typenow'], $_REQUEST['ids'], $GLOBALS['post'] );
 		$this->set_permalink_structure( '' );
 		set_current_screen( 'front' );
 		parent::tear_down();
@@ -87,6 +87,39 @@ final class NoticesTest extends WP_UnitTestCase {
 	 */
 	private function rendered(): string {
 		set_current_screen( 'edit-page' );
+		ob_start();
+		$this->notice->render();
+		return (string) ob_get_clean();
+	}
+
+	/**
+	 * Renames about as the admin with pretty permalinks, as the classic editor
+	 * saves it, and returns the change the save recorded.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private function save_about(): array {
+		$this->set_permalink_structure( '/%postname%/' );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		return $this->log->latest( $this->admin );
+	}
+
+	/**
+	 * What render() prints on the edit screen of a post.
+	 *
+	 * @param int  $post_id Post being edited.
+	 * @param bool $blocks  Whether the screen is the block editor's.
+	 * @return string
+	 */
+	private function rendered_on_edit( int $post_id, bool $blocks = false ): string {
+		set_current_screen( 'page' );
+		get_current_screen()->is_block_editor( $blocks );
+		$GLOBALS['post'] = get_post( $post_id );
 		ob_start();
 		$this->notice->render();
 		return (string) ob_get_clean();
@@ -245,6 +278,57 @@ final class NoticesTest extends WP_UnitTestCase {
 		}
 		$this->assertFalse( $this->log->latest( $this->admin )['shown'], 'The save’s own notice is still to come.' );
 		$this->assertStringNotContainsString( 'hierarchy-guard-urls', $this->rendered(), 'The list screen prints no URLs notice for a save.' );
+	}
+
+	public function test_a_save_s_urls_notice_says_what_handles_its_redirects(): void {
+		$change = $this->save_about();
+
+		$notice = $this->notice->urls_notice( $change );
+		$this->assertSame( 'warning', $notice['type'] );
+		$this->assertStringStartsWith( '4 old URLs now show “Page not found”. <a href="', $notice['message'] );
+		$this->assertStringContainsString( '/hierarchy-guard/v1/changes/' . $change['id'] . '/csv', $notice['message'] );
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->assertSame(
+			[
+				'type'    => 'success',
+				'message' => '4 old URLs now redirect to their new pages.',
+			],
+			$this->notice->urls_notice( $change )
+		);
+		delete_option( Settings::OPTION );
+
+		$this->with_provider();
+		$this->assertStringStartsWith( '4 URLs changed. Add their redirects in Redirection. <a href="', $this->notice->urls_notice( $change )['message'] );
+	}
+
+	public function test_the_classic_editor_prints_the_save_s_urls_notice_once(): void {
+		$change = $this->save_about();
+		$before = did_action( 'hierarchy_guard_list_script' );
+
+		$html = $this->rendered_on_edit( $this->ids['about'] );
+
+		$this->assertStringContainsString( 'notice-warning', $html );
+		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
+		$this->assertStringContainsString( 'is-dismissible', $html );
+		$this->assertStringContainsString( '4 old URLs now show “Page not found”.', $html );
+		$this->assertStringContainsString( 'changes/' . $change['id'] . '/csv', $html, 'Without JavaScript the link downloads the CSV.' );
+		$this->assertStringContainsString( 'download>Download redirects (CSV)</a>', $html );
+		$this->assertSame( 0, did_action( 'hierarchy_guard_list_script' ) - $before, 'The edit screen needs no list script.' );
+		$this->assertTrue( $this->log->latest( $this->admin )['shown'] );
+
+		$this->assertSame( '', $this->rendered_on_edit( $this->ids['about'] ), 'Shown once.' );
+	}
+
+	public function test_the_classic_notice_is_only_for_the_page_the_save_changed(): void {
+		$this->save_about();
+
+		$this->assertSame( '', $this->rendered_on_edit( $this->ids['team'] ), 'Its root is about.' );
+		$this->assertSame( '', $this->rendered_on_edit( $this->ids['about'], true ), 'The block editor raises its own notice.' );
+		$this->assertFalse( $this->log->latest( $this->admin )['shown'], 'Still to be shown on about’s edit screen.' );
+
+		$this->trash_about();
+		$this->assertSame( '', $this->rendered_on_edit( $this->ids['company'] ), 'A trash is no save.' );
 	}
 
 	public function test_trash_sentences_for_one_page(): void {

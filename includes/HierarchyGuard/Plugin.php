@@ -71,7 +71,7 @@ final class Plugin {
 		( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
 
 		$pairs    = new Redirects\Pairs();
-		$overview = new Overview( $providers );
+		$overview = new Overview( $providers, $log );
 		( new Admin\Notices( $log, $queue, $pairs, $providers ) )->register();
 		( new Admin\List_Table() )->register();
 		( new REST\Hierarchy_Controller( $overview ) )->register();

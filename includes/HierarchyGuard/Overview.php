@@ -12,12 +12,15 @@ namespace HierarchyGuard;
 use HierarchyGuard\Admin\List_Table;
 use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Redirects\Providers;
+use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
 
 /**
  * Builds the hierarchy summary of one post. Children are paged, counts are
- * direct, and every total stops at the count cap.
+ * direct, and every total stops at the count cap. It says where the post is
+ * now, not its past URLs; the current user's latest change, when it is a
+ * save of this post, tells the editor which redirects that save needs.
  */
 final class Overview {
 
@@ -31,12 +34,21 @@ final class Overview {
 	private Providers $providers;
 
 	/**
+	 * Change log.
+	 *
+	 * @var Change_Log
+	 */
+	private Change_Log $log;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Providers $providers Redirect plugin detection.
+	 * @param Providers  $providers Redirect plugin detection.
+	 * @param Change_Log $log       Change log.
 	 */
-	public function __construct( Providers $providers ) {
+	public function __construct( Providers $providers, Change_Log $log ) {
 		$this->providers = $providers;
+		$this->log       = $log;
 	}
 
 	/**
@@ -71,6 +83,7 @@ final class Overview {
 				'count'  => min( $descendants, $cap ),
 				'capped' => $descendants > $cap,
 			],
+			'latest_change'   => $this->latest_change( $id ),
 			'redirects'       => [
 				// The server redirects only to a page anyone can view, outside the trash.
 				'serving'      => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
@@ -87,6 +100,20 @@ final class Overview {
 			'trash_to'        => $to > 0 ? self::ref( $to ) : null,
 			'list_url'        => List_Table::filter_url( $type, $id ),
 		];
+	}
+
+	/**
+	 * The current user's latest change ID when it is a save of this post.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string|null
+	 */
+	private function latest_change( int $post_id ): ?string {
+		$change = $this->log->latest( get_current_user_id() );
+		if ( null === $change || 'save' !== ( $change['action'] ?? '' ) || ! isset( $change['roots'][ $post_id ] ) ) {
+			return null;
+		}
+		return (string) $change['id'];
 	}
 
 	/**

@@ -114,6 +114,7 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 			$data['descendants']
 		);
 		$this->assertArrayNotHasKey( 'old_paths', $data, 'The panel shows where the page is now, not its past URLs.' );
+		$this->assertNull( $data['latest_change'] );
 		$this->assertSame(
 			[
 				'serving'      => false,
@@ -125,6 +126,22 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( Settings::POLICY_REPARENT, $data['trash_policy'] );
 		$this->assertSame( 'Company', $data['trash_to']['title'] );
 		$this->assertStringContainsString( 'hierarchy_guard_under=' . $this->ids['about'], $data['list_url'] );
+	}
+
+	public function test_the_latest_change_is_the_user_s_save_of_this_page(): void {
+		$this->rename( $this->ids['about'], 'about-us' );
+		$change = ( new Change_Log() )->latest( $this->admin );
+
+		$this->assertSame( $change['id'], $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['latest_change'] );
+		$this->assertNull( $this->get( '/posts/' . $this->ids['team'] . '/hierarchy' )->get_data()['latest_change'], 'The save moved team too, but its root is about.' );
+
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$this->assertNull( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['latest_change'], 'Another user’s change is not this user’s.' );
+		wp_set_current_user( $this->admin );
+
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['team'] );
+		$this->assertNull( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['latest_change'], 'A trash replaced the save.' );
 	}
 
 	public function test_children_are_paged(): void {
