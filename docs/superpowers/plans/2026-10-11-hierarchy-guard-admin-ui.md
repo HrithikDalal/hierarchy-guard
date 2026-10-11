@@ -7100,15 +7100,11 @@ export function optionDescription( policy, page, cap ) {
  * @return {string} Sentence.
  */
 export function deniedSentence( policy ) {
-	return 'trash_children' === policy
-		? __(
-				'You can’t delete some of the subpages. They’ll stay where they are.',
-				'hierarchy-guard'
-			)
-		: __(
-				'You can’t edit some of the subpages. They’ll stay where they are.',
-				'hierarchy-guard'
-			);
+	const first =
+		'trash_children' === policy
+			? __( 'You can’t delete some of the subpages.', 'hierarchy-guard' )
+			: __( 'You can’t edit some of the subpages.', 'hierarchy-guard' );
+	return first + ' ' + __( 'They’ll stay where they are.', 'hierarchy-guard' );
 }
 
 /**
@@ -7120,19 +7116,23 @@ export function deniedSentence( policy ) {
 export function previewError( policy ) {
 	const outcomes = {
 		reparent: __(
-			'The subpages couldn’t be checked. If you continue, they’ll move up one level.',
+			'If you continue, they’ll move up one level.',
 			'hierarchy-guard'
 		),
 		trash_children: __(
-			'The subpages couldn’t be checked. If you continue, they’ll go to the Trash too.',
+			'If you continue, they’ll go to the Trash too.',
 			'hierarchy-guard'
 		),
 		keep: __(
-			'The subpages couldn’t be checked. If you continue, they’ll stay where they are.',
+			'If you continue, they’ll stay where they are.',
 			'hierarchy-guard'
 		),
 	};
-	return outcomes[ policy ] || outcomes.reparent;
+	return (
+		__( 'The subpages couldn’t be checked.', 'hierarchy-guard' ) +
+		' ' +
+		( outcomes[ policy ] || outcomes.reparent )
+	);
 }
 
 /**
@@ -7216,30 +7216,30 @@ export function changedSentence( count, capped, serving, provider ) {
 			shown
 		);
 	}
-	if ( provider && provider.name ) {
-		return sprintf(
-			/* translators: 1: number of URLs, such as 12 or 1,000+, 2: name of the redirect plugin. */
-			_n(
-				'%1$s URL changed. Add its redirect in %2$s.',
-				'%1$s URLs changed. Add their redirects in %2$s.',
-				count,
-				'hierarchy-guard'
-			),
-			shown,
-			provider.name
-		);
-	}
 	if ( provider ) {
-		return sprintf(
+		const changed = sprintf(
 			/* translators: %s: number of URLs, such as 12 or 1,000+. */
-			_n(
-				'%s URL changed. Add its redirect in your redirect plugin.',
-				'%s URLs changed. Add their redirects in your redirect plugin.',
-				count,
-				'hierarchy-guard'
-			),
+			_n( '%s URL changed.', '%s URLs changed.', count, 'hierarchy-guard' ),
 			shown
 		);
+		const add = provider.name
+			? sprintf(
+					/* translators: %s: name of the redirect plugin. */
+					_n(
+						'Add its redirect in %s.',
+						'Add their redirects in %s.',
+						count,
+						'hierarchy-guard'
+					),
+					provider.name
+			  )
+			: _n(
+					'Add its redirect in your redirect plugin.',
+					'Add their redirects in your redirect plugin.',
+					count,
+					'hierarchy-guard'
+			  );
+		return changed + ' ' + add;
 	}
 	return sprintf(
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
@@ -7541,7 +7541,7 @@ Create `src/classic/index.js`:
  * changed slug or parent on a published page with subpages.
  */
 import domReady from '@wordpress/dom-ready';
-import { _n, sprintf } from '@wordpress/i18n';
+import { __, _n, sprintf } from '@wordpress/i18n';
 import { formatCount } from '../common/copy';
 
 domReady( () => {
@@ -7571,16 +7571,23 @@ domReady( () => {
 		if ( ! edited ) {
 			return;
 		}
-		const message = sprintf(
-			/* translators: %s: number of subpages, such as 12 or 1,000+. */
-			_n(
-				'Saving changes this page’s URL and the URL of %s subpage. You’ll get the redirects to add in the Hierarchy box after saving. Continue?',
-				'Saving changes this page’s URL and the URLs of %s subpages. You’ll get the redirects to add in the Hierarchy box after saving. Continue?',
-				count,
+		const message = [
+			sprintf(
+				/* translators: %s: number of subpages, such as 12 or 1,000+. */
+				_n(
+					'Saving changes this page’s URL and the URL of %s subpage.',
+					'Saving changes this page’s URL and the URLs of %s subpages.',
+					count,
+					'hierarchy-guard'
+				),
+				formatCount( count, '1' === box.dataset.capped )
+			),
+			__(
+				'You’ll get the redirects to add in the Hierarchy box after saving.',
 				'hierarchy-guard'
 			),
-			formatCount( count, '1' === box.dataset.capped )
-		);
+			__( 'Continue?', 'hierarchy-guard' ),
+		].join( ' ' );
 		// eslint-disable-next-line no-alert
 		if ( ! window.confirm( message ) ) {
 			event.preventDefault();
