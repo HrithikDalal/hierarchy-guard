@@ -7314,8 +7314,6 @@ export function oldUrlState( serving, provider, inUse = false ) {
 export function trashNote( data ) {
 	const children = data.children_total;
 	const all = data.descendants.count;
-	const shownChildren = formatCount( children, data.children_capped );
-	const shownAll = formatCount( all, data.descendants.capped );
 	if ( ! children ) {
 		return '';
 	}
@@ -7328,7 +7326,7 @@ export function trashNote( data ) {
 				all,
 				'hierarchy-guard'
 			),
-			shownAll
+			formatCount( all, data.descendants.capped )
 		);
 	}
 	if ( 'keep' === data.trash_policy ) {
@@ -7340,7 +7338,7 @@ export function trashNote( data ) {
 				children,
 				'hierarchy-guard'
 			),
-			shownChildren
+			formatCount( children, data.children_capped )
 		);
 	}
 	if ( data.trash_to ) {
@@ -7352,7 +7350,7 @@ export function trashNote( data ) {
 				children,
 				'hierarchy-guard'
 			),
-			shownChildren,
+			formatCount( children, data.children_capped ),
 			data.trash_to.title
 		);
 	}
@@ -7364,7 +7362,7 @@ export function trashNote( data ) {
 			children,
 			'hierarchy-guard'
 		),
-		shownChildren
+		formatCount( children, data.children_capped )
 	);
 }
 
