@@ -19,8 +19,14 @@
 	}
 }
 
-// A slug that fits never breaks; a path breaks after a slash,
-// and only a slug longer than the line breaks inside.
+// A path breaks only after a slash; a slug longer than the line breaks inside.
+// The code is an inline-block so the parts' 100% fits inside its padding.
+.hierarchy-guard-url {
+	display: inline-block;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
 .hierarchy-guard-url__part {
 	display: inline-block;
 	max-width: 100%;
