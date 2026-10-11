@@ -76,6 +76,7 @@ final class Plugin {
 		( new Admin\List_Table() )->register();
 		( new REST\Hierarchy_Controller( $overview, $ledger, $pairs ) )->register();
 		( new REST\Csv_Download() )->register();
+		( new Admin\Trash_Choice() )->register();
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'hierarchy-guard', new Batch\CLI_Command( $queue, $processor ) );

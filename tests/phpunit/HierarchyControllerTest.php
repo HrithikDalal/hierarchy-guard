@@ -293,4 +293,137 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertFalse( has_filter( 'private_title_format' ) );
 		$this->assertFalse( has_filter( 'protected_title_format' ) );
 	}
+
+	public function test_the_trash_preview_describes_each_page_with_subpages(): void {
+		$data = $this->get(
+			'/trash-preview',
+			[ 'ids' => [ $this->ids['about'], $this->ids['history'], $this->ids['team'] ] ]
+		)->get_data();
+
+		$this->assertSame( [ $this->ids['about'], $this->ids['team'] ], array_column( $data['pages'], 'id' ), 'History has no subpages.' );
+		$about = $data['pages'][0];
+		$this->assertSame( 'About', $about['title'] );
+		$this->assertSame( '/company/about/', $about['path'] );
+		$this->assertSame( 2, $about['children'] );
+		$this->assertSame( 3, $about['descendants']['count'] );
+		$this->assertSame( 'Company', $about['to']['title'] );
+		$this->assertSame(
+			[
+				'from' => '/company/about/team/',
+				'to'   => '/company/team/',
+			],
+			$about['example']
+		);
+		$this->assertFalse( $about['denied'] );
+		$this->assertFalse( $about['fallback'] );
+		$this->assertSame(
+			[
+				'count'  => 4,
+				'capped' => false,
+			],
+			$data['total']
+		);
+		$this->assertSame( Settings::POLICY_REPARENT, $data['policy'] );
+	}
+
+	public function test_the_trash_preview_says_when_some_subpages_cannot_be_moved(): void {
+		$locked = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $locked === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_data();
+
+		$this->assertTrue( $data['pages'][0]['denied'] );
+	}
+
+	public function test_the_trash_preview_shares_one_capped_budget(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'], $this->ids['team'] ] ] )->get_data();
+
+		$this->assertTrue( $data['pages'][0]['fallback'], 'About has more subpages than the cap.' );
+		$this->assertSame(
+			[
+				'count'  => 2,
+				'capped' => true,
+			],
+			$data['total']
+		);
+	}
+
+	public function test_the_trash_preview_skips_pages_the_user_cannot_trash(): void {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_data();
+
+		$this->assertSame( [], $data['pages'] );
+	}
+
+	public function test_the_trash_preview_carries_each_page_s_own_policy(): void {
+		$about = $this->ids['about'];
+		add_filter( 'hierarchy_guard_trash_policy', static fn( string $policy, \WP_Post $post ): string => $about === (int) $post->ID ? Settings::POLICY_KEEP : $policy, 10, 2 );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $about, $this->ids['team'] ] ] )->get_data();
+
+		$this->assertSame( [ Settings::POLICY_KEEP, Settings::POLICY_REPARENT ], array_column( $data['pages'], 'policy' ) );
+		$this->assertSame( Settings::POLICY_REPARENT, $data['policy'], 'The site default, for a bulk dialog.' );
+	}
+
+	public function test_the_trash_preview_checks_both_rights(): void {
+		$locked = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+				return 'delete_post' === $cap && isset( $args[0] ) && $locked === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$page = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_data()['pages'][0];
+
+		$this->assertFalse( $page['denied'], 'Team can be moved.' );
+		$this->assertTrue( $page['denied_trash'], 'Team can’t be trashed.' );
+	}
+
+	public function test_the_trash_preview_reports_pages_past_its_limit(): void {
+		$ids = array_merge( [ $this->ids['about'] ], range( 900000, 900050 ) );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => $ids ] )->get_data();
+
+		$this->assertSame( 2, $data['more'] );
+		$this->assertTrue( $data['total']['capped'] );
+	}
+
+	public function test_a_page_counted_past_the_shared_budget_has_an_unknown_fallback(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 3 );
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['team'], $this->ids['about'] ] ] )->get_data();
+
+		$this->assertFalse( $data['pages'][0]['fallback'], 'Team was counted in full.' );
+		$this->assertNull( $data['pages'][1]['fallback'], 'About was counted against what was left.' );
+	}
+
+	public function test_the_capability_checks_share_one_batch(): void {
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$locked = $this->ids['leadership'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $locked === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'], $this->ids['team'] ] ] )->get_data();
+
+		$this->assertFalse( $data['pages'][1]['denied'], 'About used the whole batch, so Team’s subpages were not checked.' );
+	}
 }
