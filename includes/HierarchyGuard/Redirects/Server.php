@@ -99,7 +99,7 @@ final class Server {
 
 		$target    = null;
 		$temporary = false;
-		foreach ( $this->candidates( $request['path'] ) as [ $post_type, $path ] ) {
+		foreach ( self::candidates( $request['path'] ) as [ $post_type, $path ] ) {
 			$target = $this->resolver->resolve( $post_type, $path, $temporary );
 			if ( null !== $target ) {
 				break;
@@ -253,7 +253,7 @@ final class Server {
 	 * @param string $path Normalized request path, suffixes removed.
 	 * @return array<int,array{0:string,1:string}>
 	 */
-	private function candidates( string $path ): array {
+	public static function candidates( string $path ): array {
 		global $wp_rewrite;
 
 		$typed = [];

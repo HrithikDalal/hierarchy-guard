@@ -724,4 +724,16 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ 'company/about' => 'none' ], $this->states( $this->ids['about'] ) );
 	}
+
+	public function test_an_old_url_past_the_segment_cap_that_a_page_in_the_trash_holds_is_in_the_trash(): void {
+		$this->rename( $this->ids['team'], 'crew' );
+		$other = $this->page( 'team', $this->ids['about'] );
+		$this->rename( $other, 'z-now' );
+		wp_trash_post( $other );
+		$this->assertSame( 'trash', $this->states( $this->ids['team'] )['company/about/team'] );
+
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 2 );
+
+		$this->assertSame( 'trash', $this->states( $this->ids['team'] )['company/about/team'], 'The server refuses a request of three segments, and a page in the trash holds the path.' );
+	}
 }

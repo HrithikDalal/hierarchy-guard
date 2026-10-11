@@ -13,6 +13,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use InvalidArgumentException;
 use OutOfBoundsException;
+use UnexpectedValueException;
 use WP_Post;
 
 /**
@@ -69,7 +70,7 @@ final class Prefetched_View implements Ledger_View {
 	private array $shown = [];
 
 	/**
-	 * The post at each rewritten path, 0 for none.
+	 * The post at each rewritten path, 0 for none, Batch_Resolver::UNKNOWN when core could not be asked.
 	 *
 	 * @var array<string,int>
 	 */
@@ -170,12 +171,16 @@ final class Prefetched_View implements Ledger_View {
 	 * @param string $candidate Normalized path.
 	 * @param string $post_type Post type name.
 	 * @throws OutOfBoundsException When the path was not looked up yet.
+	 * @throws UnexpectedValueException When core could not be asked which of the posts at the path it finds.
 	 */
 	public function page_by_path( string $candidate, string $post_type ): ?WP_Post {
 		$this->own( $post_type );
 		if ( ! isset( $this->candidates[ $candidate ] ) ) {
 			$this->needs['candidates'][ $candidate ] = true;
 			throw new OutOfBoundsException( 'Not looked up yet.' );
+		}
+		if ( Batch_Resolver::UNKNOWN === $this->candidates[ $candidate ] ) {
+			throw new UnexpectedValueException( 'Not known.' );
 		}
 		return $this->candidates[ $candidate ] > 0 ? $this->post( $this->candidates[ $candidate ] ) : null;
 	}

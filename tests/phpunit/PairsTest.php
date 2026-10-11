@@ -202,7 +202,7 @@ final class PairsTest extends WP_UnitTestCase {
 
 		$this->pairs->collect_post( $post, 'company/about-us' );
 
-		$this->assertLessThanOrEqual( 11, get_num_queries() - $queries, 'A trash-holder check and one path lookup, an index read and a sort per level (about; team and history; leadership), then the old paths of the pages walked, the ledger for the paths listed and their prefixes, the root list, and one path lookup for the resolver’s check of every pair.' );
+		$this->assertLessThanOrEqual( 12, get_num_queries() - $queries, 'A trash-holder check and one path lookup, an index read and a sort per level (about; team and history; leadership), then the old paths of the pages walked, the ledger for the paths listed and their prefixes, the root list, one path lookup for the resolver’s check of every pair, and the settings the supported types are read from, once, for the order the server tries them in.' );
 
 		$queries = get_num_queries();
 		$this->pairs->collect_post( $post, 'company/about-us' );
@@ -1866,6 +1866,15 @@ final class PairsTest extends WP_UnitTestCase {
 		return $docs;
 	}
 
+	public function test_an_old_url_the_server_sends_to_a_type_with_that_prefix_first_is_not_listed(): void {
+		$docs = $this->docs_beside_pages( false );
+
+		$lines = $this->lines( $this->pairs->collect_post( get_post( $docs ), 'docs' ) );
+
+		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines );
+		$this->assertSame( '/docs/handbook/', $this->served_on_request( 'docs/guide' ), 'With no rule for the type yet the request is a 404, and the server tries the type whose prefix starts the path first.' );
+	}
+
 	public function test_an_old_url_a_type_s_rewrite_rule_takes_is_not_listed(): void {
 		$docs = $this->docs_beside_pages( true );
 
@@ -1873,5 +1882,43 @@ final class PairsTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines, 'WordPress hands /docs/guide/ to the type\'s rule, which the 404 model does not look into.' );
 		$this->assertSame( '/docs/handbook/', $this->served_on_request( 'docs/guide' ) );
+	}
+
+	public function test_past_the_fallbacks_a_path_two_pages_share_leads_to_no_pair(): void {
+		$company = $this->ids['company'];
+		for ( $i = 1; $i <= Batch_Resolver::FALLBACKS; $i++ ) {
+			$this->page( 'a' . $i, $company );
+			// A draft keeps its slug: two pages at one path, and core's own lookup says which it finds.
+			$this->page( 'a' . $i, $company, 'draft' );
+		}
+		$draft = $this->page( 'kid', 0, 'draft' );
+		$kid   = $this->page( 'kid', $company );
+		wp_update_post(
+			[
+				'ID'        => $company,
+				'post_name' => 'company-new',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $kid,
+				'post_name' => 'kid-moved',
+			]
+		);
+		$this->page( 'kid', $company );
+		// company-new/kid then has two pages too: the draft, then the published one.
+		wp_update_post(
+			[
+				'ID'          => $draft,
+				'post_parent' => $company,
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $company ), 'company' );
+
+		$this->assertNotContains( '/company/kid/', array_map( static fn( string $line ): string => strtok( $line, ' ' ), $this->lines( $collected ) ), 'Core was asked about twenty paths before this one, so which page it finds there is not known.' );
+		$this->assertContains( '/company/about/ -> /company-new/about/', $this->lines( $collected ) );
+		$this->assertSame( '/company-new/kid/', $this->served_on_request( 'company/kid' ) );
+		$this->assert_the_resolver_agrees( $collected );
 	}
 }

@@ -12,6 +12,7 @@ namespace HierarchyGuard\Redirects;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use OutOfBoundsException;
+use UnexpectedValueException;
 use WP_Post;
 
 /**
@@ -29,8 +30,9 @@ final class Batch_Resolver {
 	public const NOT_404 = -1;
 
 	/**
-	 * What lookup() answers for a request path several posts share when core
-	 * could not be asked any more: taken as one of them showing there.
+	 * What lookup() answers for a path several posts share when core could
+	 * not be asked any more. As a request it is taken as one of them showing
+	 * there; as a rewritten path it ends the run, which is then not served.
 	 */
 	public const UNKNOWN = -2;
 
@@ -40,27 +42,26 @@ final class Batch_Resolver {
 	public const FALLBACKS = 20;
 
 	/**
-	 * The page the server redirects each path to, for every path at once:
-	 * Rules::resolve() on a 404, on facts read ahead. Each run of the rules that asks for
-	 * a fact not read yet stops; the facts every run asked for are read in one
-	 * query, ledger facts or path lookups, and the runs start again. The paths
-	 * go round by round together, so each round costs one ledger query, one
-	 * get_page_by_path() lookup for every rewritten path, the request lookups
-	 * with the first, and the posts found primed a level at a time. A path with
-	 * more segments than the server's cap is not served.
+	 * The page each path is redirected to, for every path at once, as far as
+	 * a model of the server can tell it: the request must be a 404 by
+	 * Rules::is_404(), and Rules::resolve() must lead to the page, on facts
+	 * read ahead. Where the model cannot tell for sure, the path is not
+	 * served. A path with more segments than the server's cap is not served,
+	 * though whether a page in the trash holds it is still read. The server
+	 * tries a type whose rewrite prefix starts the request before this one,
+	 * longest prefix first, so a path one of those resolves is that post's.
 	 *
 	 * @param string[]                                $paths         Normalized old paths, at most the count cap.
 	 * @param string                                  $post_type     Post type name.
-	 * @param array<string,array{live:int,held:bool}> $facts         Ledger facts read so far, by path; more are added.
+	 * @param array<string,array{live:int,held:bool}> $facts         Ledger facts read so far, by path; more are added, for every path.
 	 * @param bool                                    $every_request Whether every path is looked up as a request, so each answer that is no redirect says whether WordPress shows something there.
-	 * @return array<string,int> Page ID by path; 0 for none, NOT_404 when something is shown there (always told with $every_request, otherwise when known).
+	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is shown there (always told with $every_request, otherwise when known).
 	 */
 	public static function served( array $paths, string $post_type, array &$facts, bool $every_request = false ): array {
-		$view    = new Prefetched_View( $post_type, $facts );
-		$out     = [];
-		$pending = [];
-		$prefix  = Server::prefix( $post_type );
-		$room    = Server::max_segments() - ( '' !== $prefix ? substr_count( $prefix, '/' ) + 1 : 0 );
+		$prefix = Server::prefix( $post_type );
+		$room   = self::room( $post_type );
+		$out    = [];
+		$within = [];
 		foreach ( $paths as $path ) {
 			$path = (string) $path;
 			// The server refuses a longer request before it looks anything up.
@@ -68,15 +69,103 @@ final class Batch_Resolver {
 				$out[ $path ] = 0;
 				continue;
 			}
+			$within[ $path ] = true;
+		}
+		$found = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, $every_request, true, array_map( 'strval', array_keys( $out ) ) );
+
+		// The candidates the server tries before this type's own, by path.
+		$before = [];
+		$asks   = [];
+		foreach ( $found as $start => $target ) {
+			if ( $target < 0 ) {
+				continue;
+			}
+			$start   = (string) $start;
+			$list    = [];
+			$own     = false;
+			$request = '' !== $prefix ? $prefix . '/' . $start : $start;
+			foreach ( Server::candidates( $request ) as [ $type, $path ] ) {
+				if ( $type === $post_type && $path === $start ) {
+					$own = true;
+					break;
+				}
+				$list[]                 = [ $type, $path ];
+				$asks[ $type ][ $path ] = true;
+			}
+			if ( [] !== $list || ! $own ) {
+				$before[ $start ] = [ $list, $own ];
+			}
+		}
+		$resolved = [];
+		foreach ( $asks as $type => $by_path ) {
+			$other             = [];
+			$resolved[ $type ] = self::run( array_map( 'strval', array_keys( $by_path ) ), (string) $type, $other, false, false );
+		}
+		foreach ( $before as $start => [ $list, $own ] ) {
+			$target = $own ? $found[ $start ] : 0;
+			foreach ( $list as [ $type, $path ] ) {
+				$first = $resolved[ $type ][ $path ] ?? self::UNKNOWN;
+				if ( 0 !== $first ) {
+					// The server redirects there first, or may: not here.
+					$target = $first > 0 ? $first : 0;
+					break;
+				}
+			}
+			$found[ $start ] = $target;
+		}
+
+		foreach ( $found as $start => $target ) {
+			$out[ (string) $start ] = self::UNKNOWN === $target ? 0 : $target;
+		}
+		return $out;
+	}
+
+	/**
+	 * The most segments an old path of a type may have for the server to
+	 * look it up: its cap, less the segments of the type's rewrite prefix.
+	 *
+	 * @param string $post_type Post type name.
+	 * @return int
+	 */
+	public static function room( string $post_type ): int {
+		$prefix = Server::prefix( $post_type );
+		return Server::max_segments() - ( '' !== $prefix ? substr_count( $prefix, '/' ) + 1 : 0 );
+	}
+
+	/**
+	 * Rules::resolve() for every path at once, after Rules::is_404() when
+	 * $requests: each run of the rules that asks for a fact not read yet
+	 * stops; the facts every run asked for are read in one query, ledger
+	 * facts or path lookups, and the runs start again. The paths go round by
+	 * round together, so each round costs one ledger query, one
+	 * get_page_by_path() lookup for every rewritten path, the request lookups
+	 * with the first, and the posts found primed a level at a time. A run
+	 * that reaches a rewritten path core could not be asked about any more
+	 * ends UNKNOWN, as does one the waves do not finish.
+	 *
+	 * @param string[]                                $paths         Normalized old paths.
+	 * @param string                                  $post_type     Post type name.
+	 * @param array<string,array{live:int,held:bool}> $facts         Ledger facts read so far, by path; more are added.
+	 * @param bool                                    $every_request See served().
+	 * @param bool                                    $requests      Whether each path is a request that must be a 404 first.
+	 * @param string[]                                $also          More paths whose own ledger facts are read with the first.
+	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, UNKNOWN when it cannot be told.
+	 */
+	private static function run( array $paths, string $post_type, array &$facts, bool $every_request, bool $requests, array $also = [] ): array {
+		$view    = new Prefetched_View( $post_type, $facts );
+		$out     = [];
+		$pending = [];
+		foreach ( $paths as $path ) {
 			$pending[ $path ] = $path;
+		}
+		$first = array_values( array_filter( array_unique( array_merge( self::prefixes( $paths ), $also ) ), static fn( string $path ): bool => ! isset( $facts[ $path ] ) ) );
+		if ( [] !== $first ) {
+			$facts += self::ledger_facts( $first, $post_type );
 		}
 
 		$budget = self::FALLBACKS;
 		for ( $wave = 0; [] !== $pending && $wave < 2 * ( Rules::MAX_ROUNDS + 2 ); $wave++ ) {
 			$needs = $view->take_needs();
-			if ( 0 === $wave ) {
-				$needs['facts'] = array_values( array_filter( self::prefixes( array_values( $pending ) ), static fn( string $prefix ): bool => ! isset( $facts[ $prefix ] ) ) );
-			}
 			if ( [] !== $needs['facts'] ) {
 				$facts += self::ledger_facts( $needs['facts'], $post_type );
 			}
@@ -105,7 +194,7 @@ final class Batch_Resolver {
 				$view->begin();
 				try {
 					// Only a 404 reaches the resolver.
-					$target = $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace ) : null;
+					$target = ! $requests || $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace ) : null;
 					if ( null !== $target && ! $view->guessed() ) {
 						$out[ $start ] = (int) $target->ID;
 						continue;
@@ -117,6 +206,13 @@ final class Batch_Resolver {
 				} catch ( OutOfBoundsException $unread ) {
 					// The facts it asked for are read next; it runs again then.
 					unset( $unread );
+				} catch ( UnexpectedValueException $unknown ) {
+					// Which of the posts at a rewritten path core finds is not known: unless the request is read yet, that ends it.
+					unset( $unknown );
+					if ( ! $every_request || ! $view->guessed() ) {
+						$out[ $start ] = self::UNKNOWN;
+						continue;
+					}
 				}
 				$view->keep();
 				$next[ $start ] = [] !== $trace ? (string) $trace[ count( $trace ) - 1 ][2] : $start;
@@ -125,7 +221,7 @@ final class Batch_Resolver {
 		}
 
 		foreach ( array_keys( $pending ) as $start ) {
-			$out[ (string) $start ] = 0;
+			$out[ (string) $start ] = self::UNKNOWN;
 		}
 		return $out;
 	}
@@ -250,7 +346,7 @@ final class Batch_Resolver {
 	 * the order core's query reads them on the post_name index, by ID within
 	 * a slug. Where that order decides, between two posts at one full path,
 	 * core's own get_page_by_path() is asked, at most $budget times; past
-	 * that a request path counts as UNKNOWN and a candidate leads nowhere.
+	 * that the path counts as UNKNOWN, as a request and as a candidate.
 	 * Each request path is routed by the rewrite rules (Rules::route()), and
 	 * what the rule after the page rule asks for is read too: blog posts and
 	 * attachments by slug in the same query, categories and tags in one more.
@@ -316,10 +412,14 @@ final class Batch_Resolver {
 			}
 		}
 		foreach ( $unsure_there as $path ) {
-			$post = $budget-- > 0 ? get_page_by_path( $path, OBJECT, [ $post_type ] ) : null;
-			unset( $there[ $path ] );
-			if ( $post instanceof WP_Post ) {
-				$there[ $path ] = (int) $post->ID;
+			if ( $budget-- > 0 ) {
+				$post = get_page_by_path( $path, OBJECT, [ $post_type ] );
+				unset( $there[ $path ] );
+				if ( $post instanceof WP_Post ) {
+					$there[ $path ] = (int) $post->ID;
+				}
+			} else {
+				$there[ $path ] = self::UNKNOWN;
 			}
 		}
 
