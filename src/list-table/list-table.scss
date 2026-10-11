@@ -1,0 +1,46 @@
+// Layout only: colours, radii and type come from the admin theme.
+.hierarchy-guard-dialog {
+
+	&__options {
+		margin: 12px 0 0;
+	}
+
+	&__loading {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+
+		.components-spinner {
+			margin: 0;
+		}
+	}
+
+	&__option {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		column-gap: 8px;
+		margin-bottom: 12px;
+
+		input {
+			margin-top: 2px;
+		}
+
+		.description {
+			grid-column: 2;
+			margin: 2px 0 0;
+		}
+	}
+
+}
+
+// Core's save bar wraps; the warning takes a line of its own above the buttons.
+.inline-edit-save .hierarchy-guard-quick-edit {
+	flex-basis: 100%;
+	box-sizing: border-box;
+	margin: 0 0 8px;
+}
+
+// Core gives Author and Date fixed widths and leaves the rest to Title.
+.fixed .column-hierarchy_guard {
+	width: 20%;
+}

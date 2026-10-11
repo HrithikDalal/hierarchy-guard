@@ -7,6 +7,7 @@ module.exports = {
 	...defaultConfig,
 	entry: {
 		editor: './src/editor/index.js',
+		'list-table': './src/list-table/index.js',
 		classic: './src/classic/index.js',
 	},
 };
