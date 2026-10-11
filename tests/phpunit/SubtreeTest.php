@@ -95,4 +95,79 @@ final class SubtreeTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['company'], Subtree::nearest_live_ancestor( get_post( $this->ids['leadership'] ) ) );
 		$this->assertSame( 0, Subtree::nearest_live_ancestor( get_post( $this->ids['company'] ) ) );
 	}
+
+	public function test_child_counts_counts_live_children_per_post_in_one_query(): void {
+		$this->page( 'draft-child', $this->ids['about'], 'draft' );
+		$this->trash_raw( $this->page( 'gone', $this->ids['about'] ) );
+
+		$queries = get_num_queries();
+		$counts  = Subtree::child_counts( [ $this->ids['company'], $this->ids['about'], $this->ids['team'], $this->ids['leadership'] ], 'page', 10 );
+
+		$this->assertSame( 1, get_num_queries() - $queries );
+		$this->assertSame(
+			[
+				$this->ids['company']    => 1,
+				$this->ids['about']      => 3,
+				$this->ids['team']       => 1,
+				$this->ids['leadership'] => 0,
+			],
+			$counts,
+			'A draft counts, a trashed child does not.'
+		);
+	}
+
+	public function test_child_counts_stop_at_the_cap(): void {
+		$this->page( 'third', $this->ids['about'] );
+
+		$this->assertSame( [ $this->ids['about'] => 2 ], Subtree::child_counts( [ $this->ids['about'] ], 'page', 2 ) );
+		$this->assertSame( [], Subtree::child_counts( [], 'page', 2 ) );
+	}
+
+	public function test_descendant_ids_walks_level_by_level_up_to_the_cap(): void {
+		$all = Subtree::descendant_ids( $this->ids['company'], 'page', 10 );
+		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $all['ids'], 'Level by level, each in menu order then title.' );
+		$this->assertFalse( $all['capped'] );
+
+		$two = Subtree::descendant_ids( $this->ids['company'], 'page', 2 );
+		$this->assertSame( [ $this->ids['about'], $this->ids['history'] ], $two['ids'] );
+		$this->assertTrue( $two['capped'] );
+
+		$exact = Subtree::descendant_ids( $this->ids['company'], 'page', 4 );
+		$this->assertFalse( $exact['capped'], 'Exactly the cap is not capped.' );
+	}
+
+	public function test_ordered_children_reads_up_to_the_limit_in_menu_order(): void {
+		$zed = $this->page( 'zed', $this->ids['about'] );
+		wp_update_post(
+			[
+				'ID'         => $zed,
+				'menu_order' => -1,
+			]
+		);
+
+		$this->assertSame( [ $zed, $this->ids['history'], $this->ids['team'] ], array_map( 'intval', array_column( Subtree::ordered_children( [ $this->ids['about'] ], 'page', 10 ), 'ID' ) ) );
+		$this->assertCount( 2, Subtree::ordered_children( [ $this->ids['about'] ], 'page', 2 ), 'The limit bounds the read.' );
+		$this->assertSame( [], Subtree::ordered_children( [], 'page', 2 ) );
+	}
+
+	public function test_ordered_children_reads_in_the_index_s_order_then_sorts_what_it_read(): void {
+		$queries = [];
+		$capture = static function ( string $sql ) use ( &$queries ): string {
+			$queries[] = $sql;
+			return $sql;
+		};
+		add_filter( 'query', $capture );
+		Subtree::ordered_children( [ $this->ids['about'] ], 'page', 10 );
+		remove_filter( 'query', $capture );
+
+		$this->assertCount( 2, $queries );
+		$this->assertStringContainsString( 'ORDER BY post_parent ASC, ID ASC LIMIT 10', $queries[0], 'The post_parent index gives this order, so LIMIT stops the read; no sort of every child.' );
+		$this->assertStringContainsString( 'WHERE ID IN (', $queries[1] );
+		$this->assertStringContainsString( 'ORDER BY menu_order ASC, post_title ASC, ID ASC', $queries[1] );
+	}
+
+	public function test_format_count_marks_a_capped_count(): void {
+		$this->assertSame( '1,000+', Subtree::format_count( 1000, true ) );
+		$this->assertSame( '12', Subtree::format_count( 12 ) );
+	}
 }

@@ -228,4 +228,60 @@ final class PathsTest extends WP_UnitTestCase {
 		$this->assertSame( 'company/about/team', Paths::untrashed_uri( get_post( $team ) ) );
 		$this->assertSame( 'company', Paths::untrashed_uri( get_post( $company ) ), 'Untrashed segments are unchanged.' );
 	}
+
+	public function test_url_builds_the_permalink_core_would_build_for_a_path(): void {
+		$parent = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'about',
+			]
+		);
+		$child  = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'team',
+				'post_parent' => $parent,
+			]
+		);
+
+		$this->assertSame( get_permalink( $child ), Paths::url( 'page', 'about/team' ) );
+		$this->assertSame( home_url( '/old/path/' ), Paths::url( 'page', '/Old/Path/' ) );
+	}
+
+	public function test_url_uses_the_rewrite_prefix_of_a_custom_type(): void {
+		register_post_type(
+			'hg_doc',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'rewrite'      => [ 'slug' => 'docs' ],
+			]
+		);
+		$this->set_permalink_structure( '/%postname%/' );
+
+		$this->assertSame( home_url( '/docs/guide/intro/' ), Paths::url( 'hg_doc', 'guide/intro' ) );
+		$this->assertSame( '', Paths::url( 'hg_none', 'guide' ), 'A type without a permastruct has no URL.' );
+		unregister_post_type( 'hg_doc' );
+	}
+
+	public function test_url_is_empty_without_pretty_permalinks(): void {
+		$this->set_permalink_structure( '' );
+
+		$this->assertSame( '', Paths::url( 'page', 'about' ) );
+	}
+
+	public function test_relative_strips_the_home_url(): void {
+		$this->assertSame( '/about/team/', Paths::relative( home_url( '/about/team/' ) ) );
+		$this->assertSame( '/', Paths::relative( home_url() ) );
+		$this->assertSame( '/about/?x=1', Paths::relative( home_url( '/about/?x=1' ) ) );
+	}
+
+	public function test_relative_strips_a_subdirectory_home(): void {
+		$filter = static fn( $url, $path ): string => 'http://example.org/blog/' . ltrim( (string) $path, '/' );
+		add_filter( 'home_url', $filter, 10, 2 );
+
+		$this->assertSame( '/about/', Paths::relative( 'http://example.org/blog/about/' ) );
+		$this->assertSame( '/', Paths::relative( 'http://example.org/blog/' ) );
+		remove_filter( 'home_url', $filter, 10 );
+	}
 }

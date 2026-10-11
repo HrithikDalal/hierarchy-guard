@@ -176,4 +176,116 @@ final class Subtree {
 		}
 		return 0;
 	}
+
+	/**
+	 * Live direct-child counts for a screenful of posts, each stopping at the cap.
+	 * One statement: a capped subquery per post, joined with UNION ALL.
+	 *
+	 * @param int[]  $ids       Post IDs, at most one list-table page of them.
+	 * @param string $post_type Post type name.
+	 * @param int    $cap       Stop counting each post's children at this number.
+	 * @return array<int,int> Count by post ID; posts without live children are 0.
+	 */
+	public static function child_counts( array $ids, string $post_type, int $cap ): array {
+		global $wpdb;
+
+		$ids    = array_values( array_unique( array_filter( array_map( 'intval', $ids ) ) ) );
+		$counts = array_fill_keys( $ids, 0 );
+		if ( [] === $ids ) {
+			return $counts;
+		}
+
+		$cap   = max( 1, $cap );
+		$parts = [];
+		foreach ( $ids as $id ) {
+			$parts[] = $wpdb->prepare(
+				"( SELECT %d AS parent_id, COUNT(*) AS children FROM ( SELECT ID FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) LIMIT %d ) AS c%d )",
+				$id,
+				$id,
+				$post_type,
+				$cap,
+				$id
+			);
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Every part was prepared above; each is an index range on post_parent bounded by LIMIT.
+		$rows = $wpdb->get_results( implode( ' UNION ALL ', $parts ), ARRAY_A );
+		foreach ( (array) $rows as $row ) {
+			$counts[ (int) $row['parent_id'] ] = (int) $row['children'];
+		}
+
+		return $counts;
+	}
+
+	/**
+	 * Live children of the given parents, at most $limit, in menu order then
+	 * title then ID. The first query follows the post_parent index in its own
+	 * order and stops at the limit; the second sorts only that bounded set. No
+	 * query reads every child of a large parent.
+	 *
+	 * @param int[]  $parent_ids Parent post IDs; 0 stands for top level.
+	 * @param string $post_type  Post type name.
+	 * @param int    $limit      Most children to read.
+	 * @return array<int,array{ID:string,post_parent:string,post_name:string,post_status:string}>
+	 */
+	public static function ordered_children( array $parent_ids, string $post_type, int $limit ): array {
+		global $wpdb;
+
+		$parent_ids = array_values( array_unique( array_map( 'intval', $parent_ids ) ) );
+		if ( [] === $parent_ids || $limit < 1 ) {
+			return [];
+		}
+
+		$in = implode( ',', $parent_ids );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only; the index's own order lets LIMIT stop the read.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY post_parent ASC, ID ASC LIMIT %d", $post_type, $limit ) );
+		if ( [] === $ids ) {
+			return [];
+		}
+
+		$in = implode( ',', array_map( 'intval', $ids ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds the integers read above, at most $limit of them.
+		return (array) $wpdb->get_results( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) ORDER BY menu_order ASC, post_title ASC, ID ASC", ARRAY_A );
+	}
+
+	/**
+	 * Live descendants level by level, stopping at the cap.
+	 *
+	 * @param int    $root_id   Root post ID.
+	 * @param string $post_type Post type name.
+	 * @param int    $cap       Most IDs to return.
+	 * @return array{ids:int[],capped:bool} IDs root-near first, each level in menu order; capped when more exist.
+	 */
+	public static function descendant_ids( int $root_id, string $post_type, int $cap ): array {
+		$cap   = max( 1, $cap );
+		$ids   = [];
+		$found = 0;
+		$level = [ $root_id ];
+		$depth = 0;
+
+		while ( [] !== $level && $found <= $cap && $depth < 50 ) {
+			++$depth;
+			$level  = array_map( 'intval', array_column( self::ordered_children( $level, $post_type, $cap + 1 - $found ), 'ID' ) );
+			$ids    = array_merge( $ids, $level );
+			$found += count( $level );
+		}
+
+		return [
+			'ids'    => array_slice( $ids, 0, $cap ),
+			'capped' => $found > $cap,
+		];
+	}
+
+	/**
+	 * A count for display: "1,000", or "1,000+" when more exist.
+	 *
+	 * @param int  $count  Count, already at most the cap.
+	 * @param bool $capped Whether more exist.
+	 * @return string
+	 */
+	public static function format_count( int $count, bool $capped = false ): string {
+		$number = number_format_i18n( $count );
+		/* translators: %s: a number that is a lower bound, such as 1,000. */
+		return $capped ? sprintf( __( '%s+', 'hierarchy-guard' ), $number ) : $number;
+	}
 }

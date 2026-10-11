@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard;
 
 use WP_Post;
+use WP_Rewrite;
 
 /**
  * Builds and normalizes page paths from slug chains.
@@ -168,5 +169,55 @@ final class Paths {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * The URL core would build for a post of this type at this path, the way
+	 * get_page_link() and get_post_permalink() do.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path without the type's rewrite prefix, such as `about/team`.
+	 * @return string Absolute URL, or an empty string without pretty permalinks.
+	 */
+	public static function url( string $post_type, string $path ): string {
+		global $wp_rewrite;
+
+		if ( ! $wp_rewrite instanceof WP_Rewrite || '' === (string) get_option( 'permalink_structure' ) ) {
+			return '';
+		}
+		$path = self::normalize( $path );
+
+		if ( 'page' === $post_type ) {
+			$struct = (string) $wp_rewrite->get_page_permastruct();
+			return user_trailingslashit( home_url( str_replace( '%pagename%', $path, $struct ) ), 'page' );
+		}
+
+		$struct = $wp_rewrite->get_extra_permastruct( $post_type );
+		if ( ! is_string( $struct ) || '' === $struct ) {
+			return '';
+		}
+		return home_url( user_trailingslashit( str_replace( '%' . $post_type . '%', $path, $struct ) ) );
+	}
+
+	/**
+	 * A URL on this site as a path relative to the home URL, such as `/about/team/`.
+	 * This is the form redirect plugins expect for the old and the new URL.
+	 *
+	 * @param string $url Absolute URL on this site.
+	 * @return string Path starting with a slash, with any query string kept.
+	 */
+	public static function relative( string $url ): string {
+		$home  = (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH );
+		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
+		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
+
+		if ( '' !== $home && '/' !== $home && str_starts_with( $path, $home ) ) {
+			$path = '/' . substr( $path, strlen( $home ) );
+		}
+		if ( '' === $path ) {
+			$path = '/';
+		}
+
+		return $path . ( '' !== $query ? '?' . $query : '' );
 	}
 }
