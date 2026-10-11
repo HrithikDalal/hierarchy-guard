@@ -30,6 +30,12 @@ final class Rebuild {
 	public const ROWS_PER_PAGE = 20;
 
 	/**
+	 * Most passes one sweep rebuilds on their own, each by a rewind over every
+	 * event from its date: past them the list is incomplete.
+	 */
+	public const ALONE_PASSES = 10;
+
+	/**
 	 * Each tracked page's place, during one rewind.
 	 *
 	 * @var array<int,array{parent:int,above:string,slug:string}>
@@ -83,12 +89,13 @@ final class Rebuild {
 	 * @param array{tops:array<int,array<int,array<string,mixed>>>,kids:array<int,array<int,array<string,mixed>>>} $tree    The walk.
 	 * @param array<string,array<int,mixed>>                                                                     $history From history().
 	 * @param callable|null                                                                                      $above   The path above an untracked parent, by its ID; above() when null.
+	 * @param bool                                                                                               $capped  Set to true when more passes than ALONE_PASSES were to be rebuilt on their own.
 	 * @return array<int,array{0:string,1:int}> Old path and page ID, published pages only, depth first in menu order.
 	 */
-	public static function listed_then( array $block, array $tree, array $history, ?callable $above = null ): array {
+	public static function listed_then( array $block, array $tree, array $history, ?callable $above = null, bool &$capped = false ): array {
 		[ $nodes, $order ] = self::walked( $block, $tree );
 		$places            = self::places( $block, $nodes, $history, $above );
-		return self::sweep( $places, $history, self::passes( $block, $nodes, $history ), (string) $block['old'], $nodes, $order );
+		return self::sweep( $places, $history, self::passes( $block, $nodes, $history ), (string) $block['old'], $nodes, $order, $capped );
 	}
 
 	/**
@@ -240,7 +247,9 @@ final class Rebuild {
 	 * list a path keeps it, with the first page in walk order there. One event
 	 * reads differently for the pass whose anchor it belongs to: the anchor's
 	 * entry for the old path below its own path then. Such a pass is rebuilt
-	 * on its own by rewind().
+	 * on its own by rewind(), over every event from its date: the first
+	 * ALONE_PASSES of them in their own order are, and past that the list is
+	 * capped.
 	 *
 	 * @param array<int,array{parent:int,above:string,slug:string}> $places  Each page's place now, by ID.
 	 * @param array<string,array<int,mixed>>                        $history From history().
@@ -248,9 +257,10 @@ final class Rebuild {
 	 * @param string                                                $old     The old path.
 	 * @param array<int,array<string,mixed>>                        $nodes   The pages walked, by ID.
 	 * @param int[]                                                 $order   Their IDs, depth first in menu order.
+	 * @param bool                                                  $capped  Set to true when passes past ALONE_PASSES were left out.
 	 * @return array<int,array{0:string,1:int}> Old path and page ID, published pages only.
 	 */
-	private static function sweep( array $places, array $history, array $passes, string $old, array $nodes, array $order ): array {
+	private static function sweep( array $places, array $history, array $passes, string $old, array $nodes, array $order, bool &$capped = false ): array {
 		if ( [] === $passes ) {
 			return [];
 		}
@@ -328,7 +338,14 @@ final class Rebuild {
 		foreach ( $points as [ $id, $path, $s ] ) {
 			$keep( $path, $ranks[ $s ], $id );
 		}
-		foreach ( array_keys( $alone ) as $k ) {
+		// The passes listed first keep their paths first, so they are the ones rebuilt.
+		$alone = array_keys( $alone );
+		sort( $alone );
+		if ( count( $alone ) > self::ALONE_PASSES ) {
+			$capped = true;
+			$alone  = array_slice( $alone, 0, self::ALONE_PASSES );
+		}
+		foreach ( $alone as $k ) {
 			$then = self::rewind( $places, $history, $passes[ $k ][1], $passes[ $k ][0], $old );
 			foreach ( $order as $id ) {
 				$keep( $then[ $id ] ?? '', $k, $id );

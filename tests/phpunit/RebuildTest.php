@@ -328,6 +328,80 @@ final class RebuildTest extends TestCase {
 		$this->assertLessThan( 1.0, $took, 'One pass per page in the trash, each over every event, took quadratic time.' );
 	}
 
+	public function test_the_passes_rebuilt_alone_stop_at_a_cap_and_mark_the_list_capped(): void {
+		$holders = 1000;
+		$tops    = [];
+		$places  = [ 1 => self::place( 0, 'company' ) ];
+		$entries = [ 1 => [] ];
+		$markers = [];
+		$virtual = [];
+		for ( $i = 1; $i <= $holders; $i++ ) {
+			// Page 1000 + i left company/about for the top level as company, the path above it, then had subpage 5000 + i and went to the trash under Company.
+			$tops[]               = self::node( 5000 + $i, 1, 'kid-' . $i ) + [ 'holder' => 1000 + $i ];
+			$places[ 1000 + $i ]  = self::place( 1, 'about-' . $i );
+			$entries[ 1000 + $i ] = [ self::entry( 10 * $i + 1, 'company/about' ), self::entry( 10 * $i + 2, 'company' ) ];
+			$markers[ 5000 + $i ] = [ self::marker( 10 * $i + 3, 1000 + $i, 'kid-' . $i ) ];
+			$virtual[ 1000 + $i ] = [
+				'aliases' => [
+					[
+						'to'   => 1,
+						'path' => 'company/about',
+					],
+				],
+			];
+		}
+		$block   = self::block( 'company/about', 1, 'company', 0 );
+		$tree    = self::tree( $tops );
+		$history = self::history( $places, $entries, $markers, $virtual );
+
+		$capped = false;
+		$start  = microtime( true );
+		$result = Rebuild::listed_then( $block, $tree, $history, static fn(): string => '', $capped );
+		$took   = microtime( true ) - $start;
+
+		$this->assertTrue( $capped, 'Each holder\'s entry for the old path lies below where it was then, so each such pass is rebuilt on its own, and past the cap the list is incomplete.' );
+		$this->assertLessThan( 0.5, $took, 'One rewind per pass rebuilt alone, each over every event, took quadratic time.' );
+		$this->assertSame( [ 'company/about/kid-1', 5001 ], $result[0] );
+	}
+
+	public function test_a_few_passes_rebuilt_alone_list_what_a_rewind_lists(): void {
+		$block   = self::block( 'company/about', 1, 'company', 0 );
+		$tops    = [];
+		$places  = [ 1 => self::place( 0, 'company' ) ];
+		$entries = [ 1 => [] ];
+		$markers = [];
+		$virtual = [];
+		for ( $i = 1; $i <= 3; $i++ ) {
+			$tops[]               = self::node( 5000 + $i, 1, 'kid-' . $i ) + [ 'holder' => 1000 + $i ];
+			$places[ 1000 + $i ]  = self::place( 1, 'about-' . $i );
+			$entries[ 1000 + $i ] = [ self::entry( 10 * $i + 1, 'company/about' ), self::entry( 10 * $i + 2, 'company' ) ];
+			$markers[ 5000 + $i ] = [ self::marker( 10 * $i + 3, 1000 + $i, 'kid-' . $i ) ];
+			$virtual[ 1000 + $i ] = [ 'aliases' => [] ];
+		}
+		$tree    = self::tree( $tops );
+		$history = self::history( $places, $entries, $markers, $virtual );
+
+		[ $nodes, $order ] = Rebuild::walked( $block, $tree );
+		$above             = static fn(): string => '';
+		$places            = Rebuild::places( $block, $nodes, $history, $above );
+		$expected          = [];
+		$seen              = [];
+		foreach ( Rebuild::passes( $block, $nodes, $history ) as [ $anchor, $date ] ) {
+			$then = Rebuild::rewind( $places, $history, $date, $anchor, 'company/about' );
+			foreach ( $order as $id ) {
+				$path = $then[ $id ] ?? '';
+				if ( str_starts_with( $path, 'company/about/' ) && ! isset( $seen[ $path ] ) ) {
+					$seen[ $path ] = true;
+					$expected[]    = [ $path, (int) $id ];
+				}
+			}
+		}
+
+		$capped = false;
+		$this->assertSame( $expected, Rebuild::listed_then( $block, $tree, $history, $above, $capped ) );
+		$this->assertFalse( $capped );
+	}
+
 	/**
 	 * A block on a post's old path.
 	 *

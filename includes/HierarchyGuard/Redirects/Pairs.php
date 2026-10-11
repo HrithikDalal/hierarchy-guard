@@ -236,9 +236,11 @@ final class Pairs {
 				];
 			}
 
+			$alone  = false;
 			$listed = ! empty( $block['rebuild'] )
-				? Rebuild::listed_then( $block + [ 'index' => $index ], $tree, $history )
+				? Rebuild::listed_then( $block + [ 'index' => $index ], $tree, $history, null, $alone )
 				: self::listed_by_segment( $block, $tree['tops'][ $index ] ?? [], $tree['kids'] );
+			$capped = $capped || $alone;
 			foreach ( $listed as [ $path, $id ] ) {
 				if ( count( $pairs ) >= $cap ) {
 					$capped = true;
@@ -470,7 +472,10 @@ final class Pairs {
 	}
 
 	/**
-	 * Every block's pages, level by level for all blocks at once, within the budget.
+	 * Every block's pages, level by level for all blocks at once, within the
+	 * budget. Under a block the walk goes no deeper than the server's segment
+	 * cap leaves room for below its old path: a deeper old path is never
+	 * looked up, so it can list nothing.
 	 *
 	 * @param array<int,array<string,mixed>> $blocks Blocks to walk, by index.
 	 * @param string                         $type   Post type name.
@@ -482,12 +487,18 @@ final class Pairs {
 		$froms   = [];
 		$skip    = [];
 		$visited = 0;
+		$room    = Batch_Resolver::room( $type );
+		// How many levels below its old path each block's pages may sit.
+		$levels = [];
+		foreach ( $blocks as $index => $block ) {
+			$levels[ $index ] = $room - ( substr_count( (string) $block['old'], '/' ) + 1 );
+		}
 		foreach ( $blocks as $index => $block ) {
 			foreach ( (array) $block['children'] as $node ) {
 				$tops[ $index ][] = $node;
 				++$visited;
 			}
-			if ( (int) $block['from'] > 0 ) {
+			if ( (int) $block['from'] > 0 && $levels[ $index ] >= 1 ) {
 				$froms[ (int) $block['from'] ] = $index;
 				$skip[ $index ]                = array_flip( array_map( 'intval', (array) ( $block['skip'] ?? [] ) ) );
 			}
@@ -503,24 +514,28 @@ final class Pairs {
 			}
 		}
 
+		// The levels each page read may still have below it.
 		$kids  = [];
-		$level = [];
-		foreach ( $tops as $nodes ) {
+		$below = [];
+		foreach ( $tops as $index => $nodes ) {
 			foreach ( $nodes as $node ) {
-				$level[] = (int) $node['id'];
+				$below[ (int) $node['id'] ] = max( $below[ (int) $node['id'] ] ?? PHP_INT_MIN, $levels[ $index ] - 1 );
 			}
 		}
+		$level = array_keys( array_filter( $below, static fn( int $left ): bool => $left >= 1 ) );
 		$depth = 0;
 		while ( [] !== $level && $visited <= $cap && $depth < 50 ) {
 			++$depth;
-			$rows  = Subtree::ordered_children( $level, $type, $cap + 1 - $visited );
-			$level = [];
+			$rows = Subtree::ordered_children( $level, $type, $cap + 1 - $visited );
+			$next = [];
 			foreach ( $rows as $row ) {
 				$node                      = self::node( $row, (string) $row['post_name'] );
 				$kids[ $node['parent'] ][] = $node;
-				$level[]                   = $node['id'];
+				$next[ $node['id'] ]       = max( $next[ $node['id'] ] ?? PHP_INT_MIN, $below[ $node['parent'] ] - 1 );
 			}
 			$visited += count( $rows );
+			$below    = $next;
+			$level    = array_keys( array_filter( $below, static fn( int $left ): bool => $left >= 1 ) );
 		}
 
 		$ids = [];

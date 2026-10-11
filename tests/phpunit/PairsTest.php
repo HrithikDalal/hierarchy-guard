@@ -1921,4 +1921,50 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertSame( '/company-new/kid/', $this->served_on_request( 'company/kid' ) );
 		$this->assert_the_resolver_agrees( $collected );
 	}
+
+	public function test_the_walk_stops_where_the_server_s_segment_cap_does(): void {
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 4 );
+		$shallow = $this->queries_to_collect_deep( 'shallow', 0 );
+		$deep    = $this->queries_to_collect_deep( 'deep', 8 );
+
+		$this->assertSame( $shallow, $deep, 'The pages below four segments can list nothing, so they are not read.' );
+	}
+
+	/**
+	 * Queries a cold collect costs for a renamed page with About › Team ›
+	 * Leadership below it and a chain of pages below that.
+	 *
+	 * @param string $slug  The page's old slug.
+	 * @param int    $below How many pages the chain below Leadership has.
+	 * @return int
+	 */
+	private function queries_to_collect_deep( string $slug, int $below ): int {
+		$root   = $this->page( $slug );
+		$parent = $this->page( 'leadership', $this->page( 'team', $this->page( 'about', $root ) ) );
+		for ( $i = 1; $i <= $below; $i++ ) {
+			$parent = $this->page( 'level-' . $i, $parent );
+		}
+		wp_update_post(
+			[
+				'ID'        => $root,
+				'post_name' => $slug . '-now',
+			]
+		);
+		$post = get_post( $root );
+		wp_cache_flush();
+
+		$queries   = get_num_queries();
+		$collected = $this->pairs->collect_post( $post, $slug );
+		$cost      = get_num_queries() - $queries;
+		$this->assertSame(
+			[
+				'/' . $slug . '/ -> /' . $slug . '-now/',
+				'/' . $slug . '/about/ -> /' . $slug . '-now/about/',
+				'/' . $slug . '/about/team/ -> /' . $slug . '-now/about/team/',
+				'/' . $slug . '/about/team/leadership/ -> /' . $slug . '-now/about/team/leadership/',
+			],
+			$this->lines( $collected )
+		);
+		return $cost;
+	}
 }
