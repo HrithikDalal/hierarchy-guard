@@ -154,6 +154,35 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( 3, $change['roots'][20]['counts']['moved'], 'The count still says how many moved, so its pairs are marked incomplete.' );
 	}
 
+	public function test_only_roots_whose_subpages_moved_up_share_the_id_budget(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 5 );
+		$trashed           = $this->entry( 12, [ 'trashed' => 5 ] );
+		$trashed['policy'] = 'trash_children';
+		$trashed['ids']    = [ 1, 2, 3, 4, 5 ];
+		$moved             = $this->entry( 20, [ 'moved' => 3 ] );
+		$moved['ids']      = [ 6, 7, 8 ];
+		$moved['slugs']    = [
+			6 => 'f',
+			7 => 'g',
+			8 => 'h',
+		];
+
+		$this->log->record( $this->admin, 'trash', 'page', $trashed );
+		$this->log->record( $this->admin, 'trash', 'page', $moved );
+
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( [ 1, 2, 3, 4, 5 ], $change['roots'][12]['ids'], 'A root that trashed its subpages keeps its IDs as before.' );
+		$this->assertSame( [ 6, 7, 8 ], $change['roots'][20]['ids'], 'Only the pairs read IDs, and only a reparent root’s.' );
+		$this->assertSame(
+			[
+				6 => 'f',
+				7 => 'g',
+				8 => 'h',
+			],
+			$change['roots'][20]['slugs']
+		);
+	}
+
 	public function test_nothing_is_stored_without_a_user(): void {
 		$this->assertSame( '', $this->log->record( 0, 'trash', 'page', $this->entry( 12, [] ) ) );
 		$this->assertFalse( get_transient( Change_Log::key( 0 ) ) );

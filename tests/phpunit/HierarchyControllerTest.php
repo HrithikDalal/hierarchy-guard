@@ -11,6 +11,7 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Overview;
+use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\REST\Csv_Download;
 use HierarchyGuard\Settings;
@@ -324,6 +325,33 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( [ '(private page)' ], array_column( $data['ancestors'], 'title' ) );
 		$this->assertArrayNotHasKey( 'status', $data['ancestors'][0], 'Nothing reads it, and the user may not read the ancestor.' );
 		$this->assertSame( '(private page)', $data['trash_to']['title'] );
+	}
+
+	public function test_an_ancestor_in_the_trash_has_no_edit_link(): void {
+		$this->trash_raw( $this->ids['team'] );
+
+		$data = $this->get( '/posts/' . $this->ids['leadership'] . '/hierarchy' )->get_data();
+
+		$this->assertSame( [ 'Company', 'About', 'Team' ], array_column( $data['ancestors'], 'title' ) );
+		$this->assertNull( $data['ancestors'][2]['edit_link'], 'Core refuses to edit a page in the Trash.' );
+		$this->assertIsString( $data['ancestors'][1]['edit_link'] );
+	}
+
+	public function test_a_page_moved_back_to_an_old_path_does_not_list_it_as_an_old_url(): void {
+		$services = $this->page( 'services', $this->ids['company'] );
+		wp_update_post(
+			[
+				'ID'          => $services,
+				'post_parent' => $this->ids['about'],
+			]
+		);
+		// The trash moves it back to company/services.
+		wp_trash_post( $this->ids['about'] );
+
+		$data = $this->get( '/posts/' . $services . '/hierarchy' )->get_data();
+
+		$this->assertSame( 'company/services', Paths::uri( get_post( $services ) ) );
+		$this->assertSame( [], array_column( $data['old_paths'], 'path' ), 'That is its URL again.' );
 	}
 
 	public function test_a_fields_parameter_on_the_csv_route_still_gives_the_csv(): void {

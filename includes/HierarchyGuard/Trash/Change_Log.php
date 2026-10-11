@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 
 /**
@@ -177,11 +178,13 @@ final class Change_Log {
 	}
 
 	/**
-	 * Sums the roots, keeps the roots' own IDs within one budget, merges the IDs and saves.
+	 * Sums the roots, keeps the reparent roots' own IDs within one budget, merges the IDs and saves.
 	 *
-	 * The roots' IDs and slugs together stay within the count cap, later roots
-	 * trimmed first, so a bulk trash of many parents stays a small transient.
-	 * A trimmed root keeps its counts, so its pairs show as incomplete.
+	 * The IDs and slugs of the roots whose subpages moved up together stay
+	 * within the count cap, later roots trimmed first, so a bulk trash of many
+	 * parents stays a small transient. Only the pairs read them, and only for
+	 * those roots; every other root keeps its own IDs, at most MAX_IDS each, as
+	 * before. A trimmed root keeps its counts, so its pairs show as incomplete.
 	 *
 	 * set_transient() returns false both when the save fails and when nothing
 	 * changed, so its result says nothing reliable here. Nothing depends on it:
@@ -197,6 +200,9 @@ final class Change_Log {
 		foreach ( $change['roots'] as $root_id => $root ) {
 			foreach ( self::COUNT_KEYS as $key ) {
 				$counts[ $key ] += (int) ( $root['counts'][ $key ] ?? 0 );
+			}
+			if ( Settings::POLICY_REPARENT !== ( $root['policy'] ?? '' ) ) {
+				continue;
 			}
 			$own     = array_slice( (array) ( $root['ids'] ?? [] ), 0, max( 0, $budget ) );
 			$budget -= count( $own );

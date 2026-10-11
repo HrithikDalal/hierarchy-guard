@@ -233,14 +233,14 @@ final class Meta_Box {
 
 	/**
 	 * A post's title, linked to its editor when the user may edit it and core
-	 * would open it: never for a page in the Trash.
+	 * would open it: Overview gives a page in the Trash no edit link.
 	 *
 	 * @param array<string,mixed> $ref Post reference from Overview.
 	 * @return string HTML.
 	 */
 	private static function link( array $ref ): string {
 		$title = esc_html( (string) $ref['title'] );
-		if ( null === $ref['edit_link'] || 'trash' === get_post_status( (int) $ref['id'] ) ) {
+		if ( null === $ref['edit_link'] ) {
 			return $title;
 		}
 		return sprintf( '<a href="%1$s">%2$s</a>', esc_url( (string) $ref['edit_link'] ), $title );

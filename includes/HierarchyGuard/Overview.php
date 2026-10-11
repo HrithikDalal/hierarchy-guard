@@ -117,7 +117,8 @@ final class Overview {
 
 	/**
 	 * A short reference to a post. A post the user may not read keeps its
-	 * title to itself, as core's REST routes do.
+	 * title to itself, as core's REST routes do. A post in the Trash has no
+	 * edit link, because core refuses to edit it.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return array{id:int,title:string,edit_link:string|null}
@@ -127,7 +128,7 @@ final class Overview {
 		return [
 			'id'        => $post_id,
 			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : __( '(private page)', 'hierarchy-guard' ),
-			'edit_link' => is_string( $link ) && '' !== $link ? $link : null,
+			'edit_link' => 'trash' !== get_post_status( $post_id ) && is_string( $link ) && '' !== $link ? $link : null,
 		];
 	}
 
@@ -188,7 +189,9 @@ final class Overview {
 	}
 
 	/**
-	 * Old paths recorded on the post, newest first, as URLs relative to the home URL.
+	 * Old paths recorded on the post, newest first, as URLs relative to the
+	 * home URL. A path the post is at again, as after a trash moved it back,
+	 * is its URL, not an old one.
 	 *
 	 * Each has a state: `in_use` when another live page holds the path, `trash`
 	 * when a page in the trash holds it, `none` when this page is not viewable or
@@ -200,10 +203,14 @@ final class Overview {
 	private function old_paths( WP_Post $post ): array {
 		$post_id   = (int) $post->ID;
 		$type      = (string) $post->post_type;
-		$reachable = is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) );
+		$current   = Paths::uri( $post );
+		$reachable = is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( $current );
 
 		$out = [];
 		foreach ( array_slice( array_reverse( $this->ledger->paths_for( $post_id ) ), 0, self::MAX_OLD_PATHS ) as $path ) {
+			if ( $current === $path ) {
+				continue;
+			}
 			$url = Paths::url( $type, $path );
 			// Without pretty permalinks, or a permastruct for the type, no URL ever held the path.
 			if ( '' === $url ) {
