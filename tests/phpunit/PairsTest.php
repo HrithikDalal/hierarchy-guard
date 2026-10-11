@@ -14,6 +14,7 @@ use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Batch_Resolver;
 use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Redirects\Pairs_Blocks;
 use HierarchyGuard\Redirects\Providers;
@@ -1615,5 +1616,262 @@ final class PairsTest extends WP_UnitTestCase {
 			'The resolver follows the draft, which nobody can view, so the URL leads nowhere.'
 		);
 		$this->assertSame( '', $this->served_on_request( 'company/about' ) );
+	}
+	/**
+	 * Switches the permalink structure, with core's category and tag rules for
+	 * it, as a site has them from init on: the test bootstrap registered the
+	 * taxonomies under plain permalinks, which gives them no rewrite rules.
+	 *
+	 * @param string $structure Permalink structure.
+	 */
+	private function use_permalinks( string $structure ): void {
+		global $wp_rewrite;
+		$this->set_permalink_structure( $structure );
+		create_initial_taxonomies();
+		$wp_rewrite->flush_rules();
+	}
+
+	public function test_under_category_permalinks_an_old_url_a_category_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/%category%/%postname%/' );
+		$news = $this->page( 'news' );
+		wp_update_post(
+			[
+				'ID'        => $news,
+				'post_name' => 'updates',
+			]
+		);
+		self::factory()->category->create(
+			[
+				'slug' => 'news',
+				'name' => 'News',
+			]
+		);
+
+		$collected = $this->pairs->collect_post( get_post( $news ), 'news' );
+
+		$this->assertSame( [], $this->lines( $collected ), 'WordPress shows the category archive at /news/, with no posts in it too.' );
+		$this->assertSame(
+			[
+				[
+					'old'    => '/news/',
+					'reason' => 'in_use',
+				],
+			],
+			$this->pairs->page( $collected, 1, 100 )['unresolved']
+		);
+		$this->assertSame( '', $this->served_on_request( 'news' ) );
+	}
+
+	public function test_under_category_permalinks_an_old_url_a_blog_post_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/%category%/%postname%/' );
+		$press = $this->page( 'press' );
+		$this->page( 'release', $press );
+		$this->page( 'archive', $press );
+		wp_update_post(
+			[
+				'ID'        => $press,
+				'post_name' => 'media',
+			]
+		);
+		$category = self::factory()->category->create(
+			[
+				'slug' => 'press',
+				'name' => 'Press',
+			]
+		);
+		$post     = self::factory()->post->create(
+			[
+				'post_name'     => 'release',
+				'post_status'   => 'publish',
+				'post_category' => [ $category ],
+			]
+		);
+
+		$lines = $this->lines( $this->pairs->collect_post( get_post( $press ), 'press' ) );
+
+		$this->assertSame( '/press/release/', Paths::relative( (string) get_permalink( $post ) ), 'The old URL of the page is the blog post\'s.' );
+		$this->assertSame( [ '/press/archive/ -> /media/archive/' ], $lines, 'The category is shown at /press/ and the blog post at /press/release/.' );
+		$this->assertSame( '', $this->served_on_request( 'press' ) );
+		$this->assertSame( '', $this->served_on_request( 'press/release' ) );
+		$this->assertSame( '/media/archive/', $this->served_on_request( 'press/archive' ) );
+	}
+
+	public function test_under_a_blog_front_an_old_url_a_blog_post_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/blog/%postname%/' );
+		$blog = $this->page( 'blog' );
+		$this->page( 'foo', $blog );
+		$this->page( 'bar', $blog );
+		wp_update_post(
+			[
+				'ID'        => $blog,
+				'post_name' => 'journal',
+			]
+		);
+		$post = self::factory()->post->create(
+			[
+				'post_name'   => 'foo',
+				'post_status' => 'publish',
+			]
+		);
+
+		$lines = $this->lines( $this->pairs->collect_post( get_post( $blog ), 'blog' ) );
+
+		$this->assertSame( '/blog/foo/', Paths::relative( (string) get_permalink( $post ) ), 'The old URL of the page is the blog post\'s.' );
+		$this->assertSame( [ '/blog/ -> /journal/', '/blog/bar/ -> /journal/bar/' ], $lines );
+		$this->assertSame( '', $this->served_on_request( 'blog/foo' ) );
+		$this->assertSame( '/journal/bar/', $this->served_on_request( 'blog/bar' ) );
+	}
+
+	public function test_under_a_blog_front_an_old_url_a_category_uses_now_is_not_listed(): void {
+		$this->use_permalinks( '/blog/%postname%/' );
+		$blog = $this->page( 'blog' );
+		$this->page( 'news', $this->page( 'category', $blog ) );
+		wp_update_post(
+			[
+				'ID'        => $blog,
+				'post_name' => 'journal',
+			]
+		);
+		$term = self::factory()->category->create(
+			[
+				'slug' => 'news',
+				'name' => 'News',
+			]
+		);
+		$news = $this->page( 'news' );
+		wp_update_post(
+			[
+				'ID'        => $news,
+				'post_name' => 'updates',
+			]
+		);
+
+		$lines = $this->lines( $this->pairs->collect_post( get_post( $blog ), 'blog' ) );
+
+		$this->assertSame( '/blog/category/news/', Paths::relative( (string) get_term_link( $term ) ), 'The old URL of the page is the category\'s.' );
+		$this->assertSame( [ '/blog/ -> /journal/', '/blog/category/ -> /journal/category/' ], $lines );
+		$this->assertSame( '', $this->served_on_request( 'blog/category/news' ) );
+		$this->assertSame( [ '/news/ -> /updates/' ], $this->lines( $this->pairs->collect_post( get_post( $news ), 'news' ) ), 'Under this front the categories live under /blog/category/.' );
+		$this->assertSame( '/updates/', $this->served_on_request( 'news' ) );
+	}
+
+	public function test_under_postname_permalinks_a_404_is_told_as_before(): void {
+		$this->use_permalinks( '/%postname%/' );
+		$news     = $this->page( 'news' );
+		$services = $this->page( 'services', $this->ids['company'] );
+		$renames  = [
+			$news                 => 'updates',
+			$services             => 'offers',
+			$this->ids['company'] => 'company-new',
+		];
+		foreach ( $renames as $id => $slug ) {
+			wp_update_post(
+				[
+					'ID'        => $id,
+					'post_name' => $slug,
+				]
+			);
+		}
+		// The category archive lives under /category/; a blog post at one segment; an attachment at the last of two.
+		self::factory()->category->create(
+			[
+				'slug' => 'news',
+				'name' => 'News',
+			]
+		);
+		self::factory()->post->create(
+			[
+				'post_name'   => 'company',
+				'post_status' => 'publish',
+			]
+		);
+		self::factory()->post->create(
+			[
+				'post_name'   => 'history',
+				'post_status' => 'publish',
+			]
+		);
+		self::factory()->attachment->create(
+			[
+				'post_name'      => 'services',
+				'post_title'     => 'services',
+				'post_parent'    => $news,
+				'post_mime_type' => 'image/jpeg',
+				'file'           => 'services.jpg',
+			]
+		);
+		$facts = [];
+
+		$served = Batch_Resolver::served( [ 'news', 'company', 'company/services', 'company/about', 'company/about/history' ], 'page', $facts, true );
+		ksort( $served );
+
+		$this->assertSame(
+			[
+				'company'               => Batch_Resolver::NOT_404,
+				'company/about'         => $this->ids['about'],
+				'company/about/history' => $this->ids['history'],
+				'company/services'      => Batch_Resolver::NOT_404,
+				'news'                  => $news,
+			],
+			$served
+		);
+		$this->assertSame( '', $this->served_on_request( 'company' ) );
+		$this->assertSame( '/company-new/about/', $this->served_on_request( 'company/about' ) );
+		$this->assertSame( '/company-new/about/history/', $this->served_on_request( 'company/about/history' ) );
+		$this->assertSame( '', $this->served_on_request( 'company/services' ) );
+		$this->assertSame( '/updates/', $this->served_on_request( 'news' ) );
+	}
+
+	/**
+	 * A hierarchical type at /docs/, its doc Guide renamed Handbook, and a page
+	 * Docs with a subpage Guide, Docs renamed Documentation since.
+	 *
+	 * @param bool $flush Whether the site's rewrite rules have the type's yet.
+	 * @return int The page Docs.
+	 */
+	private function docs_beside_pages( bool $flush ): int {
+		global $wp_rewrite;
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'rewrite'      => [ 'slug' => 'docs' ],
+			]
+		);
+		Post_Types::reset();
+		if ( $flush ) {
+			$wp_rewrite->flush_rules();
+		}
+		$doc = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $doc,
+				'post_name' => 'handbook',
+			]
+		);
+		$docs = $this->page( 'docs' );
+		$this->page( 'guide', $docs );
+		wp_update_post(
+			[
+				'ID'        => $docs,
+				'post_name' => 'documentation',
+			]
+		);
+		return $docs;
+	}
+
+	public function test_an_old_url_a_type_s_rewrite_rule_takes_is_not_listed(): void {
+		$docs = $this->docs_beside_pages( true );
+
+		$lines = $this->lines( $this->pairs->collect_post( get_post( $docs ), 'docs' ) );
+
+		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines, 'WordPress hands /docs/guide/ to the type\'s rule, which the 404 model does not look into.' );
+		$this->assertSame( '/docs/handbook/', $this->served_on_request( 'docs/guide' ) );
 	}
 }

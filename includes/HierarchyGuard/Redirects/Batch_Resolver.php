@@ -82,8 +82,8 @@ final class Batch_Resolver {
 			}
 			$found = [];
 			if ( [] !== $needs['requests'] || [] !== $needs['candidates'] ) {
-				[ $at, $there, $named ] = self::lookup( $needs['requests'], $needs['candidates'], $post_type, $budget );
-				$view->add_lookups( $needs['requests'], $at, $needs['candidates'], $there, $named );
+				[ $at, $there, $routes, $shown ] = self::lookup( $needs['requests'], $needs['candidates'], $post_type, $budget );
+				$view->add_lookups( $needs['requests'], $at, $needs['candidates'], $there, $routes, $shown );
 				$found = array_filter( array_merge( array_values( $at ), array_values( $there ) ), static fn( int $id ): bool => $id > 0 );
 			}
 			// The live posts that hold a prefix of the path each run rewrites next, and the posts found, with the pages above them.
@@ -239,7 +239,7 @@ final class Batch_Resolver {
 	 */
 	public static function owners( array $paths, string $post_type ): array {
 		$budget = self::FALLBACKS;
-		return self::lookup( $paths, [], $post_type, $budget )[0];
+		return self::lookup( $paths, [], $post_type, $budget, false )[0];
 	}
 
 	/**
@@ -251,18 +251,30 @@ final class Batch_Resolver {
 	 * a slug. Where that order decides, between two posts at one full path,
 	 * core's own get_page_by_path() is asked, at most $budget times; past
 	 * that a request path counts as UNKNOWN and a candidate leads nowhere.
-	 * Under /%postname%/ the request lookups also read the blog posts and
-	 * attachments the post rules would show at one- and two-segment paths.
+	 * Each request path is routed by the rewrite rules (Rules::route()), and
+	 * what the rule after the page rule asks for is read too: blog posts and
+	 * attachments by slug in the same query, categories and tags in one more.
 	 * The posts found are primed.
 	 *
 	 * @param string[] $paths      Normalized paths, looked up as a request is.
 	 * @param string[] $candidates Normalized paths, looked up as the resolver does.
 	 * @param string   $post_type  Post type name.
 	 * @param int      $budget     How many more times core may be asked; lowered.
-	 * @return array{0:array<string,int>,1:array<string,int>,2:array<string,array<string,bool>>} Post ID by path for each, a path no post uses now absent; and whether anyone can view a post of a type with a slug.
+	 * @param bool     $route      Whether the request paths are routed, as a 404 check needs.
+	 * @return array{0:array<string,int>,1:array<string,int>,2:array<string,array{0:bool,1:string,2:string}>,3:array<string,array<string,bool>>} Post ID by path for each, a path no post uses now absent; each request path's route; and whether what the routes ask for is there, by kind and slug.
 	 */
-	private static function lookup( array $paths, array $candidates, string $post_type, int &$budget ): array {
+	private static function lookup( array $paths, array $candidates, string $post_type, int &$budget, bool $route = true ): array {
 		global $wpdb;
+
+		$routes = [];
+		$asked  = [];
+		foreach ( $route ? array_unique( array_map( 'strval', $paths ) ) : [] as $path ) {
+			$routes[ $path ]   = Rules::route( $post_type, $path );
+			[ , $kind, $slug ] = $routes[ $path ];
+			if ( '' !== $slug ) {
+				$asked[ $kind ][ $slug ] = true;
+			}
+		}
 
 		$names = [];
 		foreach ( array_merge( $paths, $candidates ) as $path ) {
@@ -270,16 +282,18 @@ final class Batch_Resolver {
 				$names[ $name ] = true;
 			}
 		}
+		foreach ( [ 'post', 'attachment' ] as $kind ) {
+			$names += $asked[ $kind ] ?? [];
+		}
 		unset( $names[''] );
 		if ( [] === $names ) {
-			return [ [], [], [] ];
+			return [ [], [], $routes, [] ];
 		}
 
-		$posts        = [] !== $paths && 'page' === $post_type && Rules::posts_at_the_root();
 		$names        = array_map( 'strval', array_keys( $names ) );
 		$placeholders = implode( ',', array_fill( 0, count( $names ), '%s' ) );
-		$types        = [] !== $paths ? ( $posts ? "%s, 'attachment', 'post'" : "%s, 'attachment'" ) : '%s';
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per segment of the paths; $types is a fixed placeholder list; core's get_page_by_path() query for every path at once, on the post_name index.
+		$types        = [] !== $paths ? ( isset( $asked['post'] ) ? "%s, 'attachment', 'post'" : "%s, 'attachment'" ) : '%s';
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per segment of the paths and slug a rule asks for; $types is a fixed placeholder list; core's get_page_by_path() query for every path at once, on the post_name index.
 		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name, post_parent, post_type FROM {$wpdb->posts} WHERE post_name IN ( {$placeholders} ) AND post_type IN ( {$types} )", ...array_merge( $names, [ $post_type ] ) ), OBJECT_K );
 		// Core's own query reads one slug's rows by ID on the post_name index, and its loop keeps the first or the last.
 		ksort( $rows );
@@ -309,16 +323,14 @@ final class Batch_Resolver {
 			}
 		}
 
-		// The blog post a one-segment request path names, and the attachment the last segment of a two-segment one names.
+		// The blog posts and attachments the rules ask for, by slug.
 		$shown = [];
-		if ( $posts ) {
-			foreach ( array_unique( array_map( 'strval', $paths ) ) as $path ) {
-				$segments = explode( '/', $path );
-				$type     = 1 === count( $segments ) ? 'post' : ( 2 === count( $segments ) ? 'attachment' : '' );
-				$name     = (string) end( $segments );
-				foreach ( '' !== $type ? $named[ $name ] ?? [] : [] as $id => $row ) {
-					if ( $type === (string) $row->post_type ) {
-						$shown[ $type ][ $name ][] = (int) $id;
+		foreach ( [ 'post', 'attachment' ] as $kind ) {
+			foreach ( array_keys( $asked[ $kind ] ?? [] ) as $slug ) {
+				$shown[ $kind ][ (string) $slug ] = [];
+				foreach ( $named[ (string) $slug ] ?? [] as $id => $row ) {
+					if ( $kind === (string) $row->post_type ) {
+						$shown[ $kind ][ (string) $slug ][] = (int) $id;
 					}
 				}
 			}
@@ -330,20 +342,64 @@ final class Batch_Resolver {
 		}
 		// An attachment is viewable as its parent is.
 		$others = [];
-		foreach ( $shown as $by_name ) {
-			foreach ( $by_name as $list ) {
+		foreach ( $shown as $by_slug ) {
+			foreach ( $by_slug as $list ) {
 				$others = array_merge( $others, $list );
 			}
 		}
 		self::prime_with_ancestors( array_values( array_unique( $others ) ) );
 
-		$viewable = [];
-		foreach ( $shown as $type => $by_name ) {
-			foreach ( $by_name as $name => $list ) {
-				$viewable[ $type ][ $name ] = [] !== array_filter( $list, 'is_post_publicly_viewable' );
+		$there_now = [];
+		foreach ( $shown as $kind => $by_slug ) {
+			foreach ( $by_slug as $slug => $list ) {
+				$there_now[ $kind ][ $slug ] = [] !== array_filter( $list, 'is_post_publicly_viewable' );
 			}
 		}
-		return [ $at, $there, $viewable ];
+		return [ $at, $there, $routes, $there_now + self::terms( $asked ) ];
+	}
+
+	/**
+	 * Whether the categories and tags the rules ask for exist, in one query:
+	 * an archive is shown for a term with no posts too. When they cannot be
+	 * read, each is taken to exist.
+	 *
+	 * @param array<string,array<string,true>> $asked Slugs by kind.
+	 * @return array<string,array<string,bool>> By kind and slug.
+	 */
+	private static function terms( array $asked ): array {
+		$taxonomies = [
+			'category' => 'category',
+			'tag'      => 'post_tag',
+		];
+		$out        = [];
+		$slugs      = [];
+		foreach ( $taxonomies as $kind => $taxonomy ) {
+			foreach ( array_keys( $asked[ $kind ] ?? [] ) as $slug ) {
+				$out[ $kind ][ (string) $slug ] = false;
+				$slugs[ (string) $slug ]        = true;
+			}
+		}
+		if ( [] === $slugs ) {
+			return [];
+		}
+		$terms = get_terms(
+			[
+				'taxonomy'               => array_values( $taxonomies ),
+				'slug'                   => array_map( 'strval', array_keys( $slugs ) ),
+				'hide_empty'             => false,
+				'update_term_meta_cache' => false,
+			]
+		);
+		if ( ! is_array( $terms ) ) {
+			return array_map( static fn( array $by_slug ): array => array_fill_keys( array_keys( $by_slug ), true ), $out );
+		}
+		foreach ( $terms as $term ) {
+			$kind = array_search( $term->taxonomy, $taxonomies, true );
+			if ( false !== $kind && isset( $out[ $kind ][ $term->slug ] ) ) {
+				$out[ $kind ][ $term->slug ] = true;
+			}
+		}
+		return $out;
 	}
 
 	/**

@@ -10,7 +10,9 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Paths;
+use WP_MatchesMapRegex;
 use WP_Post;
+use WP_Rewrite;
 
 /**
  * Longest-prefix rewriting with a bounded number of rounds, and the test a
@@ -133,51 +135,151 @@ final class Rules {
 	}
 
 	/**
-	 * Whether WP's main query answers a request for a path with a 404: only
-	 * then does the resolver run. $at is the post the page rule finds,
-	 * get_page_by_path( $path, OBJECT, $post_type ), which serves the request
-	 * when anyone can view it. Under /%postname%/ the page rule only matches
-	 * a post whose status lets it, and the post rules come next: a blog post
-	 * named as a one-segment path, and an attachment named as the last segment
-	 * of a two-segment path, wherever it is attached, are served there. Other
-	 * rewrite rules are not looked at.
+	 * How WP::parse_request() routes a request for a path of a type: the
+	 * first of $wp_rewrite->wp_rewrite_rules() that matches it, in their
+	 * order, matched as WordPress matches them. A verbose page rule only
+	 * matches when a page with a status it shows is at the path: whether one
+	 * is there is the request lookup's to tell, so that rule is noted and the
+	 * rules after it are walked on. The rule found is named by what its query
+	 * asks for:
 	 *
-	 * @param WP_Post|null $at        The post at the path, as the page rule finds it.
-	 * @param string       $path      Normalized path.
-	 * @param string       $post_type Post type the request is for.
-	 * @param callable     $named     Whether anyone can view a post of a type with a slug: fn( string $type, string $name ): bool.
-	 * @return bool
+	 * - `own`: the post of the type at the path: the page rule with no check,
+	 *   or the type's own rule;
+	 * - `post`: a blog post, by its slug alone: a category or a date the rule
+	 *   names as well does not change which post the query finds, or only
+	 *   narrows it;
+	 * - `attachment`: an attachment, by its slug;
+	 * - `category`, `tag`: the archive of a category or tag, by its slug;
+	 * - `none`: no rule matches, so the request is a 404;
+	 * - `other`: any other rule, as another type's, a taxonomy's, an
+	 *   author's, a date's, a feed's, a verbose page rule for part of the path
+	 *   or one this type cannot answer for. What it shows is not looked into.
+	 *
+	 * @param string $post_type Post type the request is for.
+	 * @param string $path      Normalized path, without the type's rewrite prefix.
+	 * @return array{0:bool,1:string,2:string} Whether the page rule for the whole path comes first, then the kind of the first other rule that matches and the slug it names.
 	 */
-	public static function is_404( ?WP_Post $at, string $path, string $post_type, callable $named ): bool {
-		$postname = 'page' === $post_type && self::posts_at_the_root();
-		if ( $at instanceof WP_Post && ( ! $postname || self::page_rule_matches( $at ) ) ) {
-			return ! is_post_publicly_viewable( $at );
+	public static function route( string $post_type, string $path ): array {
+		global $wp_rewrite;
+
+		$other = [ false, 'other', '' ];
+		$rules = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->wp_rewrite_rules() : [];
+		if ( ! is_array( $rules ) || [] === $rules ) {
+			// With no rules WordPress reads no permalink at all.
+			return $other;
 		}
-		if ( ! $postname ) {
-			return true;
+		$prefix  = Server::prefix( $post_type );
+		$request = '' !== $prefix ? $prefix . '/' . $path : $path;
+		// On PATH_INFO permalinks, from the first rule that starts with the index file on, the rules match it in front of the path.
+		$file    = $wp_rewrite->using_index_permalinks() ? $wp_rewrite->index : $request;
+		$subject = $request;
+		$page    = false;
+		foreach ( $rules as $match => $query ) {
+			$match = (string) $match;
+			if ( $file !== $request && str_starts_with( $match, $file ) ) {
+				$subject = $file . '/' . $request;
+			}
+			if ( 1 !== preg_match( '#^' . $match . '#', $subject, $matches ) && 1 !== preg_match( '#^' . $match . '#', urldecode( $subject ), $matches ) ) {
+				continue;
+			}
+			if ( $wp_rewrite->use_verbose_page_rules && 1 === preg_match( '/pagename=\$matches\[([0-9]+)\]/', (string) $query, $index ) ) {
+				// Only a page request for the whole path has its check read.
+				$checked = (string) ( $matches[ (int) $index[1] ] ?? '' );
+				if ( 'page' !== $post_type || $checked !== $path ) {
+					return $other;
+				}
+				$page = true;
+				continue;
+			}
+			return array_merge( [ $page ], self::kind( self::vars( (string) $query, $matches ), $post_type, $path ) );
 		}
-		$segments = explode( '/', $path );
-		if ( 1 === count( $segments ) ) {
-			return ! $named( 'post', $segments[0] );
-		}
-		if ( 2 === count( $segments ) ) {
-			return ! $named( 'attachment', $segments[1] );
-		}
-		return true;
+		return [ $page, 'none', '' ];
 	}
 
 	/**
-	 * Whether blog posts live at the top level, /%postname%/, where a request
-	 * the page rule passes over goes to a post or an attachment.
+	 * Whether WP's main query answers a request for a path with a 404, by
+	 * the rule route() found: only then does the resolver run. $at is the
+	 * post at the path, get_page_by_path( $path, OBJECT, $post_type ), as the
+	 * page rule and a type's own rule find it: it is shown when anyone can
+	 * view it. A verbose page rule passes over it when its status does not
+	 * let it match, and the next rule decides. A rule this model does not
+	 * look into is taken to show something.
 	 *
+	 * @param array{0:bool,1:string,2:string} $route  From route().
+	 * @param WP_Post|null                    $at     The post at the path, as the page rule finds it.
+	 * @param callable                        $exists Whether what a rule asks for is there: fn( string $kind, string $slug ): bool, for a kind of `post`, `attachment`, `category` or `tag`, a post anyone can view or a term.
 	 * @return bool
 	 */
-	public static function posts_at_the_root(): bool {
-		$struct = trim( (string) get_option( 'permalink_structure' ), '/' );
-		if ( str_starts_with( $struct, 'index.php/' ) ) {
-			$struct = substr( $struct, strlen( 'index.php/' ) );
+	public static function is_404( array $route, ?WP_Post $at, callable $exists ): bool {
+		[ $page, $kind, $slug ] = $route;
+		if ( $page && $at instanceof WP_Post && self::page_rule_matches( $at ) ) {
+			return ! is_post_publicly_viewable( $at );
 		}
-		return '%postname%' === $struct;
+		switch ( $kind ) {
+			case 'own':
+				return ! ( $at instanceof WP_Post && is_post_publicly_viewable( $at ) );
+			case 'none':
+				return true;
+			case 'post':
+			case 'attachment':
+			case 'category':
+			case 'tag':
+				return ! $exists( $kind, $slug );
+		}
+		return false;
+	}
+
+	/**
+	 * A matched rule's query variables, as WP::parse_request() reads them:
+	 * the matches put into the query, then the query parsed. Empty ones are
+	 * left out.
+	 *
+	 * @param string   $query   The rule's query.
+	 * @param string[] $matches What the rule matched.
+	 * @return array<string,string>
+	 */
+	private static function vars( string $query, array $matches ): array {
+		parse_str( WP_MatchesMapRegex::apply( (string) preg_replace( '!^.+\?!', '', $query ), $matches ), $vars );
+		return array_filter( $vars, static fn( $value ): bool => is_string( $value ) && '' !== $value );
+	}
+
+	/**
+	 * What a rule's query asks for; see route().
+	 *
+	 * @param array<string,string> $vars      The rule's query variables, none empty.
+	 * @param string               $post_type Post type the request is for.
+	 * @param string               $path      Normalized path, without the type's rewrite prefix.
+	 * @return array{0:string,1:string} Kind and slug.
+	 */
+	private static function kind( array $vars, string $post_type, string $path ): array {
+		$keys  = array_keys( $vars );
+		$only  = static fn( string ...$allowed ): bool => [] === array_diff( $keys, $allowed );
+		$other = [ 'other', '' ];
+		if ( isset( $vars['pagename'] ) ) {
+			// The page rule with no verbose check, or a hierarchical type's own rule when the type has no query variable.
+			$type = $vars['post_type'] ?? 'page';
+			$own  = $type === $post_type && $only( 'pagename', 'post_type' );
+			return $own && $path === $vars['pagename'] ? [ 'own', '' ] : $other;
+		}
+		$object = 'page' !== $post_type ? get_post_type_object( $post_type ) : null;
+		$var    = null !== $object && is_string( $object->query_var ) ? $object->query_var : '';
+		if ( '' !== $var && isset( $vars[ $var ] ) ) {
+			return $only( $var ) && $path === $vars[ $var ] ? [ 'own', '' ] : $other;
+		}
+		if ( isset( $vars['attachment'] ) ) {
+			return $only( 'attachment' ) ? [ 'attachment', $vars['attachment'] ] : $other;
+		}
+		if ( isset( $vars['name'] ) ) {
+			return $only( 'name', 'category_name', 'year', 'monthnum', 'day', 'hour', 'minute', 'second', 'author_name' ) ? [ 'post', $vars['name'] ] : $other;
+		}
+		if ( isset( $vars['category_name'] ) ) {
+			// The query reads a category path by its last slug.
+			return $only( 'category_name' ) ? [ 'category', wp_basename( $vars['category_name'] ) ] : $other;
+		}
+		if ( isset( $vars['tag'] ) ) {
+			return $only( 'tag' ) ? [ 'tag', $vars['tag'] ] : $other;
+		}
+		return $other;
 	}
 
 	/**

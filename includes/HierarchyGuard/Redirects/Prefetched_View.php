@@ -54,12 +54,19 @@ final class Prefetched_View implements Ledger_View {
 	private array $requests = [];
 
 	/**
-	 * Whether anyone can view a post of a type with a slug, for the slugs the
-	 * post rules would look up for the request paths read.
+	 * How WordPress routes each request path looked up, from Rules::route().
+	 *
+	 * @var array<string,array{0:bool,1:string,2:string}>
+	 */
+	private array $routes = [];
+
+	/**
+	 * Whether what those routes ask for is there, by kind and slug: a post
+	 * anyone can view, or a term.
 	 *
 	 * @var array<string,array<string,bool>>
 	 */
-	private array $named = [];
+	private array $shown = [];
 
 	/**
 	 * The post at each rewritten path, 0 for none.
@@ -193,7 +200,8 @@ final class Prefetched_View implements Ledger_View {
 			// Core was not asked about a path two pages share: taken as served by one of them.
 			return false;
 		}
-		return Rules::is_404( $there > 0 ? $this->post( $there ) : null, $path, $this->post_type, fn( string $type, string $name ): bool => $this->named[ $type ][ $name ] ?? false );
+		// A path with no route read is taken as showing something.
+		return Rules::is_404( $this->routes[ $path ] ?? [ false, 'other', '' ], $there > 0 ? $this->post( $there ) : null, fn( string $kind, string $slug ): bool => $this->shown[ $kind ][ $slug ] ?? false );
 	}
 
 	/**
@@ -248,22 +256,24 @@ final class Prefetched_View implements Ledger_View {
 	/**
 	 * Adds the posts looked up.
 	 *
-	 * @param string[]                         $requests   Paths looked up as a request.
-	 * @param array<string,int>                $at         The post found at each, by path; absent for none.
-	 * @param string[]                         $candidates Rewritten paths looked up.
-	 * @param array<string,int>                $there      The post found at each, by path; absent for none.
-	 * @param array<string,array<string,bool>> $named      Whether anyone can view a post of a type with a slug, by type and slug.
+	 * @param string[]                                       $requests   Paths looked up as a request.
+	 * @param array<string,int>                              $at         The post found at each, by path; absent for none.
+	 * @param string[]                                       $candidates Rewritten paths looked up.
+	 * @param array<string,int>                              $there      The post found at each, by path; absent for none.
+	 * @param array<string,array{0:bool,1:string,2:string}>  $routes     How WordPress routes each request path, by path.
+	 * @param array<string,array<string,bool>>               $shown      Whether what the routes ask for is there, by kind and slug.
 	 */
-	public function add_lookups( array $requests, array $at, array $candidates, array $there, array $named = [] ): void {
+	public function add_lookups( array $requests, array $at, array $candidates, array $there, array $routes = [], array $shown = [] ): void {
 		foreach ( $requests as $path ) {
 			$this->requests[ $path ] = (int) ( $at[ $path ] ?? 0 );
 		}
 		foreach ( $candidates as $path ) {
 			$this->candidates[ $path ] = (int) ( $there[ $path ] ?? 0 );
 		}
-		foreach ( $named as $type => $names ) {
-			foreach ( $names as $name => $viewable ) {
-				$this->named[ (string) $type ][ (string) $name ] = ( $this->named[ (string) $type ][ (string) $name ] ?? false ) || $viewable;
+		$this->routes += $routes;
+		foreach ( $shown as $kind => $slugs ) {
+			foreach ( $slugs as $slug => $there_now ) {
+				$this->shown[ (string) $kind ][ (string) $slug ] = ( $this->shown[ (string) $kind ][ (string) $slug ] ?? false ) || $there_now;
 			}
 		}
 	}
