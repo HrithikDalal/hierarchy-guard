@@ -426,4 +426,40 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertFalse( $data['pages'][1]['denied'], 'About used the whole batch, so Team’s subpages were not checked.' );
 	}
+
+	public function test_the_trash_preview_example_skips_a_draft_subpage_without_a_slug(): void {
+		$parent = $this->page( 'parent' );
+		self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => '',
+				'post_title'  => 'Draft',
+				'post_parent' => $parent,
+				'post_status' => 'draft',
+			]
+		);
+		$this->page( 'live', $parent );
+
+		$example = $this->get( '/trash-preview', [ 'ids' => [ $parent ] ] )->get_data()['pages'][0]['example'];
+
+		$this->assertSame( '/parent/live/', $example['from'] );
+		$this->assertNotSame( '/parent/', $example['from'], 'The draft is not the example.' );
+	}
+
+	public function test_the_trash_preview_example_is_null_when_only_drafts_lack_a_slug(): void {
+		$parent = $this->page( 'parent' );
+		self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => '',
+				'post_title'  => 'Draft',
+				'post_parent' => $parent,
+				'post_status' => 'draft',
+			]
+		);
+
+		$page = $this->get( '/trash-preview', [ 'ids' => [ $parent ] ] )->get_data()['pages'][0];
+
+		$this->assertNull( $page['example'] );
+	}
 }

@@ -311,11 +311,18 @@ final class Hierarchy_Controller {
 			$denied_trash = $denied_trash || ! current_user_can( 'delete_post', $child_id );
 		}
 
-		// The first subpage shows what an URL change looks like.
-		$first   = [] !== $checked ? [ $checked[0] ] : Subtree::live_children( $id, $type, 1 );
+		// The first published subpage shows what an URL change looks like; a draft has no URL to change.
+		$shown   = null;
 		$example = null;
-		if ( [] !== $first && '' !== $path ) {
-			$slug    = (string) get_post_field( 'post_name', $first[0] );
+		foreach ( [] !== $checked ? $checked : Subtree::live_children( $id, $type, 1 ) as $candidate ) {
+			$child = get_post( $candidate );
+			if ( $child instanceof WP_Post && 'publish' === $child->post_status && '' !== $child->post_name ) {
+				$shown = $child;
+				break;
+			}
+		}
+		if ( null !== $shown && '' !== $path ) {
+			$slug    = (string) $shown->post_name;
 			$base    = $to > 0 ? Paths::uri( get_post( $to ) ) . '/' : '';
 			$example = [
 				'from' => Paths::relative( Paths::url( $type, Paths::untrashed_uri( $post ) . '/' . $slug ) ),
