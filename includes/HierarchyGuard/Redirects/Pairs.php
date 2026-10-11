@@ -182,8 +182,9 @@ final class Pairs {
 	 * hidden, an old subpage path one of its published subpages uses is
 	 * dropped for the same reason.
 	 *
-	 * A page renamed under its parent is listed at the slug it had there, read
-	 * from its own old paths. An old path the ledger gives to another live post
+	 * A page renamed after its parent moved is listed at the slug it had when
+	 * the parent left the old path, read from its own old paths. An old path
+	 * the ledger gives to another live post
 	 * leads to that post, so it is dropped here with the pages walked below
 	 * it: that post's own list has them.
 	 *
@@ -269,7 +270,7 @@ final class Pairs {
 				[ $node, $old_parent, $current_parent, $above ] = array_pop( $stack );
 
 				// Core skips an empty slug when it builds a path, so the old path does too.
-				$segment = self::old_segment( $node, $former[ $node['id'] ] ?? [], $old_parent, $current_parent );
+				$segment = self::old_segment( $node, $former[ $node['id'] ] ?? [], $current_parent );
 				$path    = '' !== $segment ? $old_parent . '/' . $segment : $old_parent;
 				$current = '' !== $node['slug'] ? ltrim( $current_parent . '/' . $node['slug'], '/' ) : $current_parent;
 				if ( 'publish' === $node['status'] ) {
@@ -627,30 +628,29 @@ final class Pairs {
 	}
 
 	/**
-	 * The segment a page had under its parent's old path. A page renamed while
-	 * under its parent, before or after the parent moved, holds an old path one
-	 * segment below the parent's old or current path: that segment, newest
-	 * first. Otherwise the node's own segment.
+	 * The segment a page had under its parent's old path. A page renamed after
+	 * its parent moved holds an old path one segment below the parent's current
+	 * path: the oldest such segment is the slug it had when the parent left the
+	 * old path. Otherwise the node's own segment. An old path one segment below
+	 * the parent's old path is older than that segment, and the page's own
+	 * list has it.
 	 *
 	 * @param array<string,mixed> $node           Tree node.
-	 * @param string[]            $paths          The page's old paths, newest first.
-	 * @param string              $old_parent     The parent's old path.
+	 * @param string[]            $paths          The page's old paths, oldest first.
 	 * @param string              $current_parent The parent's current path, empty at top level.
 	 * @return string
 	 */
-	private static function old_segment( array $node, array $paths, string $old_parent, string $current_parent ): string {
+	private static function old_segment( array $node, array $paths, string $current_parent ): string {
 		foreach ( $paths as $path ) {
-			foreach ( [ $old_parent, $current_parent ] as $parent ) {
-				if ( '' === $parent ) {
-					$rest = $path;
-				} elseif ( str_starts_with( $path, $parent . '/' ) ) {
-					$rest = substr( $path, strlen( $parent ) + 1 );
-				} else {
-					continue;
-				}
-				if ( '' !== $rest && ! str_contains( $rest, '/' ) ) {
-					return $rest;
-				}
+			if ( '' === $current_parent ) {
+				$rest = $path;
+			} elseif ( str_starts_with( $path, $current_parent . '/' ) ) {
+				$rest = substr( $path, strlen( $current_parent ) + 1 );
+			} else {
+				continue;
+			}
+			if ( '' !== $rest && ! str_contains( $rest, '/' ) ) {
+				return $rest;
 			}
 		}
 		return (string) $node['segment'];
@@ -724,7 +724,7 @@ final class Pairs {
 	}
 
 	/**
-	 * The old paths recorded on the given pages, newest first, by page.
+	 * The old paths recorded on the given pages, oldest first, by page.
 	 *
 	 * @param int[] $ids Page IDs the walk read, at most the count cap plus one.
 	 * @return array<int,string[]>
@@ -738,7 +738,7 @@ final class Pairs {
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per page the walk read; a range on the post_id index, bounded by the count cap.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key LIKE %s AND post_id IN ( {$placeholders} ) ORDER BY meta_id DESC", ...array_merge( [ $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%' ], $ids ) ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_value FROM {$wpdb->postmeta} WHERE meta_key LIKE %s AND post_id IN ( {$placeholders} ) ORDER BY meta_id ASC", ...array_merge( [ $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%' ], $ids ) ), ARRAY_A );
 
 		$out = [];
 		foreach ( (array) $rows as $row ) {

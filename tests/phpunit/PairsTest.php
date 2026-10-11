@@ -401,24 +401,25 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assert_the_resolver_agrees( $collected );
 	}
 
-	public function test_once_the_trash_is_emptied_an_alias_still_lists_each_subpage_at_its_old_slug(): void {
+	public function test_once_the_trash_is_emptied_an_alias_never_lists_the_new_parent_s_own_subpage(): void {
 		$this->page( 'team', $this->ids['company'] );
 		wp_trash_post( $this->ids['about'] );
 		wp_delete_post( $this->ids['about'], true );
 
-		$collected = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+		$company = $this->pairs->collect_post( get_post( $this->ids['company'] ), 'company/about' );
+		$team    = $this->pairs->collect_post( get_post( $this->ids['team'] ), 'company/about/team' );
 
+		$this->assertNotContains( '/company/about/team/ -> /company/team/', $this->lines( $company ), 'Company’s own team never lived under about; team-2 holds that path.' );
+		$this->assertContains( '/company/about/history/ -> /company/history/', $this->lines( $company ) );
+		$this->assert_the_resolver_agrees( $company );
 		$this->assertSame(
 			[
-				'/company/about/ -> /company/',
-				'/company/about/history/ -> /company/history/',
 				'/company/about/team/ -> /company/team-2/',
 				'/company/about/team/leadership/ -> /company/team-2/leadership/',
 			],
-			$this->lines( $collected ),
-			'The resolver serves team-2 for about/team; company’s own team is not listed under the old path.'
+			$this->lines( $team ),
+			'The subpage renamed on the move lists its old URL itself.'
 		);
-		$this->assert_the_resolver_agrees( $collected );
 	}
 
 	public function test_a_subpage_renamed_after_its_parent_is_listed_at_the_slug_it_had_under_the_old_path(): void {
@@ -448,6 +449,67 @@ final class PairsTest extends WP_UnitTestCase {
 			'The real old URLs, not about/crew, which never existed.'
 		);
 		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_subpage_renamed_twice_after_its_parent_is_listed_at_the_slug_it_had_under_the_old_path(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		foreach ( [ 'crew', 'squad' ] as $slug ) {
+			wp_update_post(
+				[
+					'ID'        => $this->ids['team'],
+					'post_name' => $slug,
+				]
+			);
+		}
+
+		$collected = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+
+		$this->assertContains( '/company/about/team/ -> /company/about-us/squad/', $this->lines( $collected ), 'Team was team when about moved; about/crew never existed.' );
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_a_subpage_renamed_before_its_parent_is_listed_at_the_slug_it_had_last_under_the_old_path(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['team'],
+				'post_name' => 'crew',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+
+		$about = $this->pairs->collect_post( get_post( $this->ids['about'] ), 'company/about' );
+		$crew  = $this->pairs->collect_post( get_post( $this->ids['team'] ), 'company/about/team' );
+
+		$this->assertContains( '/company/about/crew/ -> /company/about-us/crew/', $this->lines( $about ), 'The URL crew had until about moved.' );
+		$this->assertContains( '/company/about/team/ -> /company/about-us/crew/', $this->lines( $crew ), 'The older URL is on crew’s own list.' );
+		$this->assert_the_resolver_agrees( $about );
+		$this->assert_the_resolver_agrees( $crew );
+	}
+
+	public function test_a_trash_lists_a_subpage_renamed_before_it_at_the_slug_it_had_then(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->ids['team'],
+				'post_name' => 'crew',
+			]
+		);
+		wp_trash_post( $this->ids['about'] );
+		$change = $this->log->latest( $this->admin );
+
+		$this->assertContains( '/company/about/crew/ -> /company/crew/', $this->lines( $this->pairs->collect_change( $change ) ), 'The URL that worked until the trash.' );
+
+		wp_delete_post( $this->ids['about'], true );
+		$this->assertContains( '/company/about/crew/ -> /company/crew/', $this->lines( $this->pairs->collect_change( $change ) ) );
 	}
 
 	public function test_collecting_an_old_path_costs_the_same_few_queries_for_fifty_subpages(): void {
