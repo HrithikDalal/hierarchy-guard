@@ -27,10 +27,11 @@ use WP_Screen;
  * Trashing from the editor or the Pages list lands on core's "moved to the
  * Trash" notice. This adds what happened to the subpages to it once per
  * change, keeping core's Undo link last, and prints the URLs the trash
- * changed as a notice of its own, styled by what handles them. A save in
- * the classic editor that changed URLs gets the same URLs notice on the
- * edit screen it lands on, and only there. While a background batch runs,
- * the list screen says how far it got.
+ * changed as a notice of its own, styled by what handles them. A Bulk Edit
+ * that changed URLs gets the same URLs notice on the list core returns to,
+ * and a save in the classic editor on the edit screen it lands on, each
+ * only there. While a background batch runs, the list screen says how far
+ * it got.
  */
 final class Notices {
 
@@ -231,8 +232,9 @@ final class Notices {
 	}
 
 	/**
-	 * Prints the URLs notice, background progress and the redirects nudge on
-	 * supported list screens, and a save's URLs notice on the classic edit screen.
+	 * Prints the URLs notice of a trash or a Bulk Edit, background progress and
+	 * the redirects nudge on supported list screens, and a save's URLs notice
+	 * on the classic edit screen.
 	 */
 	public function render(): void {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
@@ -251,16 +253,12 @@ final class Notices {
 			$notice = $this->urls_notice( $this->shown );
 			if ( null !== $notice ) {
 				do_action( 'hierarchy_guard_list_script' );
-				wp_admin_notice(
-					$notice['message'],
-					[
-						'type'               => $notice['type'],
-						'dismissible'        => true,
-						'additional_classes' => [ 'hierarchy-guard-urls' ],
-					]
-				);
+				self::print_urls( $notice );
 			}
 			// The trash notice on this load already says what is still running and what to do.
+			return;
+		}
+		if ( $this->render_list_save( (string) $screen->post_type ) ) {
 			return;
 		}
 
@@ -314,9 +312,44 @@ final class Notices {
 
 		$notice = $this->urls_notice( $change );
 		$this->log->mark_shown( $user, (string) $change['id'] );
-		if ( null === $notice ) {
-			return;
+		if ( null !== $notice ) {
+			self::print_urls( $notice );
 		}
+	}
+
+	/**
+	 * Prints the URLs notice of the user's latest change on the list screen
+	 * of its type, once, when that change is an unshown save made on the
+	 * list: a Bulk Edit's, as core redirects back here after it. Quick Edit
+	 * shows its own change in place and records it as shown.
+	 *
+	 * @param string $post_type List screen's post type.
+	 * @return bool Whether it printed the notice.
+	 */
+	private function render_list_save( string $post_type ): bool {
+		$user   = get_current_user_id();
+		$change = $this->log->latest( $user );
+		if ( null === $change || 'save' !== $change['action'] || 'list' !== ( $change['origin'] ?? '' ) || ! empty( $change['shown'] ) || $post_type !== $change['post_type'] ) {
+			return false;
+		}
+
+		$notice = $this->urls_notice( $change );
+		$this->log->mark_shown( $user, (string) $change['id'] );
+		if ( null === $notice ) {
+			return false;
+		}
+		// The list script turns its download link into the modal's button.
+		do_action( 'hierarchy_guard_list_script' );
+		self::print_urls( $notice );
+		return true;
+	}
+
+	/**
+	 * Prints a URLs notice.
+	 *
+	 * @param array{type:string,message:string} $notice From urls_notice().
+	 */
+	private static function print_urls( array $notice ): void {
 		wp_admin_notice(
 			$notice['message'],
 			[

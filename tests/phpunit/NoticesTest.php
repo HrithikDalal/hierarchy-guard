@@ -365,6 +365,63 @@ final class NoticesTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_a_bulk_edit_s_urls_notice_prints_once_on_the_pages_list_core_returns_to(): void {
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->bulk_edit( [ $this->ids['about'] ], 0 );
+		$change = $this->log->latest( $this->admin );
+		// Core redirects back to the Pages list.
+		Change_Log::reset_request();
+		$before = did_action( 'hierarchy_guard_list_script' );
+
+		$html = $this->rendered();
+
+		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
+		$this->assertStringContainsString( '4 old URLs now show “Page not found”.', $html );
+		$this->assertStringContainsString( 'data-change="' . $change['id'] . '"', $html );
+		$this->assertSame( 1, did_action( 'hierarchy_guard_list_script' ) - $before, 'The list script turns its link into the modal’s button.' );
+		$this->assertStringNotContainsString( 'hierarchy-guard-nudge', $html, 'Never beside the nudge.' );
+		$this->assertTrue( $this->log->latest( $this->admin )['shown'] );
+
+		$this->assertStringNotContainsString( 'hierarchy-guard-urls', $this->rendered(), 'Shown once.' );
+		$this->assertSame( '', $this->rendered_on_edit( $this->ids['about'] ), 'Nor on the edit screen.' );
+	}
+
+	public function test_the_pages_list_prints_no_urls_notice_for_a_quick_edit_or_another_type(): void {
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->as_quick_edit(
+			fn() => wp_update_post(
+				[
+					'ID'        => $this->ids['about'],
+					'post_name' => 'about-quick',
+				]
+			)
+		);
+		Change_Log::reset_request();
+		$this->assertStringNotContainsString( 'hierarchy-guard-urls', $this->rendered(), 'Quick Edit showed it in place.' );
+
+		$this->bulk_edit( [ $this->ids['about'] ], 0 );
+		Change_Log::reset_request();
+		register_post_type(
+			'doc',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		add_filter( 'hierarchy_guard_post_types', static fn(): array => [ 'page', 'doc' ] );
+		Post_Types::reset();
+		try {
+			set_current_screen( 'edit-doc' );
+			ob_start();
+			$this->notice->render();
+			$this->assertStringNotContainsString( 'hierarchy-guard-urls', (string) ob_get_clean(), 'Only the list of its own type.' );
+			$this->assertFalse( $this->log->latest( $this->admin )['shown'] );
+		} finally {
+			unregister_post_type( 'doc' );
+			Post_Types::reset();
+		}
+	}
+
 	public function test_trash_sentences_for_one_page(): void {
 		$this->assertSame( [ '1 subpage moved up under “Company”.' ], Notices::sentences( $this->change( 'trash', [ $this->about( [ 'counts' => [ 'moved' => 1 ] ] ) ] ) ) );
 		Change_Log::reset_request();
