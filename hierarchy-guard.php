@@ -6,7 +6,7 @@
  * Version:           0.1.0
  * Requires at least: 6.6
  * Requires PHP:      8.0
- * Author:            rtCamp, Hrithik Dalal
+ * Author:            <a href="https://rtcamp.com">rtCamp</a>, <a href="https://github.com/HrithikDalal">Hrithik Dalal</a>
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       hierarchy-guard
