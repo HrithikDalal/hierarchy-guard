@@ -17,23 +17,26 @@ use WP_Post;
 
 /**
  * The block sources: one per page a save moved or renamed, one per root of a
- * trash change. A block names its old path, its head, the page its new URLs
- * start under, and the first-level pages its walk starts from.
+ * trash change that is still in the trash. A block names its old path, its
+ * head, the page its new URLs start under, and the first-level pages its walk
+ * starts from.
  */
 final class Pairs_Blocks {
 
 	/**
 	 * The blocks for a change: a save's, a trash's, or none for a restore.
 	 *
-	 * @param array<string,mixed> $change A change from Change_Log.
+	 * @param array<string,mixed> $change  A change from Change_Log.
+	 * @param int                 $deleted Set to how many of a trash's roots were deleted for good; they have no block.
 	 * @return array<int,array<string,mixed>> Blocks.
 	 */
-	public static function change_blocks( array $change ): array {
+	public static function change_blocks( array $change, int &$deleted = 0 ): array {
+		$deleted = 0;
 		switch ( $change['action'] ?? '' ) {
 			case 'save':
 				return self::save_blocks( $change );
 			case 'trash':
-				return self::trash_blocks( $change );
+				return self::trash_blocks( $change, $deleted );
 		}
 		return [];
 	}
@@ -60,40 +63,36 @@ final class Pairs_Blocks {
 				continue;
 			}
 			$blocks[] = [
-				'old'        => Paths::normalize( (string) $root['path'] ),
-				'head'       => $id,
-				'reason'     => '',
-				'base'       => Paths::uri( $post ),
-				'from'       => $id,
-				'children'   => [],
-				'incomplete' => false,
+				'old'      => Paths::normalize( (string) $root['path'] ),
+				'head'     => $id,
+				'reason'   => '',
+				'base'     => Paths::uri( $post ),
+				'from'     => $id,
+				'children' => [],
 				// The save recorded the old path on the page, so the resolver leads it there.
-				'target'     => $id,
-				'held'       => false,
+				'target'   => $id,
 			];
 		}
 		return $blocks;
 	}
 
 	/**
-	 * The blocks for a trash change. A root restored since has no block,
-	 * because its URLs work again. While a root is in the trash its old path
-	 * leads nowhere and its first-level pages are the subpages its moved
-	 * markers name, at their original slugs, each with its subpages below it at
-	 * their current slugs. Once it is deleted for good its old path leads to the
-	 * page its subpages moved under, and its first-level pages are the IDs its
-	 * change entry kept that still live there, at their slugs from before the move.
-	 * When a later root of the same bulk action took that page to the trash, or
-	 * it was deleted since, and the subpages moved up again, they sit under the
-	 * nearest page above it that is neither: that is where their new URLs
-	 * start. The old path itself still leads to the page it was recorded on, as
-	 * the resolver sees it, so a deleted root's old path leads anywhere only
-	 * while a live page holds it.
+	 * The blocks for a trash change, one per root still in the trash. A root
+	 * restored since has no block, because its URLs work again, and neither
+	 * has a root deleted for good: its moved markers, which kept its subpages'
+	 * slugs from before the move, went with it. While a root is in the trash
+	 * its old path leads nowhere and its first-level pages are the subpages its
+	 * moved markers name, at their original slugs, each with its subpages below
+	 * it at their current slugs. When a later root of the same bulk action took
+	 * the page they moved under to the trash, or it was deleted since, and the
+	 * subpages moved up again, they sit under the nearest page above it that is
+	 * neither: that is where their new URLs start.
 	 *
-	 * @param array<string,mixed> $change A trash change from Change_Log.
+	 * @param array<string,mixed> $change  A trash change from Change_Log.
+	 * @param int                 $deleted Set to how many roots whose subpages moved up were deleted for good.
 	 * @return array<int,array<string,mixed>> Blocks.
 	 */
-	private static function trash_blocks( array $change ): array {
+	private static function trash_blocks( array $change, int &$deleted ): array {
 		$type  = (string) $change['post_type'];
 		$all   = [];
 		$roots = [];
@@ -109,45 +108,25 @@ final class Pairs_Blocks {
 
 		// Every root's status, in one query: a root missing here was deleted for good.
 		$statuses = self::statuses( array_keys( $all ) );
-		$trashed  = array_keys( array_filter( array_intersect_key( $statuses, $roots ), static fn( string $status ): bool => 'trash' === $status ) );
-		$moved    = self::moved_children( $trashed, $type );
+		$deleted  = count( array_diff_key( $roots, $statuses ) );
+		$roots    = array_filter( array_intersect_key( $roots, $statuses ), static fn( int $root_id ): bool => 'trash' === $statuses[ $root_id ], ARRAY_FILTER_USE_KEY );
+		$moved    = self::moved_children( array_keys( $roots ), $type );
 
-		$parents = [];
-		$under   = [];
+		$blocks  = [];
 		$targets = [];
 		foreach ( $roots as $root_id => $root ) {
-			$status = $statuses[ $root_id ] ?? '';
-			if ( '' !== $status && 'trash' !== $status ) {
-				unset( $roots[ $root_id ] );
-				continue;
-			}
 			// A root trashed later in the same bulk action may have moved these subpages up again, and either may be deleted since.
-			$to                  = self::live_target( (int) $root['to'], $all, $statuses, $targets );
-			$parent              = $to > 0 ? get_post( $to ) : null;
-			$under[ $root_id ]   = array_merge( $root, [ 'to' => $to ] );
-			$parents[ $root_id ] = $parent instanceof WP_Post ? $parent : null;
-		}
-		$kept = self::kept_children( array_diff_key( $under, $statuses ), $all, $type );
-
-		$blocks = [];
-		foreach ( $roots as $root_id => $root ) {
-			$status   = $statuses[ $root_id ] ?? '';
-			$parent   = $parents[ $root_id ];
-			$to       = (int) $root['to'];
-			$trash    = 'trash' === $status;
+			$to       = self::live_target( (int) $root['to'], $all, $statuses, $targets );
+			$parent   = $to > 0 ? get_post( $to ) : null;
 			$blocks[] = [
-				'old'        => Paths::normalize( (string) $root['path'] ),
-				// A target that was itself a root of the change and is gone now is no page: nothing needs reading.
-				'head'       => '' === $status && ! ( isset( $all[ $to ] ) && ! isset( $statuses[ $to ] ) ) ? $to : 0,
-				'reason'     => $trash ? 'trash' : '',
-				'base'       => null !== $parent ? Paths::uri( $parent ) : '',
-				'from'       => 0,
-				// In the trash, the markers keep each subpage's slug from before the move; once deleted, the change entry does.
-				'children'   => $trash ? ( $moved[ $root_id ] ?? [] ) : ( $kept[ $root_id ] ?? [] ),
-				'incomplete' => '' === $status && (int) ( $root['counts']['moved'] ?? 0 ) > count( (array) ( $root['ids'] ?? [] ) ),
-				'target'     => (int) $under[ $root_id ]['to'],
-				// A deleted root's old path leads to its target only through a live page that holds it.
-				'held'       => '' === $status,
+				'old'      => Paths::normalize( (string) $root['path'] ),
+				'head'     => 0,
+				'reason'   => 'trash',
+				'base'     => $parent instanceof WP_Post ? Paths::uri( $parent ) : '',
+				'from'     => 0,
+				// The markers keep each subpage's slug from before the move.
+				'children' => $moved[ $root_id ] ?? [],
+				'target'   => $to,
 			];
 		}
 
@@ -230,57 +209,6 @@ final class Pairs_Blocks {
 			$id                       = (int) $row['ID'];
 			$slug                     = '' !== $original[ $id ] ? $original[ $id ] : (string) $row['post_name'];
 			$out[ $root_of[ $id ] ][] = Pairs::node( $row, $slug );
-		}
-		return $out;
-	}
-
-	/**
-	 * The subpages each deleted root's entry kept, by root, where they still live under its target.
-	 *
-	 * In a chained bulk trash every root a subpage moved up from keeps it. It
-	 * belongs to the root it left first: the one whose move took it up to
-	 * another root of the change and that no other of those moves led to.
-	 *
-	 * @param array<int,array<string,mixed>> $roots Root entries of deleted roots, by root ID, each `to` the page its subpages live under now.
-	 * @param array<int,array<string,mixed>> $all   Every root entry of the change as recorded, by root ID.
-	 * @param string                         $type  Post type name.
-	 * @return array<int,array<int,array{id:int,parent:int,segment:string,slug:string,status:string}>>
-	 */
-	private static function kept_children( array $roots, array $all, string $type ): array {
-		$listed = [];
-		foreach ( $roots as $root_id => $root ) {
-			foreach ( (array) ( $root['ids'] ?? [] ) as $id ) {
-				$listed[ (int) $id ][] = (int) $root_id;
-			}
-		}
-		if ( [] === $listed ) {
-			return [];
-		}
-
-		$owner = [];
-		foreach ( $listed as $id => $candidates ) {
-			$owner[ $id ] = (int) end( $candidates );
-			if ( count( $candidates ) < 2 ) {
-				continue;
-			}
-			$tos = array_map( static fn( int $candidate ): int => (int) ( $all[ $candidate ]['to'] ?? 0 ), $candidates );
-			foreach ( $candidates as $candidate ) {
-				if ( isset( $all[ (int) ( $all[ $candidate ]['to'] ?? 0 ) ] ) && ! in_array( $candidate, $tos, true ) ) {
-					$owner[ $id ] = $candidate;
-					break;
-				}
-			}
-		}
-		// The walk reads no more than the cap, whatever an older change stored.
-		$owner = array_slice( $owner, 0, Subtree::count_cap() + 1, true );
-
-		$out = [];
-		foreach ( self::rows( array_keys( $owner ), $type ) as $row ) {
-			$root_id = $owner[ (int) $row['ID'] ];
-			if ( (int) $row['post_parent'] === (int) $roots[ $root_id ]['to'] ) {
-				$slug              = $roots[ $root_id ]['slugs'][ (int) $row['ID'] ] ?? '';
-				$out[ $root_id ][] = Pairs::node( $row, is_string( $slug ) && '' !== $slug ? $slug : (string) $row['post_name'] );
-			}
 		}
 		return $out;
 	}

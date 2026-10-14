@@ -117,11 +117,11 @@ final class Changes_Controller {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function pairs( WP_REST_Request $request ) {
-		$change = $this->change( (string) $request['id'] );
-		if ( $change instanceof WP_Error ) {
-			return $change;
+		$collected = $this->collected( (string) $request['id'] );
+		if ( $collected instanceof WP_Error ) {
+			return $collected;
 		}
-		return new WP_REST_Response( $this->pairs->page( $this->pairs->collect_change( $change ), (int) $request['page'], (int) $request['per_page'] ) );
+		return new WP_REST_Response( $this->pairs->page( $collected, (int) $request['page'], (int) $request['per_page'] ) );
 	}
 
 	/**
@@ -131,36 +131,49 @@ final class Changes_Controller {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function csv( WP_REST_Request $request ) {
-		$change = $this->change( (string) $request['id'] );
-		if ( $change instanceof WP_Error ) {
-			return $change;
+		$collected = $this->collected( (string) $request['id'] );
+		if ( $collected instanceof WP_Error ) {
+			return $collected;
 		}
-		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $this->pairs->collect_change( $change ) ) );
+		return Csv_Download::response( (string) $request['format'], $this->pairs->all( $collected ) );
 	}
 
 	/**
-	 * The current user's change with this ID. When it is gone, the message
-	 * says a later change replaced it only when the user has one; a change
-	 * that expired, or that the cache dropped, has nothing newer.
+	 * The pairs of the current user's change with this ID. When the change is
+	 * gone, the message says a later change replaced it only when the user
+	 * has one; a change that expired, or that the cache dropped, has nothing
+	 * newer. A trash whose pages are all deleted for good lists nothing.
 	 *
 	 * @param string $change_id Change ID.
 	 * @return array<string,mixed>|WP_Error
 	 */
-	private function change( string $change_id ) {
+	private function collected( string $change_id ) {
 		$change = $this->log->latest( get_current_user_id() );
 		if ( null === $change || $change_id !== $change['id'] ) {
-			$minutes = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
-			$message = __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ';
-			if ( null !== $change ) {
-				$message .= __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ';
-			}
+			$minutes  = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
+			$message  = null !== $change ? __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ' : '';
 			$message .= sprintf(
 				/* translators: %s: number of minutes. */
 				_n( 'They are kept for %s minute.', 'They are kept for %s minutes.', $minutes, 'hierarchy-guard' ),
 				number_format_i18n( $minutes )
 			);
-			return new WP_Error( 'hierarchy_guard_change_gone', $message, [ 'status' => 404 ] );
+			return self::gone( $message );
 		}
-		return $change;
+
+		$collected = $this->pairs->collect_change( $change );
+		if ( ! empty( $collected['gone'] ) ) {
+			return self::gone( __( 'The pages were deleted for good.', 'hierarchy-guard' ) );
+		}
+		return $collected;
+	}
+
+	/**
+	 * The answer for redirects that are no longer available, and why.
+	 *
+	 * @param string $why What happened to them.
+	 * @return WP_Error
+	 */
+	private static function gone( string $why ): WP_Error {
+		return new WP_Error( 'hierarchy_guard_change_gone', __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ' . $why, [ 'status' => 404 ] );
 	}
 }

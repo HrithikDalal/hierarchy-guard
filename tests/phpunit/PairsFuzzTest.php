@@ -38,7 +38,8 @@ use WP_UnitTestCase;
  * attachments named as the last segment of an old two-segment path. The
  * renames and moves are saves through wp_update_post() as the admin, so each
  * records a change, as a trash does. Every change is collected right after
- * the step that made it, and the admin's latest change again at the end.
+ * the step that made it, and the admin's latest change again at the end,
+ * where a root deleted for good since lists nothing.
  *
  * - Correct: every listed pair's old URL is a 404 the resolver sends to that
  *   pair's page, and a logged-out request for it is redirected there by the

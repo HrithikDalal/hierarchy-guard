@@ -75,6 +75,42 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$this->assertSame( 3, $data['total'] );
 		$this->assertSame( [ '/company/about/history/', '/company/about/team/', '/company/about/team/leadership/' ], array_column( $data['pairs'], 'old' ) );
 		$this->assertSame( [ '/company/about/' ], array_column( $data['unresolved'], 'old' ) );
+		$this->assertFalse( $data['capped'], 'While the page is in the Trash, the list is complete.' );
+	}
+
+	public function test_a_trash_whose_pages_were_all_deleted_for_good_is_gone(): void {
+		Change_Log::reset_request();
+		wp_delete_post( $this->ids['about'], true );
+
+		foreach ( [ 'pairs', 'csv' ] as $route ) {
+			$response = $this->get( '/changes/' . $this->change_id . '/' . $route );
+
+			$this->assertSame( 404, $response->get_status(), $route );
+			$this->assertSame( 'hierarchy_guard_change_gone', $response->get_data()['code'], $route );
+			$this->assertSame( 'These redirects are no longer available. The pages were deleted for good.', $response->get_data()['message'], $route );
+		}
+	}
+
+	public function test_a_trash_with_a_page_deleted_for_good_lists_the_others_as_incomplete(): void {
+		$careers = $this->page( 'careers', $this->ids['company'] );
+		$this->page( 'jobs', $careers );
+		$services = $this->page( 'services', $this->ids['company'] );
+		$this->page( 'design', $services );
+		// One request, one change with two roots.
+		Change_Log::reset_request();
+		wp_trash_post( $careers );
+		wp_trash_post( $services );
+		$change = (string) ( new Change_Log() )->latest( $this->admin )['id'];
+		Change_Log::reset_request();
+		$this->assertSame( 2, $this->get( '/changes/' . $change . '/pairs' )->get_data()['total'], 'Precondition: both are listed while in the Trash.' );
+
+		wp_delete_post( $careers, true );
+		$data = $this->get( '/changes/' . $change . '/pairs' )->get_data();
+
+		$this->assertSame( [ '/company/services/design/' ], array_column( $data['pairs'], 'old' ) );
+		$this->assertSame( 1, $data['total'] );
+		$this->assertTrue( $data['capped'], 'The list says it is incomplete.' );
+		$this->assertSame( "source,target,code\r\n/company/services/design/,/company/design/,302\r\n", $this->get( '/changes/' . $change . '/csv', [ 'format' => 'generic' ] )->get_data() );
 	}
 
 	public function test_another_user_cannot_read_the_change(): void {

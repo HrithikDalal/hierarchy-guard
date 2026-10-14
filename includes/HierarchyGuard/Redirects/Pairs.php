@@ -20,8 +20,8 @@ use WP_Post;
  * A block starts at one old path (Pairs_Blocks). Its head is the post that
  * path leads to, or none. Below it come the published pages that lived under
  * the old path, depth first in menu order: the first-level pages at the
- * slugs the change kept, the pages below them at their current slugs, which
- * is exact while the change is fresh. Every block of a change is walked
+ * slugs they had under it, the pages below them at their current slugs,
+ * which is exact while the change is fresh. Every block of a change is walked
  * together, one query pair per level, and no walk goes past the count cap or
  * the server's segment cap. Last, every pair is checked against a model of
  * the server (Batch_Resolver): the request must be a 404 by the site's
@@ -37,15 +37,25 @@ final class Pairs {
 
 	/**
 	 * Every pair of a change: one block per page a save moved or renamed, or
-	 * per root of a trash whose subpages moved up.
+	 * per root of a trash whose subpages moved up, while it is in the trash.
+	 * A root deleted for good lists nothing, so the list lacks its pairs and
+	 * says it is incomplete; when no such root is left in the trash, the list
+	 * is gone.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
-	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool,gone:bool}
 	 */
 	public function collect_change( array $change ): array {
 		return $this->cached(
 			'change:' . (string) ( $change['id'] ?? '' ) . ':' . (int) ( $change['updated'] ?? 0 ),
-			fn(): array => $this->collect( Pairs_Blocks::change_blocks( $change ), (string) ( $change['post_type'] ?? 'page' ) )
+			function () use ( $change ): array {
+				$deleted             = 0;
+				$blocks              = Pairs_Blocks::change_blocks( $change, $deleted );
+				$collected           = $this->collect( $blocks, (string) ( $change['post_type'] ?? 'page' ) );
+				$collected['capped'] = $collected['capped'] || $deleted > 0;
+				$collected['gone']   = $deleted > 0 && [] === $blocks;
+				return $collected;
+			}
 		);
 	}
 
@@ -62,12 +72,10 @@ final class Pairs {
 	 * Each first-level page is listed at its old segment under the block's old
 	 * path, and the pages below it at their current slugs. An old path the
 	 * ledger gives to another live post leads to that post, so it is dropped
-	 * here with the pages walked below it. A deleted root's old path leads to
-	 * its target only while that target holds it, so with no live holder it is
-	 * unresolved, while its subpages are still listed. When the newest live
-	 * holder of a block's own old path is another page outside the trash, the
-	 * whole block is unresolved. Last, each pair is checked against what the
-	 * resolver serves.
+	 * here with the pages walked below it. When the newest live holder of a
+	 * block's own old path is another page outside the trash, the whole block
+	 * is unresolved. Last, each pair is checked against what the resolver
+	 * serves.
 	 *
 	 * @param array<int,array<string,mixed>> $blocks    Blocks.
 	 * @param string                         $post_type Post type name.
@@ -151,18 +159,14 @@ final class Pairs {
 	 * @param array<string,mixed>                        $tree       The walk.
 	 * @param int                                        $cap        Most pairs.
 	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; a head with no new URL is added.
-	 * @return array{pairs:array<int,array{old:string,id:int}>,lineage:array<int,int[]>,block_of:array<int,int>,held:array<int,true>,headless:array<int,true>,capped:bool}
+	 * @return array{pairs:array<int,array{old:string,id:int}>,lineage:array<int,int[]>,block_of:array<int,int>,headless:array<int,true>,capped:bool}
 	 */
 	private static function listing( array $open, array $in_use, array $tree, int $cap, array &$unresolved ): array {
 		$capped   = false;
 		$pairs    = [];
 		$lineage  = [];
 		$block_of = [];
-		$held     = [];
 		$headless = [];
-		foreach ( $open as $block ) {
-			$capped = $capped || ! empty( $block['incomplete'] );
-		}
 		foreach ( $open as $index => $block ) {
 			$old  = (string) $block['old'];
 			$head = (int) $block['head'];
@@ -173,10 +177,7 @@ final class Pairs {
 			} elseif ( $post instanceof WP_Post && is_post_publicly_viewable( $post ) ) {
 				$at[ $old ]                  = count( $pairs );
 				$block_of[ count( $pairs ) ] = $index;
-				if ( ! empty( $block['held'] ) ) {
-					$held[ count( $pairs ) ] = true;
-				}
-				$pairs[] = [
+				$pairs[]                     = [
 					'old' => $old,
 					'id'  => $head,
 				];
@@ -218,7 +219,6 @@ final class Pairs {
 			'pairs'    => $pairs,
 			'lineage'  => $lineage,
 			'block_of' => $block_of,
-			'held'     => $held,
 			'headless' => $headless,
 			'capped'   => $capped,
 		];
@@ -226,7 +226,7 @@ final class Pairs {
 
 	/**
 	 * The pairs the ledger gives to another post, with the pages listed below
-	 * them, and the deleted roots' old paths no live page holds.
+	 * them.
 	 *
 	 * The resolver rewrites an old path through the newest live post that
 	 * holds its longest known prefix. When that post for a block's own old path
@@ -238,7 +238,7 @@ final class Pairs {
 	 * @param array<int,array<string,mixed>>           $open    Blocks by index.
 	 * @param array<string,mixed>                      $listing From listing().
 	 * @param array<string,array{id:int,trashed:bool}> $holders From Batch_Resolver::holders().
-	 * @return array{void:array<int,true>,trashed:array<int,true>,dropped:array<int,true>,unheld:array<int,true>} Blocks by index, then pairs by index.
+	 * @return array{void:array<int,true>,trashed:array<int,true>,dropped:array<int,true>} Blocks by index, then pairs by index.
 	 */
 	private static function dropped( array $open, array $listing, array $holders ): array {
 		$void    = [];
@@ -259,15 +259,11 @@ final class Pairs {
 		// with the pages walked below it. A holder under the trash holds
 		// nothing for the resolver.
 		$dropped = [];
-		$unheld  = [];
 		foreach ( $listing['pairs'] as $i => $pair ) {
 			$found  = $holders[ $pair['old'] ] ?? null;
 			$holder = null !== $found && ! $found['trashed'] ? $found['id'] : 0;
 			if ( isset( $void[ $listing['block_of'][ $i ] ?? -1 ] ) || ( $holder > 0 && $holder !== $pair['id'] ) || [] !== array_intersect_key( array_flip( $listing['lineage'][ $i ] ?? [] ), $dropped ) ) {
 				$dropped[ $i ] = true;
-			} elseif ( isset( $listing['held'][ $i ] ) && 0 === $holder ) {
-				// No live page holds a deleted root's old path, so it leads nowhere; its subpages may still redirect.
-				$unheld[ $i ] = true;
 			}
 		}
 
@@ -275,7 +271,6 @@ final class Pairs {
 			'void'    => $void,
 			'trashed' => $trashed,
 			'dropped' => $dropped,
-			'unheld'  => $unheld,
 		];
 	}
 
@@ -303,7 +298,7 @@ final class Pairs {
 	 */
 	private static function served_only( array $open, array $listing, array $gone, string $post_type, array $facts, array &$unresolved ): array {
 		$pairs = $listing['pairs'];
-		$left  = array_diff_key( $pairs, $gone['dropped'], $gone['unheld'] );
+		$left  = array_diff_key( $pairs, $gone['dropped'] );
 		$heads = [];
 		foreach ( array_keys( $gone['void'] ) as $index ) {
 			if ( ! isset( $listing['headless'][ $index ] ) ) {
@@ -318,12 +313,6 @@ final class Pairs {
 			$unresolved[] = [
 				'old'    => $old,
 				'reason' => $reason( $served[ $old ] ?? 0, false ),
-			];
-		}
-		foreach ( array_keys( $gone['unheld'] ) as $i ) {
-			$unresolved[] = [
-				'old'    => $pairs[ $i ]['old'],
-				'reason' => isset( $gone['trashed'][ $listing['block_of'][ $i ] ?? -1 ] ) ? 'trash' : 'none',
 			];
 		}
 		$dropped = $gone['dropped'];
@@ -343,7 +332,7 @@ final class Pairs {
 		return array_values(
 			array_map(
 				static fn( array $pair ): array => $pair + [ 'temporary' => isset( $temporary[ $pair['old'] ] ) ],
-				array_diff_key( $pairs, $dropped, $gone['unheld'] )
+				array_diff_key( $pairs, $dropped )
 			)
 		);
 	}
@@ -437,7 +426,7 @@ final class Pairs {
 	 * @param array<int,array<string,mixed>> $blocks Blocks to walk, by index.
 	 * @param string                         $type   Post type name.
 	 * @param int                            $cap    Most pages to read.
-	 * @return array{tops:array<int,array<int,array<string,mixed>>>,kids:array<int,array<int,array<string,mixed>>>,ids:int[],capped:bool}
+	 * @return array{tops:array<int,array<int,array<string,mixed>>>,kids:array<int,array<int,array<string,mixed>>>,capped:bool}
 	 */
 	private function walk( array $blocks, string $type, int $cap ): array {
 		$tops    = [];
@@ -490,15 +479,9 @@ final class Pairs {
 			$level    = array_keys( array_filter( $below, static fn( int $left ): bool => $left >= 1 ) );
 		}
 
-		$ids = [];
-		foreach ( array_merge( array_merge( [], ...array_values( $tops ) ), array_merge( [], ...array_values( $kids ) ) ) as $node ) {
-			$ids[] = (int) $node['id'];
-		}
-
 		return [
 			'tops'   => $tops,
 			'kids'   => $kids,
-			'ids'    => $ids,
 			'capped' => $visited > $cap,
 		];
 	}

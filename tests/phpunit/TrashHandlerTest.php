@@ -540,8 +540,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( [ '5 subpages moved up one level.', '1 subpage stayed where it is.' ], Notices::sentences( $change ), 'Nothing says pages are still moving.' );
 		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'No job is left that could correct it later.' );
 		$this->assertSame( 6, $this->stored_pair_count() );
-		$this->in_another_process( fn() => wp_delete_post( $this->ids['about'], true ) );
-		$this->assertSame( 7, $this->stored_pair_count(), 'Every page the run moved is still listed after about is deleted for good.' );
 	}
 
 	public function test_a_run_that_finishes_between_two_job_roots_of_a_bulk_trash_keeps_its_root(): void {
@@ -579,8 +577,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 4, $change['roots'][ $careers ]['counts']['moved'] );
 		$this->assertSame( [ '9 subpages moved up one level.' ], Notices::sentences( $change ) );
 		$this->assertSame( 10, $this->stored_pair_count() );
-		$this->in_another_process( fn() => wp_delete_post( $about, true ) );
-		$this->assertSame( 11, $this->stored_pair_count(), 'Every page about’s run moved is still listed after it is deleted for good.' );
 	}
 
 	public function test_a_cron_process_that_runs_two_jobs_keeps_a_root_the_request_wrote_in_between(): void {

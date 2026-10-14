@@ -145,6 +145,8 @@ final class PairsTest extends WP_UnitTestCase {
 			$this->pairs->page( $collected, 1, 20 )['unresolved'],
 			'The trashed page itself has no target.'
 		);
+		$this->assertFalse( $collected['capped'], 'While the page is in the Trash, the list is complete.' );
+		$this->assertFalse( $collected['gone'] );
 	}
 
 	public function test_a_subpage_renamed_on_the_move_is_listed_at_its_old_slug(): void {
@@ -155,47 +157,49 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertContains( '/company/about/team/ -> /company/team-2/', $this->lines( $this->last_change() ) );
 	}
 
-	public function test_once_the_trash_is_emptied_the_old_path_leads_to_the_new_parent(): void {
+	public function test_once_every_root_is_deleted_for_good_nothing_is_listed(): void {
 		wp_trash_post( $this->ids['about'] );
 		$change = $this->log->latest( $this->admin );
 		wp_delete_post( $this->ids['about'], true );
 
-		$this->assertSame(
-			[
-				'/company/about/ -> /company/',
-				'/company/about/history/ -> /company/history/',
-				'/company/about/team/ -> /company/team/',
-				'/company/about/team/leadership/ -> /company/team/leadership/',
-			],
-			$this->lines( $this->pairs->collect_change( $change ) )
-		);
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertTrue( $collected['gone'], 'Its moved markers went with it, so there is no list.' );
+		$this->assertSame( [], $collected['pairs'] );
+		$this->assertSame( [], $collected['unresolved'] );
+		$this->assertNull( ( new Notices( $this->log, new Queue(), new Pairs(), new Providers() ) )->urls_notice( $change ), 'No notice offers it.' );
+		$this->assertSame( $this->ids['team'], ( new Resolver( new Ledger() ) )->resolve( 'page', 'company/about/team' )->ID, 'The built-in redirects still serve the old URLs.' );
 	}
 
-	public function test_after_a_delete_each_root_lists_only_its_own_subpages(): void {
+	public function test_once_some_roots_are_deleted_for_good_the_others_are_listed_as_incomplete(): void {
 		$sibling = $this->page( 'careers', $this->ids['company'] );
 		$this->page( 'jobs', $sibling );
 		// One request, one change with two roots.
 		wp_trash_post( $this->ids['about'] );
 		wp_trash_post( $sibling );
 		$change = $this->log->latest( $this->admin );
+
+		$collected = $this->pairs->collect_change( $change );
+		$this->assertFalse( $collected['capped'], 'While both are in the Trash, the list is complete.' );
+		$this->assertFalse( $collected['gone'] );
+		$this->assertSame(
+			[
+				'/company/about/history/ -> /company/history/',
+				'/company/about/team/ -> /company/team/',
+				'/company/about/team/leadership/ -> /company/team/leadership/',
+				'/company/careers/jobs/ -> /company/jobs/',
+			],
+			$this->lines( $collected )
+		);
+
 		wp_delete_post( $this->ids['about'], true );
+		$collected = $this->pairs->collect_change( $change );
 
-		$lines = $this->lines( $this->pairs->collect_change( $change ) );
-
-		$this->assertContains( '/company/about/history/ -> /company/history/', $lines );
-		$this->assertNotContains( '/company/about/jobs/ -> /company/jobs/', $lines, 'Jobs moved up from Careers, not from About.' );
-		$this->assertContains( '/company/careers/jobs/ -> /company/jobs/', $lines );
-	}
-
-	public function test_after_a_delete_a_root_that_moved_more_than_it_kept_is_capped(): void {
-		wp_trash_post( $this->ids['about'] );
-		$change = $this->log->latest( $this->admin );
-		$root   = $this->ids['about'];
-		// As if the root had moved more subpages than its entry could keep.
-		$change['roots'][ $root ]['counts']['moved'] = 500;
-		wp_delete_post( $root, true );
-
-		$this->assertTrue( $this->pairs->collect_change( $change )['capped'] );
+		$this->assertSame( [ '/company/careers/jobs/ -> /company/jobs/' ], $this->lines( $collected ), 'About lists nothing once it is deleted for good.' );
+		$this->assertTrue( $collected['capped'], 'The list says it is incomplete.' );
+		$this->assertFalse( $collected['gone'] );
+		$this->assertSame( [ '/company/careers/' ], array_column( $this->pairs->page( $collected, 1, 100 )['unresolved'], 'old' ) );
+		$this->assert_the_resolver_agrees( $collected );
 	}
 
 	public function test_a_restored_page_needs_no_redirects(): void {
@@ -232,21 +236,6 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertLessThanOrEqual( 4, get_num_queries() - $queries, 'Statuses, markers and moved pages in one query each, whatever the number of roots.' );
 	}
 
-	public function test_after_a_delete_a_subpage_renamed_on_the_move_keeps_its_old_slug(): void {
-		$this->page( 'team', $this->ids['company'] );
-		wp_trash_post( $this->ids['about'] );
-		$change = $this->log->latest( $this->admin );
-		wp_delete_post( $this->ids['about'], true );
-
-		$lines = $this->lines( $this->pairs->collect_change( $change ) );
-
-		$this->assertContains( '/company/about/team/ -> /company/team-2/', $lines );
-		$this->assertContains( '/company/about/team/leadership/ -> /company/team-2/leadership/', $lines );
-		foreach ( $lines as $line ) {
-			$this->assertStringNotContainsString( 'about/team-2', explode( ' -> ', $line )[0] );
-		}
-	}
-
 	public function test_a_trash_lists_a_subpage_renamed_before_it_at_the_slug_it_had_then(): void {
 		wp_update_post(
 			[
@@ -258,9 +247,6 @@ final class PairsTest extends WP_UnitTestCase {
 		$change = $this->log->latest( $this->admin );
 
 		$this->assertContains( '/company/about/crew/ -> /company/crew/', $this->lines( $this->pairs->collect_change( $change ) ), 'The URL that worked until the trash.' );
-
-		wp_delete_post( $this->ids['about'], true );
-		$this->assertContains( '/company/about/crew/ -> /company/crew/', $this->lines( $this->pairs->collect_change( $change ) ) );
 	}
 
 	public function test_a_child_trashed_before_its_parent_in_one_bulk_action_keeps_its_pairs(): void {
@@ -290,31 +276,14 @@ final class PairsTest extends WP_UnitTestCase {
 
 			wp_delete_post( $a, true );
 			$collected = $this->pairs->collect_change( $change );
-			$this->assertContains( '/company/b/a/kid/ -> /company/kid/', $this->lines( $collected ), $order . ', once the child is deleted for good' );
+			$this->assertNotContains( '/company/b/a/kid/ -> /company/kid/', $this->lines( $collected ), $order . ': the child lists nothing once it is deleted for good.' );
+			$this->assertTrue( $collected['capped'], $order . ': the list says it is incomplete.' );
 			$this->assert_the_resolver_agrees( $collected );
 
 			foreach ( [ $kid, $b ] as $id ) {
 				wp_delete_post( $id, true );
 			}
 		}
-	}
-
-	public function test_an_old_path_whose_target_was_deleted_leads_nowhere(): void {
-		wp_trash_post( $this->ids['about'] );
-		$change = $this->log->latest( $this->admin );
-		wp_delete_post( $this->ids['about'], true );
-		wp_delete_post( $this->ids['company'], true );
-
-		$this->assertSame(
-			[
-				[
-					'old'    => '/company/about/',
-					'reason' => 'none',
-				],
-			],
-			$this->pairs->page( $this->pairs->collect_change( $change ), 1, 100 )['unresolved'],
-			'No page is there to be published.'
-		);
 	}
 
 	public function test_an_old_subpage_url_a_live_page_uses_under_a_hidden_page_is_not_listed(): void {
@@ -364,22 +333,6 @@ final class PairsTest extends WP_UnitTestCase {
 		return get_num_queries() - $queries;
 	}
 
-	public function test_after_a_delete_a_subpage_renamed_after_the_trash_keeps_its_original_slug(): void {
-		wp_trash_post( $this->ids['about'] );
-		$change = $this->log->latest( $this->admin );
-		wp_update_post(
-			[
-				'ID'        => $this->ids['history'],
-				'post_name' => 'story',
-			]
-		);
-		wp_delete_post( $this->ids['about'], true );
-
-		$lines = $this->lines( $this->pairs->collect_change( $change ) );
-
-		$this->assertContains( '/company/about/history/ -> /company/story/', $lines );
-	}
-
 	public function test_a_trash_lists_a_subpage_moved_in_and_renamed_at_the_url_it_had_until_the_trash(): void {
 		// Careers lived under Company, moved under about, and was renamed jobs there.
 		$careers = $this->page( 'careers', $this->ids['company'] );
@@ -401,12 +354,6 @@ final class PairsTest extends WP_UnitTestCase {
 		$collected = $this->pairs->collect_change( $change );
 		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $collected ), 'The URL that worked until the trash.' );
 		$this->assertNotContains( '/company/about/careers/ -> /company/jobs/', $this->lines( $collected ), 'That URL never existed.' );
-		$this->assert_the_resolver_agrees( $collected );
-
-		wp_delete_post( $this->ids['about'], true );
-		$collected = $this->pairs->collect_change( $change );
-		$this->assertContains( '/company/about/jobs/ -> /company/jobs/', $this->lines( $collected ), 'Once the trash is emptied too.' );
-		$this->assertNotContains( '/company/about/careers/ -> /company/jobs/', $this->lines( $collected ) );
 		$this->assert_the_resolver_agrees( $collected );
 	}
 
@@ -456,120 +403,7 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assert_the_resolver_agrees( $collected );
 	}
 
-	public function test_once_the_trash_is_emptied_a_child_trashed_before_its_parent_keeps_its_pairs(): void {
-		$orders = [
-			'child first'  => true,
-			'parent first' => false,
-		];
-		foreach ( $orders as $order => $child_first ) {
-			Change_Log::reset_request();
-			$b   = $this->page( 'b', $this->ids['company'] );
-			$a   = $this->page( 'a', $b );
-			$kid = $this->page( 'kid', $a );
-			$ids = $child_first ? [ $a, $b ] : [ $b, $a ];
-
-			$this->start_core_bulk( 'trash', $ids );
-			foreach ( $ids as $id ) {
-				wp_trash_post( $id );
-			}
-			$this->end_core_bulk();
-			$change = $this->log->latest( $this->admin );
-			foreach ( $ids as $id ) {
-				wp_delete_post( $id, true );
-			}
-
-			$collected = $this->pairs->collect_change( $change );
-			$this->assertContains( '/company/b/a/kid/ -> /company/kid/', $this->lines( $collected ), $order );
-			$this->assertNotContains( '/company/b/kid/ -> /company/kid/', $this->lines( $collected ), $order . ': that URL lasted only inside the bulk request.' );
-			$this->assert_the_resolver_agrees( $collected );
-
-			wp_delete_post( $kid, true );
-		}
-	}
-
-	public function test_once_the_trash_is_emptied_three_chained_roots_list_the_subpage_once(): void {
-		$c   = $this->page( 'c', $this->ids['company'] );
-		$b   = $this->page( 'b', $c );
-		$a   = $this->page( 'a', $b );
-		$kid = $this->page( 'kid', $a );
-		$ids = [ $a, $b, $c ];
-		$this->start_core_bulk( 'trash', $ids );
-		foreach ( $ids as $id ) {
-			wp_trash_post( $id );
-		}
-		$this->end_core_bulk();
-		$change = $this->log->latest( $this->admin );
-		foreach ( $ids as $id ) {
-			wp_delete_post( $id, true );
-		}
-
-		$collected = $this->pairs->collect_change( $change );
-
-		$this->assertContains( '/company/c/b/a/kid/ -> /company/kid/', $this->lines( $collected ) );
-		$this->assertNotContains( '/company/c/kid/ -> /company/kid/', $this->lines( $collected ), 'That URL lasted only inside the bulk request.' );
-		$this->assertSame( (int) $this->ids['company'], (int) get_post( $kid )->post_parent );
-		$this->assert_the_resolver_agrees( $collected );
-	}
-
-	public function test_a_deleted_root_whose_old_path_nothing_leads_from_is_unresolved(): void {
-		$c   = $this->page( 'c', $this->ids['company'] );
-		$b   = $this->page( 'b', $c );
-		$a   = $this->page( 'a', $b );
-		$kid = $this->page( 'kid', $a );
-		$ids = [ $c, $b, $a ];
-		$this->start_core_bulk( 'trash', $ids );
-		foreach ( $ids as $id ) {
-			wp_trash_post( $id );
-		}
-		$this->end_core_bulk();
-		$change = $this->log->latest( $this->admin );
-		// b moved nothing, so only c, still in the trash, holds b's old path.
-		wp_delete_post( $a, true );
-		wp_delete_post( $b, true );
-
-		$collected = $this->pairs->collect_change( $change );
-
-		$this->assertNotContains( '/company/c/b/ -> /company/', $this->lines( $collected ), 'The resolver sends nothing there.' );
-		$this->assertContains(
-			[
-				'old'    => '/company/c/b/',
-				'reason' => 'none',
-			],
-			$this->pairs->page( $collected, 1, 100 )['unresolved']
-		);
-		$this->assertContains( '/company/c/b/a/kid/ -> /company/kid/', $this->lines( $collected ) );
-		$this->assertSame( (int) $this->ids['company'], (int) get_post( $kid )->post_parent );
-		$this->assert_the_resolver_agrees( $collected );
-	}
-
-	public function test_once_the_trash_is_emptied_an_old_path_whose_newest_holder_sits_under_the_trash_lists_nothing(): void {
-		wp_trash_post( $this->ids['about'] );
-		$change = $this->log->latest( $this->admin );
-		wp_delete_post( $this->ids['about'], true );
-		$archive = $this->page( 'archive', $this->ids['company'] );
-		$other   = $this->page( 'about', $this->ids['company'] );
-		wp_update_post(
-			[
-				'ID'          => $other,
-				'post_parent' => $archive,
-			]
-		);
-		$this->trash_raw( $archive );
-
-		$collected = $this->pairs->collect_change( $change );
-
-		$this->assertSame( [], $this->lines( $collected ) );
-		$this->assertContains(
-			[
-				'old'    => '/company/about/',
-				'reason' => 'trash',
-			],
-			$this->pairs->page( $collected, 1, 100 )['unresolved']
-		);
-		$this->assert_the_resolver_agrees( $collected );
-	}
-
-	public function test_a_long_chain_of_deleted_roots_costs_no_more_queries_than_a_short_one(): void {
+	public function test_a_long_chain_of_deleted_targets_costs_no_more_queries_than_a_short_one(): void {
 		$short = $this->queries_to_collect_chain( 'short', 4 );
 		$long  = $this->queries_to_collect_chain( 'long', 12 );
 
@@ -578,7 +412,8 @@ final class PairsTest extends WP_UnitTestCase {
 
 	/**
 	 * Queries a cold collect costs for a chain of nested roots, trashed child
-	 * first in one bulk action and then all deleted for good.
+	 * first in one bulk action and then all but the first deleted for good:
+	 * the first one's subpage moved up through all of them.
 	 *
 	 * @param string $prefix Slug prefix.
 	 * @param int    $length How many roots.
@@ -600,7 +435,7 @@ final class PairsTest extends WP_UnitTestCase {
 		}
 		$this->end_core_bulk();
 		$change = $this->log->latest( $this->admin );
-		foreach ( $ids as $id ) {
+		foreach ( array_slice( $ids, 1 ) as $id ) {
 			wp_delete_post( $id, true );
 		}
 		wp_cache_flush();
@@ -608,7 +443,8 @@ final class PairsTest extends WP_UnitTestCase {
 		$queries   = get_num_queries();
 		$collected = $this->pairs->collect_change( $change );
 		$cost      = get_num_queries() - $queries;
-		$this->assertContains( $kid, array_column( $collected['pairs'], 'id' ) );
+		$this->assertSame( [ $kid ], array_column( $collected['pairs'], 'id' ) );
+		$this->assertTrue( $collected['capped'] );
 		$this->assert_the_resolver_agrees( $collected );
 		return $cost;
 	}
@@ -745,15 +581,13 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertSame(
 			[
 				[
-					'old'        => 'company/about',
-					'head'       => $this->ids['about'],
-					'reason'     => '',
-					'base'       => 'company/about-us',
-					'from'       => $this->ids['about'],
-					'children'   => [],
-					'incomplete' => false,
-					'target'     => $this->ids['about'],
-					'held'       => false,
+					'old'      => 'company/about',
+					'head'     => $this->ids['about'],
+					'reason'   => '',
+					'base'     => 'company/about-us',
+					'from'     => $this->ids['about'],
+					'children' => [],
+					'target'   => $this->ids['about'],
 				],
 			],
 			Pairs_Blocks::change_blocks( $change ),
