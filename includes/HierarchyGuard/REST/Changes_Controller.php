@@ -148,7 +148,7 @@ final class Changes_Controller {
 		$change = $this->log->latest( get_current_user_id() );
 		if ( null === $change || $change_id !== $change['id'] ) {
 			$minutes = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
-			$message = __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ' . sprintf(
+			$message = __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ' . __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ' . sprintf(
 				/* translators: %s: number of minutes. */
 				_n( 'They are kept for %s minute.', 'They are kept for %s minutes.', $minutes, 'hierarchy-guard' ),
 				number_format_i18n( $minutes )

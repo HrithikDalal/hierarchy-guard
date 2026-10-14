@@ -10,6 +10,7 @@ import config from '../common/config';
 import { quickEditWarning } from '../common/copy';
 import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
+import { retireUrlsNotices } from './urls-notices';
 
 /**
  * Rows whose Quick Edit is open, with what they had when it opened and the
@@ -45,7 +46,8 @@ function siteRedirects() {
 }
 
 /**
- * Prints and speaks a notice under the heading.
+ * Prints and speaks a notice under the heading. The change it is about
+ * replaced the one any earlier URLs notice offers, so those lose their links.
  *
  * @param {{status: string, sentence: string, view: string, setup: boolean}} notice    What to say, the button's label (none when empty) and whether to offer setting up redirects.
  * @param {Object|null}                                                      source    The change the button opens, or null.
@@ -63,7 +65,7 @@ function printNotice( notice, source, redirects ) {
 	if ( source && notice.view ) {
 		const button = window.document.createElement( 'button' );
 		button.type = 'button';
-		button.className = 'button-link';
+		button.className = 'button-link hierarchy-guard-view-redirects';
 		button.setAttribute( 'aria-haspopup', 'dialog' );
 		button.textContent = notice.view;
 		button.addEventListener( 'click', () => {
@@ -90,6 +92,7 @@ function printNotice( notice, source, redirects ) {
 		}
 	}
 	box.appendChild( text );
+	retireUrlsNotices( window.document );
 	end.parentNode.insertBefore( box, end.nextSibling );
 	makeDismissible();
 	speak( notice.sentence, 'polite' );
