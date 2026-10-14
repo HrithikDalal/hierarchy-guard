@@ -197,26 +197,83 @@ trait Trash_Fixtures {
 
 	/**
 	 * Runs code as another process, such as a cron run, would while this
-	 * request is still going: with none of this request's change log in
-	 * memory, so it sees only what is stored.
+	 * request is still going: with an object cache and a change log of its
+	 * own, so it sees only what is stored.
 	 *
 	 * @param callable $run The code.
 	 * @return mixed What it returns.
 	 */
 	protected function in_another_process( callable $run ) {
-		$saved = [];
+		return ( $this->another_process() )( $run );
+	}
+
+	/**
+	 * A process other than this request, such as one cron process that runs
+	 * several jobs. It shares only the database: it has its own object cache
+	 * and its own change log in memory, and keeps both across its calls.
+	 * Each call restores this request's cache and change log afterwards.
+	 *
+	 * @return \Closure Takes the code to run in that process and returns what it returns.
+	 */
+	protected function another_process(): \Closure {
+		$cache   = null;
+		$statics = [];
+		return static function ( callable $run ) use ( &$cache, &$statics ) {
+			global $wp_object_cache;
+			$request_cache   = $wp_object_cache;
+			$wp_object_cache = $cache ?? self::fresh_object_cache( $request_cache );
+			$request_statics = self::swap_change_log_statics( $statics );
+			try {
+				return $run();
+			} finally {
+				$statics         = self::swap_change_log_statics( $request_statics );
+				$cache           = $wp_object_cache;
+				$wp_object_cache = $request_cache;
+			}
+		};
+	}
+
+	/**
+	 * The user's change as a process that starts now reads it: from storage,
+	 * through a fresh object cache, with each job's record laid over it.
+	 *
+	 * @param int $user_id User ID.
+	 * @return array<string,mixed>|null
+	 */
+	protected function stored_change( int $user_id ): ?array {
+		return $this->in_another_process( static fn() => ( new Change_Log() )->latest( $user_id ) );
+	}
+
+	/**
+	 * An empty object cache set up as WordPress sets up a process's own.
+	 *
+	 * @param object $like The cache whose global groups it takes.
+	 * @return \WP_Object_Cache
+	 */
+	private static function fresh_object_cache( $like ): \WP_Object_Cache {
+		$cache = new \WP_Object_Cache();
+		if ( $like instanceof \WP_Object_Cache ) {
+			$groups = new \ReflectionProperty( \WP_Object_Cache::class, 'global_groups' );
+			$groups->setAccessible( true );
+			$cache->add_global_groups( array_keys( (array) $groups->getValue( $like ) ) );
+		}
+		return $cache;
+	}
+
+	/**
+	 * Puts values in Change_Log's static properties.
+	 *
+	 * @param array<string,array<mixed>> $values Values by property name; a property not given is emptied.
+	 * @return array<string,array<mixed>> The values they had.
+	 */
+	private static function swap_change_log_statics( array $values ): array {
+		$old = [];
 		foreach ( ( new \ReflectionClass( Change_Log::class ) )->getProperties( \ReflectionProperty::IS_STATIC ) as $property ) {
 			$property->setAccessible( true );
-			$saved[] = [ $property, $property->getValue() ];
-			$property->setValue( null, [] );
+			$old[ $property->getName() ] = $property->getValue();
+			$property->setValue( null, $values[ $property->getName() ] ?? [] );
 		}
-		try {
-			return $run();
-		} finally {
-			foreach ( $saved as [ $property, $value ] ) {
-				$property->setValue( null, $value );
-			}
-		}
+		return $old;
 	}
 
 	/**

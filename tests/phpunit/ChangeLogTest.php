@@ -111,9 +111,74 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( [ 2 ], $change['roots'][12]['ids'], 'The root’s own IDs are the batch’s, so its pairs survive a delete.' );
 		$this->assertSame( 'company/about', $change['roots'][12]['path'], 'The old path the pairs are rebuilt from is kept.' );
 		$this->assertSame( [ 2 => 'old' ], $change['roots'][12]['slugs'] );
+	}
+
+	public function test_a_job_s_record_holds_its_root_for_its_change_and_nothing_else(): void {
+		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 200 ], true ), [ 1 ] );
+		Change_Log::reset_request();
+		$writes = [
+			'change' => 0,
+			'record' => 0,
+		];
+		add_filter(
+			'pre_set_transient_' . Change_Log::key( $this->admin ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes['change'];
+				return $value;
+			}
+		);
+		add_filter(
+			'pre_set_transient_' . Change_Log::job_key( $this->admin, 12 ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes['record'];
+				return $value;
+			}
+		);
+
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 400 ], [ 9 ], [ 2, 3 ], [ 2 => 'old' ], true );
+
+		$this->assertSame(
+			[
+				'change' => 0,
+				'record' => 1,
+			],
+			$writes,
+			'A job writes its own record, never the change.'
+		);
+		$this->assertSame( 'hierarchy_guard_change_' . $this->admin . '_12', Change_Log::job_key( $this->admin, 12 ) );
+		$record = get_transient( Change_Log::job_key( $this->admin, 12 ) );
+		$this->assertSame( $id, $record['change'] );
+		$this->assertSame( 400, $record['counts']['moved'] );
+		$this->assertSame( [ 9 ], $record['kept_ids'] );
+		$this->assertSame( [ 2, 3 ], $record['ids'] );
+		$this->assertSame( [ 2 => 'old' ], $record['slugs'] );
+		$this->assertTrue( $record['job'] );
+		$this->assertIsInt( $record['updated'] );
+		$this->assertSame( [ 'change', 'counts', 'kept_ids', 'ids', 'slugs', 'job', 'updated' ], array_keys( $record ) );
+		$expires = (int) get_option( '_transient_timeout_' . Change_Log::job_key( $this->admin, 12 ) );
+		$this->assertEqualsWithDelta( time() + Change_Log::TTL + 5 * MINUTE_IN_SECONDS, $expires, 2, 'It outlives the change it belongs to.' );
+		$this->assertSame( 200, get_transient( Change_Log::key( $this->admin ) )['roots'][12]['counts']['moved'], 'The stored change keeps its own copy.' );
+	}
+
+	public function test_a_record_is_laid_over_only_its_own_change_s_root_with_a_job(): void {
+		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 200 ], true ), [ 1 ] );
+		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 20, [ 'moved' => 3 ] ), [ 4 ] );
+		Change_Log::reset_request();
 
 		$this->log->update( $this->admin, 'another-change', 12, [ 'moved' => 5 ], [], [], [], false );
-		$this->assertSame( 1200, $this->log->latest( $this->admin )['counts']['moved'], 'A replaced change is left alone.' );
+		$this->log->update( $this->admin, $id, 20, [ 'moved' => 7 ], [], [], [], false );
+
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( 200, $change['roots'][12]['counts']['moved'], 'A record of another change is not laid over this one.' );
+		$this->assertTrue( $change['roots'][12]['job'] );
+		$this->assertSame( 3, $change['roots'][20]['counts']['moved'], 'A root with no job has no record to read.' );
+		$this->assertSame( 203, $change['counts']['moved'] );
+
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 300 ], [], [ 5 ], [], true );
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( 300, $change['roots'][12]['counts']['moved'], 'Its own change’s record is.' );
+		$this->assertSame( 303, $change['counts']['moved'], 'The counts are summed with it.' );
+		$this->assertSame( [ 1, 4, 5 ], $change['ids'], 'The change’s IDs take the job’s.' );
 	}
 
 	public function test_ids_and_kept_ids_are_capped(): void {
@@ -245,14 +310,14 @@ final class ChangeLogTest extends WP_UnitTestCase {
 				return $value;
 			}
 		);
-		$id = $this->log->record( $this->admin, 'save', 'page', $this->entry( 12, [] ) );
+		$id = $this->log->record( $this->admin, 'save', 'page', $this->entry( 12, [], true ) );
 		$this->log->mark_shown( $this->admin, $id );
 		$this->log->update( $this->admin, $id, 12, [ 'moved' => 2 ], [], [], [], false );
 
 		Change_Log::reset_request();
 
 		$this->assertSame( 1, $writes );
-		$stored = get_transient( Change_Log::key( $this->admin ) );
+		$stored = $this->stored_change( $this->admin );
 		$this->assertTrue( $stored['shown'] );
 		$this->assertSame( 2, $stored['counts']['moved'] );
 	}
@@ -262,13 +327,20 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		Change_Log::reset_request();
 
 		$this->log->update( $this->admin, $id, 12, [ 'moved' => 400 ], [], [], [], true );
-		$this->assertSame( 400, get_transient( Change_Log::key( $this->admin ) )['counts']['moved'], 'A background batch writes its progress as it goes.' );
+		$this->assertSame( 400, $this->stored_change( $this->admin )['counts']['moved'], 'A background batch writes its progress as it goes.' );
 
 		$this->log->mark_shown( $this->admin, $id );
 		$this->assertTrue( get_transient( Change_Log::key( $this->admin ) )['shown'] );
+
+		// The change was written with the record laid over it; the record still wins.
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 600 ], [], [], [], false );
+		$stored = $this->stored_change( $this->admin );
+		$this->assertSame( 600, $stored['counts']['moved'] );
+		$this->assertFalse( $stored['roots'][12]['job'] );
+		$this->assertTrue( $stored['shown'] );
 	}
 
-	public function test_the_request_s_change_can_be_written_before_the_request_ends(): void {
+	public function test_a_run_updates_its_root_before_the_request_s_change_is_written(): void {
 		$writes = 0;
 		add_filter(
 			'pre_set_transient_' . Change_Log::key( $this->admin ),
@@ -279,32 +351,93 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		);
 		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 2 ], true ), [ 3, 4 ] );
 
-		$this->log->write_now( $this->admin );
+		// A background run finishes root 12's job while the request is still going.
+		$seen = $this->in_another_process(
+			function () use ( $id ): ?array {
+				$this->log->update( $this->admin, $id, 12, [ 'moved' => 5 ], [], [ 3, 4, 5, 6, 7 ], [], false );
+				return $this->log->latest( $this->admin );
+			}
+		);
 
-		$this->assertSame( 1, $writes );
-		$this->assertSame( $id, $this->in_another_process( fn() => $this->log->latest( $this->admin )['id'] ), 'Another process reads it now.' );
+		$this->assertNull( $seen, 'The change is not written before the request ends.' );
+		$this->assertSame( 0, $writes );
+		$this->assertSame( 5, $this->log->latest( $this->admin )['roots'][12]['counts']['moved'], 'The request lays the run’s record over its own change too.' );
 		Change_Log::reset_request();
-		$this->assertSame( 1, $writes, 'Nothing is left to write when the request ends.' );
+
+		$this->assertSame( 1, $writes, 'The request writes its change once, when it ends.' );
+		$stored = $this->stored_change( $this->admin );
+		$this->assertSame( $id, $stored['id'] );
+		$this->assertFalse( $stored['roots'][12]['job'], 'The run’s record is laid over the change it was written for.' );
+		$this->assertSame( 5, $stored['roots'][12]['counts']['moved'] );
+		$this->assertSame( 5, $stored['counts']['moved'] );
 	}
 
-	public function test_the_request_s_last_write_keeps_what_another_process_stored_since(): void {
+	public function test_the_request_s_write_never_takes_back_what_a_run_stored(): void {
 		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 2 ], true ), [ 3, 4 ] );
-		$this->log->write_now( $this->admin );
 		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 20, [ 'kept' => 1 ] ), [ 9 ] );
 
 		// A background run finishes root 12's job before the request ends.
 		$this->in_another_process( fn() => $this->log->update( $this->admin, $id, 12, [ 'moved' => 5 ], [], [ 3, 4, 5, 6, 7 ], [], false ) );
 		Change_Log::reset_request();
 
-		$stored = get_transient( Change_Log::key( $this->admin ) );
+		$stored = $this->stored_change( $this->admin );
 		$this->assertSame( $id, $stored['id'] );
-		$this->assertFalse( $stored['roots'][12]['job'], 'The run’s update survives the request’s last write.' );
+		$this->assertFalse( $stored['roots'][12]['job'], 'The run’s update survives the request’s write.' );
 		$this->assertSame( 5, $stored['roots'][12]['counts']['moved'] );
 		$this->assertSame( [ 3, 4, 5, 6, 7 ], $stored['roots'][12]['ids'] );
-		$this->assertSame( 1, $stored['roots'][20]['counts']['kept'], 'The root recorded after the first write is written.' );
+		$this->assertSame( 1, $stored['roots'][20]['counts']['kept'], 'The root the request recorded after it is written.' );
 		$this->assertSame( 5, $stored['counts']['moved'] );
 		$this->assertSame( 1, $stored['counts']['kept'] );
 		$this->assertEqualsCanonicalizing( [ 3, 4, 5, 6, 7, 9 ], $stored['ids'] );
+	}
+
+	public function test_the_records_of_800_jobs_are_read_in_at_most_two_queries(): void {
+		global $wpdb;
+		for ( $root = 1; $root <= 800; $root++ ) {
+			$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( $root, [], true ), [ $root ] );
+		}
+		for ( $root = 1; $root <= 800; $root++ ) {
+			$this->log->update( $this->admin, $id, $root, [ 'moved' => 2 ], [], [ $root ], [], false );
+		}
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$change  = $this->log->latest( $this->admin );
+		$this->assertLessThanOrEqual( 2, $wpdb->num_queries - $queries, 'The request’s own change, with 800 records laid over it.' );
+		$this->assertSame( 1600, $change['counts']['moved'] );
+		$this->assertSame( [], array_filter( array_column( $change['roots'], 'job' ) ), 'Every record was laid over its root.' );
+
+		Change_Log::reset_request();
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$change  = $this->log->latest( $this->admin );
+		$this->assertLessThanOrEqual( 3, $wpdb->num_queries - $queries, 'The stored change: two queries for the change itself, as any transient, and one for its 800 records.' );
+		$this->assertSame( 1600, $change['counts']['moved'] );
+	}
+
+	public function test_with_an_external_object_cache_the_records_are_read_from_it(): void {
+		global $wpdb;
+		$was = wp_using_ext_object_cache( true );
+		try {
+			for ( $root = 1; $root <= 3; $root++ ) {
+				$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( $root, [], true ), [ $root ] );
+			}
+			Change_Log::reset_request();
+			for ( $root = 1; $root <= 3; $root++ ) {
+				$this->log->update( $this->admin, $id, $root, [ 'moved' => $root ], [], [ $root ], [], 3 === $root );
+			}
+
+			$queries = $wpdb->num_queries;
+			$change  = $this->log->latest( $this->admin );
+
+			$this->assertSame( $queries, $wpdb->num_queries, 'Nothing is read from the database.' );
+			$this->assertSame( 6, $change['counts']['moved'] );
+			$this->assertFalse( $change['roots'][1]['job'] );
+			$this->assertTrue( $change['roots'][3]['job'] );
+		} finally {
+			// Null would leave the flag as it is.
+			wp_using_ext_object_cache( (bool) $was );
+		}
 	}
 
 	public function test_each_site_keeps_its_own_change_in_the_request(): void {

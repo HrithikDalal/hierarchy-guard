@@ -442,9 +442,9 @@ final class Trash_Handler {
 	/**
 	 * Runs the first batch of a job inline, within what is left of this
 	 * request's budget, and queues the rest. A job for a page whose batch is
-	 * running in another process is handed to that process instead. Before a
-	 * job is queued or handed over, the user's change is written: the run
-	 * that updates it reads it from storage, maybe before this request ends.
+	 * running in another process is handed to that process instead. A run may
+	 * update the job before this request ends: it writes the job's own record,
+	 * not the change this request writes once at its end (Change_Log).
 	 *
 	 * @param string              $action trash, restore or cleanup.
 	 * @param array<string,mixed> $job    Job.
@@ -455,7 +455,6 @@ final class Trash_Handler {
 		$token = $this->queue->lock( $root );
 		if ( 0 === $token ) {
 			$job['change'] = $this->summarize( $action, $job, true );
-			$this->log->write_now( (int) $job['user'] );
 			$this->queue->offer( $job );
 			$this->queue->schedule( $root );
 			$this->cli( 'cleanup' === $action ? [] : self::cli_lines( $action, $job, true ) );
@@ -479,8 +478,6 @@ final class Trash_Handler {
 			$running       = empty( $job['finished'] );
 			$job['change'] = $this->summarize( $action, $job, $running );
 			if ( $running ) {
-				// A run can start as soon as the lock is released.
-				$this->log->write_now( (int) $job['user'] );
 				$this->queue->save( $job );
 			} else {
 				$this->queue->delete( $root );
@@ -491,14 +488,15 @@ final class Trash_Handler {
 
 		// Scheduled after the unlock; an offer that arrived during the inline step needs a run too.
 		if ( $running || null !== $this->queue->offered( $root ) ) {
-			$this->log->write_now( (int) $job['user'] );
 			$this->queue->schedule( $root );
 		}
 		$this->cli( 'cleanup' === $action ? [] : self::cli_lines( $action, $job, $running ) );
 	}
 
 	/**
-	 * Closes the summaries of the job and offer this one replaces.
+	 * Closes the records of the job and offer this one replaces. It runs
+	 * under the root's lock, before the new job is saved, so nothing else
+	 * writes those records in between.
 	 *
 	 * @param int $root_id Root page.
 	 */

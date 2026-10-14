@@ -18,6 +18,8 @@ use HierarchyGuard\Trash\Operations;
  * Each run holds the root's lock and steps its job until the job is done or
  * the run's time or memory runs low, then schedules the next run. An hourly
  * watchdog restarts a job whose run died, and gives up on one after a week.
+ * A run writes its job's record in the user's change log only while it
+ * holds the lock: after each step, and when an offer replaces the job.
  */
 final class Processor {
 
@@ -155,8 +157,6 @@ final class Processor {
 
 		// Scheduled after the unlock, so the next run cannot find this one still holding it.
 		if ( null !== $job || null !== $this->queue->offered( $root_id ) ) {
-			// The next run reads the change from storage; this process may have it waiting, as a CLI process can.
-			$this->log->write_now( (int) ( $last['user'] ?? 0 ) );
 			$this->queue->schedule( $root_id );
 		}
 
@@ -200,7 +200,6 @@ final class Processor {
 
 			$touched = max( (int) ( $job['touched'] ?? 0 ), (int) ( $offer['touched'] ?? 0 ) );
 			if ( $touched < $now - self::STALE_AFTER && ! $this->queue->is_scheduled( $root_id ) ) {
-				$this->log->write_now( (int) ( $any['user'] ?? 0 ) );
 				$this->queue->schedule( $root_id );
 			}
 		}

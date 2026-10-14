@@ -16,19 +16,22 @@ use HierarchyGuard\Subtree;
  * Feeds the outcome notice and Undo. One change per request, so a bulk trash
  * of three parents is one change with three roots, and a later change
  * replaces it. A save that changed a page's URL is a change too, with the
- * page as its root. Background batches keep their root's entry current.
- * Titles, URLs and old/new pairs are never stored; they are computed when
- * shown.
+ * page as its root. Titles, URLs and old/new pairs are never stored; they
+ * are computed when shown.
  *
- * The change a request records is kept in memory and written once, at
- * shutdown, so a request of many roots writes it once, not once per root.
- * Until then latest() answers from memory. A job a background run updates
- * is queued only once the change is written, as a run in another process
- * reads only what is stored; a later write of the same change then replaces
- * only the roots the request recorded since, so it never takes back what
- * such a run stored in between. On a network each site keeps its own: a
- * request that saves on two sites, as a plugin that switches sites does,
- * records a change on each, and each is written on its own site.
+ * Each record has one writer at a time. The change a request records is
+ * kept in memory and written once, at shutdown, only by that request, so a
+ * request of many roots writes it once, not once per root; until then
+ * latest() answers from memory. A root whose subpages a background job
+ * works on gets a record of its own: the job's counts, kept IDs, IDs, slugs
+ * and whether it still runs. Only a process that holds the root's lock
+ * writes it: the job's runs, and the run or request that replaces the job,
+ * to close it. latest() lays each record over its root, so a run in another
+ * process never needs the change written and never writes it, and a
+ * request's write never takes back what a run stored. On a network each
+ * site keeps its own: a request that saves on two sites, as a plugin that
+ * switches sites does, records a change on each, and each change and job
+ * record is written on its own site.
  */
 final class Change_Log {
 
@@ -37,6 +40,17 @@ final class Change_Log {
 	public const MAX_KEPT = 20;
 
 	public const COUNT_KEYS = [ 'moved', 'trashed', 'restored', 'kept', 'denied', 'left', 'renamed' ];
+
+	/**
+	 * The fields of a root's entry a job's record holds.
+	 */
+	private const JOB_FIELDS = [
+		'counts'   => true,
+		'kept_ids' => true,
+		'ids'      => true,
+		'slugs'    => true,
+		'job'      => true,
+	];
 
 	/**
 	 * The change each user started in this request, by site ID and user ID.
@@ -53,28 +67,24 @@ final class Change_Log {
 	private static array $pending = [];
 
 	/**
-	 * The roots of each pending change recorded or updated since it was last
-	 * written, by site ID and user ID.
-	 *
-	 * @var array<int,array<int,array<int,true>>>
-	 */
-	private static array $dirty = [];
-
-	/**
-	 * The change of each user this request has written already, by site ID and user ID.
-	 *
-	 * @var array<int,array<int,string>>
-	 */
-	private static array $written = [];
-
-	/**
-	 * Transient key for a user.
+	 * Transient key for a user's change.
 	 *
 	 * @param int $user_id User ID.
 	 * @return string
 	 */
 	public static function key( int $user_id ): string {
 		return 'hierarchy_guard_change_' . $user_id;
+	}
+
+	/**
+	 * Transient key for the record a background job keeps of its root.
+	 *
+	 * @param int $user_id User whose change the job is part of.
+	 * @param int $root_id Root page.
+	 * @return string
+	 */
+	public static function job_key( int $user_id, int $root_id ): string {
+		return self::key( $user_id ) . '_' . $root_id;
 	}
 
 	/**
@@ -94,7 +104,6 @@ final class Change_Log {
 	public static function reset_request(): void {
 		self::flush();
 		self::$current = [];
-		self::$written = [];
 	}
 
 	/**
@@ -107,16 +116,6 @@ final class Change_Log {
 				self::write( (int) $site_id, (int) $user_id );
 			}
 		}
-	}
-
-	/**
-	 * Writes the user's change now, if this request has one waiting: before a
-	 * job is queued that a run in another process updates.
-	 *
-	 * @param int $user_id User ID.
-	 */
-	public function write_now( int $user_id ): void {
-		self::write( get_current_blog_id(), $user_id );
 	}
 
 	/**
@@ -163,13 +162,23 @@ final class Change_Log {
 		$root                     = (int) ( $entry['root'] ?? 0 );
 		$change['roots'][ $root ] = self::entry( $entry );
 
-		$this->store( $user_id, $change, $ids, $root );
+		$this->store( $user_id, $change, $ids );
 
 		return $change['id'];
 	}
 
 	/**
-	 * Updates one root's entry from a background batch, if the change still exists.
+	 * Writes a background job's record of its root: what the job has done so
+	 * far, for the change it was started with. It never reads or writes the
+	 * change itself; latest() lays the record over the change's entry for
+	 * that root.
+	 *
+	 * Only the job's own run writes it, while it holds the root's lock, or the
+	 * run or request that replaces the job, under the same lock. So no other
+	 * process writes the record in between, and it is written whole. The lock
+	 * and the job are the site's own, so the record is written on the job's
+	 * site. It outlives the change by five minutes, as a change can be
+	 * written up to the end of its request, after its jobs' records.
 	 *
 	 * @param int                $user_id   User whose change it is.
 	 * @param string             $change_id Change ID the job was started with.
@@ -184,40 +193,45 @@ final class Change_Log {
 		if ( $user_id <= 0 || '' === $change_id ) {
 			return;
 		}
-		$change = $this->latest( $user_id );
-		if ( null === $change || $change_id !== $change['id'] || ! isset( $change['roots'][ $root_id ] ) ) {
-			return;
-		}
-
-		$change['roots'][ $root_id ] = self::entry(
-			array_merge(
-				$change['roots'][ $root_id ],
-				[
-					'counts'   => $counts,
-					'kept_ids' => $kept_ids,
-					'ids'      => $ids,
-					'slugs'    => $slugs,
-					'job'      => $running,
-				]
-			)
+		$entry = self::entry(
+			[
+				'counts'   => $counts,
+				'kept_ids' => $kept_ids,
+				'ids'      => $ids,
+				'slugs'    => $slugs,
+				'job'      => $running,
+			]
 		);
 
-		$this->store( $user_id, $change, $ids, $root_id );
+		set_transient(
+			self::job_key( $user_id, $root_id ),
+			[
+				'change'   => $change_id,
+				'counts'   => $entry['counts'],
+				'kept_ids' => $entry['kept_ids'],
+				'ids'      => $entry['ids'],
+				'slugs'    => $entry['slugs'],
+				'job'      => $entry['job'],
+				'updated'  => time(),
+			],
+			self::TTL + 5 * MINUTE_IN_SECONDS
+		);
 	}
 
 	/**
-	 * The latest change for a user.
+	 * The latest change for a user: the one this request has waiting, or the
+	 * stored one, with each of its jobs' records laid over its root.
 	 *
 	 * @param int $user_id User ID.
 	 * @return array<string,mixed>|null
 	 */
 	public function latest( int $user_id ): ?array {
-		$site = get_current_blog_id();
-		if ( isset( self::$pending[ $site ][ $user_id ] ) ) {
-			return self::summed( self::$pending[ $site ][ $user_id ] );
+		$site   = get_current_blog_id();
+		$change = self::$pending[ $site ][ $user_id ] ?? get_transient( self::key( $user_id ) );
+		if ( ! is_array( $change ) || ! isset( $change['id'] ) ) {
+			return null;
 		}
-		$change = get_transient( self::key( $user_id ) );
-		return is_array( $change ) && isset( $change['id'] ) ? $change : null;
+		return self::summed( self::with_jobs( $user_id, $change ) );
 	}
 
 	/**
@@ -241,8 +255,7 @@ final class Change_Log {
 	 * @param int $user_id User ID.
 	 */
 	public function forget( int $user_id ): void {
-		$site = get_current_blog_id();
-		unset( self::$pending[ $site ][ $user_id ], self::$dirty[ $site ][ $user_id ], self::$written[ $site ][ $user_id ] );
+		unset( self::$pending[ get_current_blog_id() ][ $user_id ] );
 		delete_transient( self::key( $user_id ) );
 	}
 
@@ -252,20 +265,18 @@ final class Change_Log {
 	 * @param int                 $user_id User ID.
 	 * @param array<string,mixed> $change  Change.
 	 * @param int[]               $ids     IDs to add.
-	 * @param int                 $root_id The root recorded or updated.
 	 */
-	private function store( int $user_id, array $change, array $ids, int $root_id ): void {
+	private function store( int $user_id, array $change, array $ids ): void {
 		$change['ids']     = self::merged_ids( (array) $change['ids'], $ids );
 		$change['updated'] = time();
-		self::save( $user_id, $change, $root_id );
+		self::save( $user_id, $change );
 	}
 
 	/**
 	 * Saves a change: the one this request recorded waits in memory until the
-	 * request ends, or until a job is queued (write_now()), and one from an
-	 * earlier request, which a background batch or a notice updates, is
-	 * written now. Once shutdown has begun nothing would write it later, so
-	 * it is written now too.
+	 * request ends, and one from an earlier request, which a notice marks
+	 * shown, is written now. Once shutdown has begun nothing would write it
+	 * later, so it is written now too.
 	 *
 	 * set_transient() returns false both when the save fails and when nothing
 	 * changed, so its result says nothing reliable here. Nothing depends on it:
@@ -273,19 +284,15 @@ final class Change_Log {
 	 *
 	 * @param int                 $user_id User ID.
 	 * @param array<string,mixed> $change  Change.
-	 * @param int|null            $root_id The root recorded or updated, if any.
 	 */
-	private static function save( int $user_id, array $change, ?int $root_id = null ): void {
+	private static function save( int $user_id, array $change ): void {
 		$site = get_current_blog_id();
 		if ( ( self::$current[ $site ][ $user_id ] ?? '' ) !== $change['id'] ) {
-			unset( self::$pending[ $site ][ $user_id ], self::$dirty[ $site ][ $user_id ] );
+			unset( self::$pending[ $site ][ $user_id ] );
 			set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
 			return;
 		}
 		self::$pending[ $site ][ $user_id ] = $change;
-		if ( null !== $root_id ) {
-			self::$dirty[ $site ][ $user_id ][ $root_id ] = true;
-		}
 		if ( did_action( 'shutdown' ) ) {
 			self::write( $site, $user_id );
 		} elseif ( false === has_action( 'shutdown', [ self::class, 'flush' ] ) ) {
@@ -295,9 +302,7 @@ final class Change_Log {
 
 	/**
 	 * Writes the change this request has waiting for a user on a site, with
-	 * that site current. When the request wrote it before, the stored copy is
-	 * read back first and only the roots recorded or updated since replace
-	 * its own: a background run may have updated another root in between.
+	 * that site current.
 	 *
 	 * @param int $site_id Site ID.
 	 * @param int $user_id User ID.
@@ -307,50 +312,86 @@ final class Change_Log {
 			return;
 		}
 		$change = self::$pending[ $site_id ][ $user_id ];
-		$roots  = array_keys( self::$dirty[ $site_id ][ $user_id ] ?? [] );
-		unset( self::$pending[ $site_id ][ $user_id ], self::$dirty[ $site_id ][ $user_id ] );
+		unset( self::$pending[ $site_id ][ $user_id ] );
 
 		$switched = is_multisite() && get_current_blog_id() !== $site_id;
 		if ( $switched ) {
 			switch_to_blog( $site_id );
 		}
 		try {
-			if ( ( self::$written[ $site_id ][ $user_id ] ?? '' ) === $change['id'] ) {
-				$change = self::merged( $change, $roots, get_transient( self::key( $user_id ) ) );
-			}
 			set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
 		} finally {
 			if ( $switched ) {
 				restore_current_blog();
 			}
 		}
-		self::$written[ $site_id ][ $user_id ] = (string) $change['id'];
 	}
 
 	/**
-	 * The stored copy of a change with this request's newer roots laid over
-	 * it. When the stored change is gone or another one replaced it, this
-	 * request's copy is written whole, as before.
+	 * The change with each of its jobs' records laid over its root. Only a
+	 * root whose entry says a job was queued has a record to read, and a
+	 * record counts only for the change it was written for. A record always
+	 * wins over the change's own copy of its root, so a change written with
+	 * what an earlier read laid over it is harmless.
 	 *
-	 * @param array<string,mixed> $change The request's copy.
-	 * @param int[]               $roots  Roots it recorded or updated since it last wrote the change.
-	 * @param mixed               $stored What the transient holds now.
+	 * @param int                 $user_id User ID.
+	 * @param array<string,mixed> $change  Change.
 	 * @return array<string,mixed>
 	 */
-	private static function merged( array $change, array $roots, $stored ): array {
-		if ( ! is_array( $stored ) || ( $stored['id'] ?? '' ) !== $change['id'] ) {
-			return $change;
-		}
-		foreach ( $roots as $root_id ) {
-			if ( isset( $change['roots'][ $root_id ] ) ) {
-				$stored['roots'][ $root_id ] = $change['roots'][ $root_id ];
+	private static function with_jobs( int $user_id, array $change ): array {
+		$roots = [];
+		foreach ( (array) $change['roots'] as $root_id => $root ) {
+			if ( ! empty( $root['job'] ) ) {
+				$roots[] = (int) $root_id;
 			}
 		}
-		$stored['ids']     = self::merged_ids( (array) ( $stored['ids'] ?? [] ), (array) $change['ids'] );
-		$stored['updated'] = max( (int) ( $stored['updated'] ?? 0 ), (int) $change['updated'] );
-		$stored['shown']   = ! empty( $stored['shown'] ) || ! empty( $change['shown'] );
+		if ( [] === $roots ) {
+			return $change;
+		}
 
-		return $stored;
+		$ids = [];
+		foreach ( self::records( $user_id, $roots ) as $root_id => $record ) {
+			if ( ! is_array( $record ) || ( $record['change'] ?? '' ) !== $change['id'] ) {
+				continue;
+			}
+			$change['roots'][ $root_id ] = self::entry( array_merge( $change['roots'][ $root_id ], array_intersect_key( $record, self::JOB_FIELDS ) ) );
+			$change['updated']           = max( (int) ( $change['updated'] ?? 0 ), (int) ( $record['updated'] ?? 0 ) );
+			$ids[]                       = $change['roots'][ $root_id ]['ids'];
+		}
+		if ( [] !== $ids ) {
+			$change['ids'] = self::merged_ids( (array) ( $change['ids'] ?? [] ), array_merge( ...$ids ) );
+		}
+
+		return $change;
+	}
+
+	/**
+	 * The job records of a user's roots, in one read: from an external object
+	 * cache when the site has one, else in one query for all their option rows.
+	 *
+	 * @param int   $user_id User ID.
+	 * @param int[] $roots   Root pages.
+	 * @return array<int,mixed> What each root's transient holds, false when it has none.
+	 */
+	private static function records( int $user_id, array $roots ): array {
+		$keys = [];
+		foreach ( $roots as $root_id ) {
+			$keys[ $root_id ] = self::job_key( $user_id, $root_id );
+		}
+
+		if ( wp_using_ext_object_cache() ) {
+			$found = wp_cache_get_multiple( array_values( $keys ), 'transient' );
+			return array_map( static fn( string $key ) => $found[ $key ] ?? false, $keys );
+		}
+
+		$names = [];
+		foreach ( $keys as $key ) {
+			$names[] = '_transient_' . $key;
+			$names[] = '_transient_timeout_' . $key;
+		}
+		// get_transient() then finds each row, or its absence, in the cache.
+		wp_prime_option_caches( $names );
+		return array_map( 'get_transient', $keys );
 	}
 
 	/**

@@ -9,10 +9,12 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Admin\Notices;
 use HierarchyGuard\Batch\Processor;
 use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
@@ -120,6 +122,41 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 	 */
 	private function change(): array {
 		return (array) $this->log->latest( $this->admin );
+	}
+
+	/**
+	 * Adds a top-level page that keeps its subpages where they are when it is trashed.
+	 *
+	 * @param string   $slug     Slug.
+	 * @param string[] $subpages Its subpages' slugs.
+	 * @return int Page ID.
+	 */
+	private function keep_policy_page( string $slug, array $subpages ): int {
+		$id = $this->page( $slug );
+		foreach ( $subpages as $subpage ) {
+			$this->page( $subpage, $id );
+		}
+		add_filter(
+			'hierarchy_guard_trash_policy',
+			static fn( string $policy, \WP_Post $post ): string => $id === $post->ID ? Settings::POLICY_KEEP : $policy,
+			10,
+			2
+		);
+		return $id;
+	}
+
+	/**
+	 * How many old URLs the user's stored change lists, as a later request reads it.
+	 *
+	 * @return int
+	 */
+	private function stored_pair_count(): int {
+		return $this->in_another_process(
+			function (): int {
+				$pairs = new Pairs();
+				return count( $pairs->page( $pairs->collect_change( (array) ( new Change_Log() )->latest( $this->admin ) ), 1, 1000 )['pairs'] );
+			}
+		);
 	}
 
 	/**
@@ -427,26 +464,20 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		);
 		Change_Log::reset_request();
 
-		$this->assertSame( 'trash', $seen, 'The run finds the trash’s change stored, not the one before it.' );
+		$this->assertSame( 'save', $seen, 'The trash’s change is written once, when its request ends; the run does not need it.' );
 		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'Precondition: the run finished the job.' );
-		$root = $this->change()['roots'][ $this->ids['about'] ];
+		$change = $this->stored_change( $this->admin );
+		$root   = $change['roots'][ $this->ids['about'] ];
 		$this->assertFalse( $root['job'], 'Nothing is still moving.' );
 		$this->assertSame( 5, $root['counts']['moved'] );
-		$this->assertSame( 5, $this->change()['counts']['moved'] );
+		$this->assertSame( 5, $change['counts']['moved'] );
 		$this->assertEqualsCanonicalizing( [ $this->ids['team'], $this->ids['history'], $this->ids['a'], $this->ids['b'], $this->ids['c'] ], $root['ids'], 'Every page the run moved stays listable after a delete for good.' );
 	}
 
 	public function test_the_end_of_the_trash_request_keeps_what_a_background_run_did_since(): void {
 		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
 		$this->more_subpages( [ 'a', 'b', 'c' ] );
-		$services = $this->page( 'services' );
-		$this->page( 'design', $services );
-		add_filter(
-			'hierarchy_guard_trash_policy',
-			static fn( string $policy, \WP_Post $post ): string => $services === $post->ID ? Settings::POLICY_KEEP : $policy,
-			10,
-			2
-		);
+		$services = $this->keep_policy_page( 'services', [ 'design' ] );
 
 		// A bulk trash: about's job is queued, then services is recorded...
 		$this->core_bulk( 'trash', [ $this->ids['about'], $services ] );
@@ -454,7 +485,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->in_another_process( fn() => $this->processor()->run( $this->ids['about'] ) );
 		Change_Log::reset_request();
 
-		$change = $this->change();
+		$change = $this->stored_change( $this->admin );
 		$root   = $change['roots'][ $this->ids['about'] ];
 		$this->assertFalse( $root['job'], 'The request’s own write does not take back what the run stored.' );
 		$this->assertSame( 5, $root['counts']['moved'] );
@@ -483,11 +514,178 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		);
 		Change_Log::reset_request();
 
-		$change = $this->change();
+		$change = $this->stored_change( $this->admin );
 		$this->assertSame( 'restore', $change['action'] );
 		$root = $change['roots'][ $this->ids['about'] ];
 		$this->assertFalse( $root['job'], 'The run found the restore’s change and closed it.' );
 		$this->assertSame( 1, $root['counts']['moved'], 'The one subpage the trash moved came back.' );
+	}
+
+	public function test_a_run_that_finishes_before_a_bulk_trash_ends_keeps_its_root_after_a_later_one(): void {
+		// About's job is queued, services is recorded after it, and about's run finishes in another process before the request ends.
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$this->more_subpages( [ 'a', 'b', 'c' ] );
+		$services = $this->keep_policy_page( 'services', [ 'design' ] );
+
+		$this->core_bulk( 'trash', [ $this->ids['about'], $services ] );
+		$this->in_another_process( fn() => $this->processor()->run( $this->ids['about'] ) );
+		Change_Log::reset_request();
+
+		$change = $this->stored_change( $this->admin );
+		$about  = $change['roots'][ $this->ids['about'] ];
+		$this->assertFalse( $about['job'] );
+		$this->assertSame( 5, $about['counts']['moved'] );
+		$this->assertCount( 5, $about['ids'] );
+		$this->assertSame( 1, $change['roots'][ $services ]['counts']['kept'] );
+		$this->assertSame( [ '5 subpages moved up one level.', '1 subpage stayed where it is.' ], Notices::sentences( $change ), 'Nothing says pages are still moving.' );
+		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'No job is left that could correct it later.' );
+		$this->assertSame( 6, $this->stored_pair_count() );
+		$this->in_another_process( fn() => wp_delete_post( $this->ids['about'], true ) );
+		$this->assertSame( 7, $this->stored_pair_count(), 'Every page the run moved is still listed after about is deleted for good.' );
+	}
+
+	public function test_a_run_that_finishes_between_two_job_roots_of_a_bulk_trash_keeps_its_root(): void {
+		// About's run finishes in another process while the request trashes careers, which queues a job too.
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$this->more_subpages( [ 'a', 'b', 'c' ] );
+		$careers = $this->page( 'careers' );
+		foreach ( [ 'x', 'y', 'z', 'w' ] as $slug ) {
+			$this->page( $slug, $careers );
+		}
+		$about = $this->ids['about'];
+		$ran   = false;
+		add_action(
+			'wp_trash_post',
+			function ( $post_id ) use ( $careers, $about, &$ran ): void {
+				if ( $careers === (int) $post_id && ! $ran ) {
+					$ran = true;
+					$this->in_another_process( fn() => $this->processor()->run( $about ) );
+				}
+			},
+			1
+		);
+
+		$this->core_bulk( 'trash', [ $about, $careers ] );
+		$this->assertTrue( $ran, 'Precondition: about’s run finished before careers was trashed.' );
+		$this->assertNotNull( $this->queue->load( $careers ), 'Precondition: careers queued a job too.' );
+		$this->in_another_process( fn() => $this->processor()->run( $careers ) );
+		Change_Log::reset_request();
+
+		$change = $this->stored_change( $this->admin );
+		$this->assertFalse( $change['roots'][ $about ]['job'] );
+		$this->assertSame( 5, $change['roots'][ $about ]['counts']['moved'] );
+		$this->assertCount( 5, $change['roots'][ $about ]['ids'] );
+		$this->assertFalse( $change['roots'][ $careers ]['job'] );
+		$this->assertSame( 4, $change['roots'][ $careers ]['counts']['moved'] );
+		$this->assertSame( [ '9 subpages moved up one level.' ], Notices::sentences( $change ) );
+		$this->assertSame( 10, $this->stored_pair_count() );
+		$this->in_another_process( fn() => wp_delete_post( $about, true ) );
+		$this->assertSame( 11, $this->stored_pair_count(), 'Every page about’s run moved is still listed after it is deleted for good.' );
+	}
+
+	public function test_a_cron_process_that_runs_two_jobs_keeps_a_root_the_request_wrote_in_between(): void {
+		// One cron process, keeping its cache across its runs, finishes about's job, the request ends, then the same process runs careers' job.
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$this->more_subpages( [ 'a', 'b', 'c' ] );
+		$careers = $this->page( 'careers' );
+		foreach ( [ 'x', 'y', 'z', 'w' ] as $slug ) {
+			$this->page( $slug, $careers );
+		}
+		$services = $this->keep_policy_page( 'services', [ 'design' ] );
+		$cron     = $this->another_process();
+
+		$this->core_bulk( 'trash', [ $this->ids['about'], $careers, $services ] );
+		$cron( fn() => $this->processor()->run( $this->ids['about'] ) );
+		Change_Log::reset_request();
+		$cron( fn() => $this->processor()->run( $careers ) );
+
+		$change = $this->stored_change( $this->admin );
+		$this->assertFalse( $change['roots'][ $this->ids['about'] ]['job'] );
+		$this->assertSame( 5, $change['roots'][ $this->ids['about'] ]['counts']['moved'] );
+		$this->assertFalse( $change['roots'][ $careers ]['job'] );
+		$this->assertSame( 4, $change['roots'][ $careers ]['counts']['moved'] );
+		$this->assertArrayHasKey( $services, $change['roots'], 'The cron process’s second run does not drop the root the request wrote.' );
+		$this->assertSame( 1, $change['roots'][ $services ]['counts']['kept'] );
+		$this->assertSame( [ '9 subpages moved up one level.', '1 subpage stayed where it is.' ], Notices::sentences( $change ) );
+	}
+
+	public function test_a_bulk_trash_of_999_parents_past_the_budget_writes_its_change_once(): void {
+		$parents = [];
+		for ( $i = 0; $i < 999; $i++ ) {
+			$parent    = $this->page( 'p' . $i );
+			$parents[] = $parent;
+			$this->page( 'c' . $i, $parent );
+		}
+		$writes = 0;
+		add_filter(
+			'pre_set_transient_' . Change_Log::key( $this->admin ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes;
+				return $value;
+			}
+		);
+
+		$this->core_bulk( 'trash', $parents );
+
+		$this->assertSame( 0, $writes, 'Nothing is written while the request trashes.' );
+		$this->assertGreaterThanOrEqual( 999 - Operations::DEFAULT_THRESHOLD, count( $this->queue->roots( 1000 ) ), 'Precondition: past the budget, every later parent queues a job.' );
+		Change_Log::reset_request();
+		$this->assertSame( 1, $writes, 'The change is written once, when the request ends.' );
+		$change = $this->stored_change( $this->admin );
+		$this->assertCount( 999, $change['roots'] );
+		$this->assertSame( Operations::DEFAULT_THRESHOLD, $change['counts']['moved'] );
+	}
+
+	public function test_a_job_on_another_site_keeps_its_record_on_that_site(): void {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Run with WP_MULTISITE=1.' );
+		}
+		grant_super_admin( $this->admin );
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$site = self::factory()->blog->create();
+		switch_to_blog( $site );
+		update_option( 'permalink_structure', '/%postname%/' );
+		$parent = $this->page( 'parent-b' );
+		foreach ( [ 'a', 'b', 'c', 'd' ] as $slug ) {
+			$this->page( $slug, $parent );
+		}
+		restore_current_blog();
+		Change_Log::reset_request();
+		$this->handler()->reset_request_budget();
+
+		// One request: a trash on site B that queues a job, then a save on the main site.
+		switch_to_blog( $site );
+		wp_trash_post( $parent );
+		$queued = null !== ( new Queue() )->load( $parent );
+		restore_current_blog();
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-2',
+			]
+		);
+		Change_Log::reset_request();
+		$this->assertTrue( $queued, 'Precondition: the trash queued a job on site B.' );
+
+		// Site B's cron finishes the job.
+		$run    = static fn() => ( new Processor( new Queue(), new Operations( new Ledger(), new Mover() ), new Change_Log() ) )->run( $parent );
+		$record = fn() => get_transient( Change_Log::job_key( $this->admin, $parent ) );
+		switch_to_blog( $site );
+		$this->in_another_process( $run );
+		$on_site = $this->in_another_process( $record );
+		$other   = $this->stored_change( $this->admin );
+		restore_current_blog();
+		$on_main = $this->in_another_process( $record );
+		$main    = $this->stored_change( $this->admin );
+
+		$this->assertIsArray( $on_site, 'The job’s record is on its own site.' );
+		$this->assertFalse( $on_main, 'The main site has none.' );
+		$this->assertSame( $other['id'], $on_site['change'] );
+		$this->assertSame( 'trash', $other['action'] );
+		$this->assertFalse( $other['roots'][ $parent ]['job'], 'Site B’s change has its job’s record laid over it.' );
+		$this->assertSame( 4, $other['roots'][ $parent ]['counts']['moved'] );
+		$this->assertSame( 'save', $main['action'] );
+		$this->assertSame( [ $this->ids['about'] ], array_keys( $main['roots'] ), 'The main site’s change has its own save only.' );
 	}
 
 	public function test_bulk_trash_and_undo_of_a_parent_and_its_subpage_round_trip(): void {
