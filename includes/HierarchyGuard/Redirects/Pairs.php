@@ -38,9 +38,8 @@ final class Pairs {
 	/**
 	 * Every pair of a change: one block per page a save moved or renamed, or
 	 * per root of a trash whose subpages moved up, while it is in the trash.
-	 * A root deleted for good lists nothing, so the list lacks its pairs and
-	 * says it is incomplete; when no such root is left in the trash, the list
-	 * is gone.
+	 * Once one of those pages is deleted for good, the list is gone, with no
+	 * pairs.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
 	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool,gone:bool}
@@ -49,11 +48,10 @@ final class Pairs {
 		return $this->cached(
 			'change:' . (string) ( $change['id'] ?? '' ) . ':' . (int) ( $change['updated'] ?? 0 ),
 			function () use ( $change ): array {
-				$deleted             = 0;
-				$blocks              = Pairs_Blocks::change_blocks( $change, $deleted );
-				$collected           = $this->collect( $blocks, (string) ( $change['post_type'] ?? 'page' ) );
-				$collected['capped'] = $collected['capped'] || $deleted > 0;
-				$collected['gone']   = $deleted > 0 && [] === $blocks;
+				$gone              = false;
+				$blocks            = Pairs_Blocks::change_blocks( $change, $gone );
+				$collected         = $this->collect( $blocks, (string) ( $change['post_type'] ?? 'page' ) );
+				$collected['gone'] = $gone;
 				return $collected;
 			}
 		);

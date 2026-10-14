@@ -19,24 +19,25 @@ use WP_Post;
  * The block sources: one per page a save moved or renamed, one per root of a
  * trash change that is still in the trash. A block names its old path, its
  * head, the page its new URLs start under, and the first-level pages its walk
- * starts from.
+ * starts from. Once a page a change lists redirects for is deleted for good,
+ * the change has no blocks: its list is gone.
  */
 final class Pairs_Blocks {
 
 	/**
 	 * The blocks for a change: a save's, a trash's, or none for a restore.
 	 *
-	 * @param array<string,mixed> $change  A change from Change_Log.
-	 * @param int                 $deleted Set to how many of a trash's roots were deleted for good; they have no block.
+	 * @param array<string,mixed> $change A change from Change_Log.
+	 * @param bool                $gone   Set to whether a page the change lists redirects for was deleted for good; then there are no blocks.
 	 * @return array<int,array<string,mixed>> Blocks.
 	 */
-	public static function change_blocks( array $change, int &$deleted = 0 ): array {
-		$deleted = 0;
+	public static function change_blocks( array $change, bool &$gone = false ): array {
+		$gone = false;
 		switch ( $change['action'] ?? '' ) {
 			case 'save':
-				return self::save_blocks( $change );
+				return self::save_blocks( $change, $gone );
 			case 'trash':
-				return self::trash_blocks( $change, $deleted );
+				return self::trash_blocks( $change, $gone );
 		}
 		return [];
 	}
@@ -45,13 +46,14 @@ final class Pairs_Blocks {
 	 * The blocks for a save: each page it saved, at the path it had right
 	 * before the save, leads to the page, and its subtree is walked as it is
 	 * now, at current slugs. That is exact while the change is fresh; the
-	 * check against the server drops whatever it no longer serves. A page
-	 * deleted since has no block.
+	 * check against the server drops whatever it no longer serves. Once a
+	 * page it saved is deleted for good, the list is gone.
 	 *
 	 * @param array<string,mixed> $change A save change from Change_Log.
+	 * @param bool                $gone   Set when a page it saved was deleted for good.
 	 * @return array<int,array<string,mixed>> Blocks.
 	 */
-	private static function save_blocks( array $change ): array {
+	private static function save_blocks( array $change, bool &$gone ): array {
 		$ids = array_map( 'intval', array_keys( (array) $change['roots'] ) );
 		Batch_Resolver::prime_with_ancestors( $ids );
 
@@ -59,8 +61,12 @@ final class Pairs_Blocks {
 		foreach ( (array) $change['roots'] as $root ) {
 			$id   = (int) $root['root'];
 			$post = get_post( $id );
-			if ( ! $post instanceof WP_Post || '' === (string) ( $root['path'] ?? '' ) ) {
+			if ( '' === (string) ( $root['path'] ?? '' ) ) {
 				continue;
+			}
+			if ( ! $post instanceof WP_Post ) {
+				$gone = true;
+				return [];
 			}
 			$blocks[] = [
 				'old'      => Paths::normalize( (string) $root['path'] ),
@@ -78,21 +84,23 @@ final class Pairs_Blocks {
 
 	/**
 	 * The blocks for a trash change, one per root still in the trash. A root
-	 * restored since has no block, because its URLs work again, and neither
-	 * has a root deleted for good: its moved markers, which kept its subpages'
-	 * slugs from before the move, went with it. While a root is in the trash
-	 * its old path leads nowhere and its first-level pages are the subpages its
-	 * moved markers name, at their original slugs, each with its subpages below
-	 * it at their current slugs. When a later root of the same bulk action took
-	 * the page they moved under to the trash, or it was deleted since, and the
-	 * subpages moved up again, they sit under the nearest page above it that is
-	 * neither: that is where their new URLs start.
+	 * restored since has no block, because its URLs work again. Once a root
+	 * whose subpages moved up is deleted for good, the list is gone: its
+	 * moved markers, which kept its subpages' slugs from before the move,
+	 * went with it. A root deleted for good that moved nothing had nothing to
+	 * list. While a root is in the trash its old path leads nowhere and its
+	 * first-level pages are the subpages its moved markers name, at their
+	 * original slugs, each with its subpages below it at their current slugs.
+	 * When a later root of the same bulk action took the page they moved
+	 * under to the trash, or it was deleted since, and the subpages moved up
+	 * again, they sit under the nearest page above it that is neither: that
+	 * is where their new URLs start.
 	 *
-	 * @param array<string,mixed> $change  A trash change from Change_Log.
-	 * @param int                 $deleted Set to how many roots whose subpages moved up were deleted for good.
+	 * @param array<string,mixed> $change A trash change from Change_Log.
+	 * @param bool                $gone   Set when a root whose subpages moved up was deleted for good.
 	 * @return array<int,array<string,mixed>> Blocks.
 	 */
-	private static function trash_blocks( array $change, int &$deleted ): array {
+	private static function trash_blocks( array $change, bool &$gone ): array {
 		$type  = (string) $change['post_type'];
 		$all   = [];
 		$roots = [];
@@ -108,9 +116,14 @@ final class Pairs_Blocks {
 
 		// Every root's status, in one query: a root missing here was deleted for good.
 		$statuses = self::statuses( array_keys( $all ) );
-		$deleted  = count( array_diff_key( $roots, $statuses ) );
-		$roots    = array_filter( array_intersect_key( $roots, $statuses ), static fn( int $root_id ): bool => 'trash' === $statuses[ $root_id ], ARRAY_FILTER_USE_KEY );
-		$moved    = self::moved_children( array_keys( $roots ), $type );
+		foreach ( $roots as $root_id => $root ) {
+			if ( ! isset( $statuses[ $root_id ] ) && (int) ( $root['counts']['moved'] ?? 0 ) > 0 ) {
+				$gone = true;
+				return [];
+			}
+		}
+		$roots = array_filter( $roots, static fn( int $root_id ): bool => 'trash' === ( $statuses[ $root_id ] ?? '' ), ARRAY_FILTER_USE_KEY );
+		$moved = self::moved_children( array_keys( $roots ), $type );
 
 		$blocks  = [];
 		$targets = [];

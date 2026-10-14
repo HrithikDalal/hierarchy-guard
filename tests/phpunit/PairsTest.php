@@ -167,11 +167,12 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertTrue( $collected['gone'], 'Its moved markers went with it, so there is no list.' );
 		$this->assertSame( [], $collected['pairs'] );
 		$this->assertSame( [], $collected['unresolved'] );
+		$this->assertFalse( $collected['capped'] );
 		$this->assertNull( ( new Notices( $this->log, new Queue(), new Pairs(), new Providers() ) )->urls_notice( $change ), 'No notice offers it.' );
 		$this->assertSame( $this->ids['team'], ( new Resolver( new Ledger() ) )->resolve( 'page', 'company/about/team' )->ID, 'The built-in redirects still serve the old URLs.' );
 	}
 
-	public function test_once_some_roots_are_deleted_for_good_the_others_are_listed_as_incomplete(): void {
+	public function test_one_parent_deleted_for_good_among_others_in_the_trash_makes_the_list_gone(): void {
 		$sibling = $this->page( 'careers', $this->ids['company'] );
 		$this->page( 'jobs', $sibling );
 		// One request, one change with two roots.
@@ -195,11 +196,85 @@ final class PairsTest extends WP_UnitTestCase {
 		wp_delete_post( $this->ids['about'], true );
 		$collected = $this->pairs->collect_change( $change );
 
-		$this->assertSame( [ '/company/careers/jobs/ -> /company/jobs/' ], $this->lines( $collected ), 'About lists nothing once it is deleted for good.' );
-		$this->assertTrue( $collected['capped'], 'The list says it is incomplete.' );
-		$this->assertFalse( $collected['gone'] );
-		$this->assertSame( [ '/company/careers/' ], array_column( $this->pairs->page( $collected, 1, 100 )['unresolved'], 'old' ) );
+		$this->assertTrue( $collected['gone'], 'About had redirects to list, and they are gone with it.' );
+		$this->assertSame( [], $collected['pairs'], 'Careers, still in the Trash, lists nothing either.' );
+		$this->assertSame( [], $collected['unresolved'] );
+		$this->assertFalse( $collected['capped'] );
+		$this->assertNull( ( new Notices( $this->log, new Queue(), new Pairs(), new Providers() ) )->urls_notice( $change ), 'No notice offers it.' );
+		$this->assertSame( $this->ids['team'], ( new Resolver( new Ledger() ) )->resolve( 'page', 'company/about/team' )->ID, 'The built-in redirects still serve the old URLs.' );
+	}
+
+	public function test_a_parent_deleted_for_good_beside_one_restored_makes_the_list_gone(): void {
+		$sibling = $this->page( 'careers', $this->ids['company'] );
+		$this->page( 'jobs', $sibling );
+		wp_trash_post( $this->ids['about'] );
+		wp_trash_post( $sibling );
+		$change = $this->log->latest( $this->admin );
+
+		Change_Log::reset_request();
+		wp_untrash_post( $sibling );
+		Change_Log::reset_request();
+		wp_delete_post( $this->ids['about'], true );
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertTrue( $collected['gone'] );
+		$this->assertSame( [], $collected['pairs'] );
+		$this->assertFalse( $collected['capped'] );
+	}
+
+	public function test_a_parent_deleted_for_good_that_moved_nothing_leaves_the_others_listed(): void {
+		// Parent first, in one bulk action: p's job skips its only child c, which the same action trashes next, so it moves nothing.
+		$p   = $this->page( 'p', $this->ids['company'] );
+		$c   = $this->page( 'c', $p );
+		$ids = [ $this->ids['about'], $p, $c ];
+		$this->start_core_bulk( 'trash', $ids );
+		foreach ( $ids as $id ) {
+			wp_trash_post( $id );
+		}
+		$this->end_core_bulk();
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( Settings::POLICY_REPARENT, $change['roots'][ $p ]['policy'], 'Precondition.' );
+		$this->assertSame( 'company/p', $change['roots'][ $p ]['path'], 'Precondition.' );
+		$this->assertSame( 0, $change['roots'][ $p ]['counts']['moved'], 'Precondition: p moved nothing.' );
+		$before = $this->pairs->collect_change( $change );
+
+		wp_delete_post( $p, true );
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertFalse( $collected['gone'], 'P had no redirect to list.' );
+		$this->assertFalse( $collected['capped'], 'The list is complete.' );
+		$this->assertSame(
+			[
+				'/company/about/history/ -> /company/history/',
+				'/company/about/team/ -> /company/team/',
+				'/company/about/team/leadership/ -> /company/team/leadership/',
+			],
+			$this->lines( $collected )
+		);
+		$this->assertSame( $this->lines( $before ), $this->lines( $collected ), 'The same list as before the delete.' );
 		$this->assert_the_resolver_agrees( $collected );
+	}
+
+	public function test_once_the_page_a_save_moved_is_deleted_for_good_the_list_is_gone(): void {
+		$careers = $this->page( 'careers', $this->ids['company'] );
+		$this->page( 'jobs', $careers );
+		$change = $this->rename( $careers, 'join-us' );
+		$this->assertSame( [ '/company/careers/ -> /company/join-us/', '/company/careers/jobs/ -> /company/join-us/jobs/' ], $this->lines( $this->pairs->collect_change( $change ) ), 'Precondition.' );
+
+		// Another admin trashes it, which records no change for this one, then deletes it for good.
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		Change_Log::reset_request();
+		wp_trash_post( $careers );
+		Change_Log::reset_request();
+		wp_delete_post( $careers, true );
+		wp_set_current_user( $this->admin );
+		$this->assertSame( $change['id'], $this->log->latest( $this->admin )['id'], 'Precondition: the save is still the admin\'s latest change.' );
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertTrue( $collected['gone'] );
+		$this->assertSame( [], $collected['pairs'] );
+		$this->assertFalse( $collected['capped'] );
 	}
 
 	public function test_a_restored_page_needs_no_redirects(): void {
@@ -276,9 +351,8 @@ final class PairsTest extends WP_UnitTestCase {
 
 			wp_delete_post( $a, true );
 			$collected = $this->pairs->collect_change( $change );
-			$this->assertNotContains( '/company/b/a/kid/ -> /company/kid/', $this->lines( $collected ), $order . ': the child lists nothing once it is deleted for good.' );
-			$this->assertTrue( $collected['capped'], $order . ': the list says it is incomplete.' );
-			$this->assert_the_resolver_agrees( $collected );
+			$this->assertTrue( $collected['gone'], $order . ': a moved its kid up, so once it is deleted for good the list is gone.' );
+			$this->assertSame( [], $collected['pairs'], $order );
 
 			foreach ( [ $kid, $b ] as $id ) {
 				wp_delete_post( $id, true );
@@ -412,8 +486,11 @@ final class PairsTest extends WP_UnitTestCase {
 
 	/**
 	 * Queries a cold collect costs for a chain of nested roots, trashed child
-	 * first in one bulk action and then all but the first deleted for good:
-	 * the first one's subpage moved up through all of them.
+	 * first in one bulk action and then all but the first deleted for good.
+	 * The first one moved its subpage up under the next, and every root above
+	 * it kept its subpages, so none of the deleted ones had a redirect to
+	 * list; as each was deleted, core moved the subpage up again, through
+	 * all of them.
 	 *
 	 * @param string $prefix Slug prefix.
 	 * @param int    $length How many roots.
@@ -428,14 +505,23 @@ final class PairsTest extends WP_UnitTestCase {
 			$chain[] = $parent;
 		}
 		$kid = $this->page( $prefix . '-kid', $parent );
-		$ids = array_reverse( $chain );
+		// A subpage of its own under each root above the first, so each is a root of the trash too.
+		foreach ( array_slice( $chain, 0, -1 ) as $id ) {
+			$this->page( $prefix . '-leaf-' . $id, $id );
+		}
+		$ids    = array_reverse( $chain );
+		$keep   = array_slice( $ids, 1 );
+		$policy = static fn( string $policy, \WP_Post $post ): string => in_array( $post->ID, $keep, true ) ? Settings::POLICY_KEEP : $policy;
+		add_filter( 'hierarchy_guard_trash_policy', $policy, 10, 2 );
 		$this->start_core_bulk( 'trash', $ids );
 		foreach ( $ids as $id ) {
 			wp_trash_post( $id );
 		}
 		$this->end_core_bulk();
+		remove_filter( 'hierarchy_guard_trash_policy', $policy, 10 );
 		$change = $this->log->latest( $this->admin );
-		foreach ( array_slice( $ids, 1 ) as $id ) {
+		$this->assertCount( $length, $change['roots'], 'Precondition: every page of the chain is a root.' );
+		foreach ( $keep as $id ) {
 			wp_delete_post( $id, true );
 		}
 		wp_cache_flush();
@@ -443,8 +529,11 @@ final class PairsTest extends WP_UnitTestCase {
 		$queries   = get_num_queries();
 		$collected = $this->pairs->collect_change( $change );
 		$cost      = get_num_queries() - $queries;
+		$old       = '/company/' . implode( '/', array_map( static fn( int $i ): string => $prefix . '-' . $i, range( 1, $length ) ) ) . '/' . $prefix . '-kid/';
+		$this->assertSame( [ $old . ' -> /company/' . $prefix . '-kid/' ], $this->lines( $collected ) );
 		$this->assertSame( [ $kid ], array_column( $collected['pairs'], 'id' ) );
-		$this->assertTrue( $collected['capped'] );
+		$this->assertFalse( $collected['gone'], 'No root deleted for good had a redirect to list.' );
+		$this->assertFalse( $collected['capped'] );
 		$this->assert_the_resolver_agrees( $collected );
 		return $cost;
 	}
@@ -595,7 +684,9 @@ final class PairsTest extends WP_UnitTestCase {
 		);
 
 		wp_delete_post( $this->ids['about'], true );
-		$this->assertSame( [], Pairs_Blocks::change_blocks( $change ), 'A page deleted since has no URL to list.' );
+		$gone = false;
+		$this->assertSame( [], Pairs_Blocks::change_blocks( $change, $gone ), 'A page deleted since has no URL to list.' );
+		$this->assertTrue( $gone, 'The list is gone with it.' );
 	}
 
 	public function test_a_rename_lists_the_page_and_its_subpages_at_the_urls_they_had(): void {

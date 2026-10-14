@@ -142,7 +142,9 @@ final class Changes_Controller {
 	 * The pairs of the current user's change with this ID. When the change is
 	 * gone, the message says a later change replaced it only when the user
 	 * has one; a change that expired, or that the cache dropped, has nothing
-	 * newer. A trash whose pages are all deleted for good lists nothing.
+	 * newer. Its list is gone too once a page it lists redirects for is
+	 * deleted for good: the page a save moved or renamed, or a trashed parent
+	 * whose subpages moved up.
 	 *
 	 * @param string $change_id Change ID.
 	 * @return array<string,mixed>|WP_Error
@@ -162,7 +164,8 @@ final class Changes_Controller {
 
 		$collected = $this->pairs->collect_change( $change );
 		if ( ! empty( $collected['gone'] ) ) {
-			return self::gone( __( 'The pages were deleted for good.', 'hierarchy-guard' ) );
+			/* translators: Follows "These redirects are no longer available."; "they" are those redirects. */
+			return self::gone( __( 'A page they belong to was deleted for good.', 'hierarchy-guard' ) );
 		}
 		return $collected;
 	}

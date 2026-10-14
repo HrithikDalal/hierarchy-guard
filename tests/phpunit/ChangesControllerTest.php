@@ -78,20 +78,30 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$this->assertFalse( $data['capped'], 'While the page is in the Trash, the list is complete.' );
 	}
 
-	public function test_a_trash_whose_pages_were_all_deleted_for_good_is_gone(): void {
-		Change_Log::reset_request();
-		wp_delete_post( $this->ids['about'], true );
-
+	/**
+	 * Asserts that the pairs and CSV routes of a change say a page its
+	 * redirects belong to was deleted for good.
+	 *
+	 * @param string $change_id Change ID.
+	 */
+	private function assert_deleted_for_good( string $change_id ): void {
 		foreach ( [ 'pairs', 'csv' ] as $route ) {
-			$response = $this->get( '/changes/' . $this->change_id . '/' . $route );
+			$response = $this->get( '/changes/' . $change_id . '/' . $route, [ 'format' => 'generic' ] );
 
 			$this->assertSame( 404, $response->get_status(), $route );
 			$this->assertSame( 'hierarchy_guard_change_gone', $response->get_data()['code'], $route );
-			$this->assertSame( 'These redirects are no longer available. The pages were deleted for good.', $response->get_data()['message'], $route );
+			$this->assertSame( 'These redirects are no longer available. A page they belong to was deleted for good.', $response->get_data()['message'], $route );
 		}
 	}
 
-	public function test_a_trash_with_a_page_deleted_for_good_lists_the_others_as_incomplete(): void {
+	public function test_a_trash_whose_page_was_deleted_for_good_is_gone(): void {
+		Change_Log::reset_request();
+		wp_delete_post( $this->ids['about'], true );
+
+		$this->assert_deleted_for_good( $this->change_id );
+	}
+
+	public function test_a_trash_with_one_page_deleted_for_good_is_gone(): void {
 		$careers = $this->page( 'careers', $this->ids['company'] );
 		$this->page( 'jobs', $careers );
 		$services = $this->page( 'services', $this->ids['company'] );
@@ -105,12 +115,33 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$this->assertSame( 2, $this->get( '/changes/' . $change . '/pairs' )->get_data()['total'], 'Precondition: both are listed while in the Trash.' );
 
 		wp_delete_post( $careers, true );
-		$data = $this->get( '/changes/' . $change . '/pairs' )->get_data();
 
-		$this->assertSame( [ '/company/services/design/' ], array_column( $data['pairs'], 'old' ) );
-		$this->assertSame( 1, $data['total'] );
-		$this->assertTrue( $data['capped'], 'The list says it is incomplete.' );
-		$this->assertSame( "source,target,code\r\n/company/services/design/,/company/design/,302\r\n", $this->get( '/changes/' . $change . '/csv', [ 'format' => 'generic' ] )->get_data() );
+		$this->assert_deleted_for_good( $change );
+	}
+
+	public function test_a_save_whose_page_was_deleted_for_good_is_gone(): void {
+		$careers = $this->page( 'careers', $this->ids['company'] );
+		$this->page( 'jobs', $careers );
+		Change_Log::reset_request();
+		wp_update_post(
+			[
+				'ID'        => $careers,
+				'post_name' => 'join-us',
+			]
+		);
+		$change = (string) ( new Change_Log() )->latest( $this->admin )['id'];
+		Change_Log::reset_request();
+		$this->assertSame( 2, $this->get( '/changes/' . $change . '/pairs' )->get_data()['total'], 'Precondition: the page and its subpage are listed.' );
+
+		// Another admin trashes it, which records no change for this one, then deletes it for good.
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		wp_trash_post( $careers );
+		Change_Log::reset_request();
+		wp_delete_post( $careers, true );
+		Change_Log::reset_request();
+		wp_set_current_user( $this->admin );
+
+		$this->assert_deleted_for_good( $change );
 	}
 
 	public function test_another_user_cannot_read_the_change(): void {
