@@ -13,6 +13,7 @@ namespace HierarchyGuard\Trash;
  * Core's Pages list trashes and restores bulk selections one ID at a time and
  * stops with wp_die() when an ID is already in, or already out of, the trash.
  * The plugin leaves those IDs to core instead of handling them as subpages.
+ * Its Bulk Edit saves a selection one page at a time too.
  */
 final class Request {
 
@@ -38,6 +39,23 @@ final class Request {
 		} else {
 			$raw = [];
 		}
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+
+		return array_values( array_unique( array_filter( array_map( 'absint', $raw ) ) ) );
+	}
+
+	/**
+	 * Post IDs core's Bulk Edit in edit.php saves in this request, in the
+	 * list's order, which bulk_edit_posts() keeps.
+	 *
+	 * @return int[]
+	 */
+	public static function bulk_edit_ids(): array {
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read only; core verified the bulk-posts nonce before bulk_edit_posts() saves anything.
+		if ( 'edit.php' !== ( $GLOBALS['pagenow'] ?? '' ) || ! isset( $_REQUEST['bulk_edit'], $_REQUEST['post'] ) ) {
+			return [];
+		}
+		$raw = array_map( 'sanitize_text_field', (array) wp_unslash( $_REQUEST['post'] ) );
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
 		return array_values( array_unique( array_filter( array_map( 'absint', $raw ) ) ) );

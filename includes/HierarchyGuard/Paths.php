@@ -46,15 +46,17 @@ final class Paths {
 	/**
 	 * The path of a post built from its slug and its ancestors' slugs.
 	 *
-	 * Uses the object's own post_parent, so a $post_before object passed by
-	 * post_updated yields the chain as it was before the save. Ancestors with
-	 * an empty slug are skipped, matching get_page_uri().
+	 * Uses the object's own slug and post_parent, so a $post_before object
+	 * passed by post_updated yields its own place before the save; each
+	 * ancestor is read as it is now, unless $as_before holds it. Ancestors
+	 * with an empty slug are skipped, matching get_page_uri().
 	 *
-	 * @param WP_Post $post Post object.
+	 * @param WP_Post             $post      Post object.
+	 * @param array<int,WP_Post>  $as_before Posts to read as these objects instead of as they are now, by ID.
 	 * @return string Normalized path, for example `company/about`.
 	 */
-	public static function uri( WP_Post $post ): string {
-		return self::chain( $post, static fn( WP_Post $item ): string => (string) $item->post_name );
+	public static function uri( WP_Post $post, array $as_before = [] ): string {
+		return self::chain( $post, static fn( WP_Post $item ): string => (string) $item->post_name, $as_before );
 	}
 
 	/**
@@ -72,18 +74,19 @@ final class Paths {
 	/**
 	 * Joins the slugs of a post and its ancestors, root first.
 	 *
-	 * @param WP_Post  $post    Post object.
-	 * @param callable $slug_of Returns the slug to use for one post.
+	 * @param WP_Post            $post      Post object.
+	 * @param callable           $slug_of   Returns the slug to use for one post.
+	 * @param array<int,WP_Post> $as_before Ancestors to read as these objects, by ID.
 	 * @return string Normalized path.
 	 */
-	private static function chain( WP_Post $post, callable $slug_of ): string {
+	private static function chain( WP_Post $post, callable $slug_of, array $as_before = [] ): string {
 		$segments  = [ (string) $slug_of( $post ) ];
 		$parent_id = (int) $post->post_parent;
 		$guard     = 0;
 
 		while ( $parent_id > 0 && $guard < 50 ) {
 			++$guard;
-			$parent = get_post( $parent_id );
+			$parent = $as_before[ $parent_id ] ?? get_post( $parent_id );
 			if ( ! $parent instanceof WP_Post ) {
 				break;
 			}

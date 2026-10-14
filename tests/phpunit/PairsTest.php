@@ -790,6 +790,26 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assert_the_resolver_agrees( $collected );
 	}
 
+	public function test_a_bulk_edit_of_a_parent_and_its_subpage_lists_their_urls_from_before_it(): void {
+		Change_Log::reset_request();
+
+		// The Pages list shows about above team, so core saves about first.
+		$this->bulk_edit( [ $this->ids['about'], $this->ids['team'] ], 0 );
+		$collected = $this->last_change();
+
+		$this->assertSame(
+			[
+				'/company/about/ -> /about/',
+				'/company/about/history/ -> /about/history/',
+				'/company/about/team/ -> /team/',
+				'/company/about/team/leadership/ -> /team/leadership/',
+			],
+			$this->lines( $collected ),
+			'No URL that lasted only inside the request, and none of the URLs before it missing.'
+		);
+		$this->assert_the_resolver_agrees( $collected );
+	}
+
 	public function test_a_save_lists_no_draft_subpage_but_its_published_subpages(): void {
 		wp_update_post(
 			[

@@ -144,6 +144,33 @@ trait Trash_Fixtures {
 	 */
 	protected function end_core_bulk(): void {
 		$GLOBALS['pagenow'] = 'index.php';
-		unset( $_REQUEST['action'], $_REQUEST['ids'], $_REQUEST['post'], $_REQUEST['filter_action'] );
+		unset( $_REQUEST['action'], $_REQUEST['ids'], $_REQUEST['post'], $_REQUEST['filter_action'], $_REQUEST['bulk_edit'] );
+	}
+
+	/**
+	 * Saves pages the way the Pages list's Bulk Edit does: core's
+	 * bulk_edit_posts() in edit.php, on the selection in the list's order,
+	 * giving them a new parent.
+	 *
+	 * @param int[] $ids       Selected pages, in the list's order.
+	 * @param int   $parent_id New parent, 0 for the top level.
+	 * @return array<string,int[]> What core reports, by updated, skipped and locked.
+	 */
+	protected function bulk_edit( array $ids, int $parent_id ): array {
+		require_once ABSPATH . 'wp-admin/includes/post.php';
+		$this->start_core_bulk( 'edit', $ids );
+		$_REQUEST['bulk_edit'] = 'Update';
+		try {
+			return bulk_edit_posts(
+				[
+					'post_type'   => 'page',
+					'_status'     => '-1',
+					'post'        => array_map( 'strval', $ids ),
+					'post_parent' => (string) $parent_id,
+				]
+			);
+		} finally {
+			$this->end_core_bulk();
+		}
 	}
 }

@@ -24,6 +24,8 @@ use WP_UnitTestCase;
  */
 final class ChangeListenerTest extends WP_UnitTestCase {
 
+	use Trash_Fixtures;
+
 	private Ledger $ledger;
 
 	private Change_Log $log;
@@ -315,6 +317,60 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		remove_all_filters( 'hierarchy_guard_trash_policy' );
 		wp_trash_post( $this->company );
 		$this->assertSame( 'trash', $this->log->latest( $user )['action'], 'A trash replaces the save.' );
+	}
+
+	public function test_a_bulk_edit_records_each_page_at_its_url_from_before_the_request(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		$leadership = $this->page( 'leadership', $this->team );
+
+		// The list shows a parent above its subpages, so core saves it first.
+		$done = $this->bulk_edit( [ $this->about, $this->team ], 0 );
+
+		$this->assertSame( [ $this->about, $this->team ], $done['updated'] );
+		$change = $this->log->latest( $user );
+		$this->assertSame( [ $this->about, $this->team ], array_keys( $change['roots'] ) );
+		$this->assertSame( 'company/about', $change['roots'][ $this->about ]['path'] );
+		$this->assertSame( 'company/about/team', $change['roots'][ $this->team ]['path'], 'The URL it had before the request, not one it had only inside it.' );
+		$this->assertSame( [ 'company/about/team' ], $this->ledger->paths_for( $this->team ) );
+		$resolver = new Resolver( $this->ledger );
+		$this->assertSame( $this->team, $resolver->resolve( 'page', 'company/about/team' )->ID );
+		$this->assertSame( $leadership, $resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+	}
+
+	public function test_a_bulk_edit_in_either_order_records_the_same_urls(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+
+		$this->bulk_edit( [ $this->team, $this->about ], 0 );
+
+		$change = $this->log->latest( $user );
+		$this->assertSame( 'company/about/team', $change['roots'][ $this->team ]['path'] );
+		$this->assertSame( 'company/about', $change['roots'][ $this->about ]['path'] );
+	}
+
+	public function test_a_bulk_edit_writes_its_change_once(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		$target = $this->page( 'target' );
+		$ids    = [];
+		for ( $i = 0; $i < 20; $i++ ) {
+			$ids[] = $this->page( 'bulk-' . $i, $this->company );
+		}
+		$writes = 0;
+		add_filter(
+			'pre_set_transient_' . Change_Log::key( $user ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes;
+				return $value;
+			}
+		);
+
+		$this->bulk_edit( $ids, $target );
+		Change_Log::reset_request();
+
+		$this->assertCount( 20, $this->log->latest( $user )['roots'] );
+		$this->assertSame( 1, $writes, 'One write for the whole Bulk Edit, not one per page.' );
 	}
 
 	public function test_a_rest_save_that_changes_the_slug_records_a_change(): void {

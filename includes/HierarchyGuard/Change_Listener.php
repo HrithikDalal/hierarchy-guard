@@ -9,8 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+use HierarchyGuard\Redirects\Batch_Resolver;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
+use HierarchyGuard\Trash\Request;
 use WP_Post;
 
 /**
@@ -57,6 +59,14 @@ final class Change_Listener {
 	private array $crossed = [];
 
 	/**
+	 * The path every page of this request's Bulk Edit had before its first
+	 * save, by ID, with the selection it was read for.
+	 *
+	 * @var array{ids:string,paths:array<int,string>}|null
+	 */
+	private ?array $bulk = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Ledger     $ledger Ledger.
@@ -101,7 +111,9 @@ final class Change_Listener {
 	 * Records the old path of a post whose slug or parent changed, and, once
 	 * the ledger holds that path on the post, the save as the current user's
 	 * latest change: the post at its old path under its new parent. With no
-	 * user, as in cron, nothing is shown.
+	 * user, as in cron, nothing is shown. In a Bulk Edit the old path is the
+	 * one the page had before the request, as a parent saved before its
+	 * subpage would otherwise give the subpage a path it had only inside it.
 	 *
 	 * @param int     $post_id Post ID.
 	 * @param WP_Post $after   Post after the update.
@@ -117,6 +129,8 @@ final class Change_Listener {
 		if ( $after->post_name === $before->post_name && (int) $after->post_parent === (int) $before->post_parent ) {
 			return;
 		}
+		// Read at the request's first save that moved anything, before any check that may skip it.
+		$bulk_path = $this->bulk_path( $post_id, $before );
 		if ( 'trash' === $before->post_status || 'trash' === $after->post_status ) {
 			return;
 		}
@@ -124,7 +138,7 @@ final class Change_Listener {
 			return;
 		}
 
-		$path = Paths::uri( $before );
+		$path = $bulk_path ?? Paths::uri( $before );
 		$this->ledger->record( $post_id, $path );
 		$this->ledger->prune( $post_id );
 
@@ -144,6 +158,40 @@ final class Change_Listener {
 				]
 			);
 		}
+	}
+
+	/**
+	 * In a Bulk Edit, the path a page had before the request. At its first
+	 * save that changed a slug or parent nothing else has moved yet, so every
+	 * selected page's path is read then, the saved page's from before its
+	 * save, in one query per level. Outside a Bulk Edit, null at no cost.
+	 *
+	 * @param int     $post_id Post ID.
+	 * @param WP_Post $before  Post before the update.
+	 * @return string|null
+	 */
+	private function bulk_path( int $post_id, WP_Post $before ): ?string {
+		$ids = Request::bulk_edit_ids();
+		if ( [] === $ids ) {
+			return null;
+		}
+		$key = implode( ',', $ids );
+		if ( null === $this->bulk || $key !== $this->bulk['ids'] ) {
+			Batch_Resolver::prime_with_ancestors( $ids );
+			$as_before = [ $post_id => $before ];
+			$paths     = [];
+			foreach ( $ids as $id ) {
+				$post = $as_before[ $id ] ?? get_post( $id );
+				if ( $post instanceof WP_Post ) {
+					$paths[ $id ] = Paths::uri( $post, $as_before );
+				}
+			}
+			$this->bulk = [
+				'ids'   => $key,
+				'paths' => $paths,
+			];
+		}
+		return $this->bulk['paths'][ $post_id ] ?? null;
 	}
 
 	/**

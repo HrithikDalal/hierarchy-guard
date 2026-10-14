@@ -34,6 +34,18 @@ final class RequestTest extends WP_UnitTestCase {
 		$this->assertSame( [ 12, 13 ], Request::core_ids() );
 	}
 
+	public function test_reads_the_selection_of_a_bulk_edit_in_its_order(): void {
+		$this->start_core_bulk( 'edit', [ 13, 12, 13 ] );
+		$this->assertSame( [], Request::bulk_edit_ids(), 'Not the Bulk Edit form.' );
+
+		$_REQUEST['bulk_edit'] = 'Update';
+		$this->assertSame( [ 13, 12 ], Request::bulk_edit_ids() );
+		$this->assertSame( [], Request::core_ids(), 'No trash or restore.' );
+
+		$GLOBALS['pagenow'] = 'post.php';
+		$this->assertSame( [], Request::bulk_edit_ids(), 'Only the list screen saves a selection.' );
+	}
+
 	public function test_other_screens_and_actions_are_ignored(): void {
 		$this->start_core_bulk( 'edit', [ 12 ] );
 		$this->assertSame( [], Request::core_ids(), 'Not a trash or untrash.' );
