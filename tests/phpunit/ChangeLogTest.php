@@ -9,6 +9,8 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Pairs;
 use HierarchyGuard\Trash\Change_Log;
 use WP_UnitTestCase;
 
@@ -303,6 +305,88 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( 5, $stored['counts']['moved'] );
 		$this->assertSame( 1, $stored['counts']['kept'] );
 		$this->assertEqualsCanonicalizing( [ 3, 4, 5, 6, 7, 9 ], $stored['ids'] );
+	}
+
+	public function test_each_site_keeps_its_own_change_in_the_request(): void {
+		$main          = $this->log->record( $this->admin, 'save', 'page', $this->entry( 4, [] ) );
+		$entry         = $this->entry( 4, [] );
+		$entry['path'] = 'beta';
+		$blog          = (int) $GLOBALS['blog_id'];
+		// As switch_to_blog() sets it, which a single site does not have.
+		$GLOBALS['blog_id'] = $blog + 1;
+		try {
+			$other = $this->log->record( $this->admin, 'save', 'page', $entry );
+			$this->assertNotSame( $main, $other, 'A save on another site is a change of its own.' );
+			$this->assertSame( 'beta', $this->log->latest( $this->admin )['roots'][4]['path'] );
+		} finally {
+			$this->log->forget( $this->admin );
+			$GLOBALS['blog_id'] = $blog;
+		}
+
+		$this->assertSame( $main, $this->log->latest( $this->admin )['id'] );
+		$this->assertSame( 'company/about', $this->log->latest( $this->admin )['roots'][4]['path'], 'This site’s change keeps its own root.' );
+	}
+
+	public function test_a_request_that_saves_on_two_sites_leaves_each_its_own_change(): void {
+		$this->two_site_saves( false );
+	}
+
+	public function test_a_request_that_ends_on_another_site_writes_each_change_on_its_own_site(): void {
+		$this->two_site_saves( true );
+	}
+
+	/**
+	 * Saves a page on the main site and one on site B in one request, as a
+	 * blog-switching plugin does, then ends the request.
+	 *
+	 * @param bool $end_switched End the request while site B is still current.
+	 */
+	private function two_site_saves( bool $end_switched ): void {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Run with WP_MULTISITE=1.' );
+		}
+		wp_set_current_user( $this->admin );
+		Post_Types::reset();
+		update_option( 'permalink_structure', '/%postname%/' );
+		$site = self::factory()->blog->create();
+		switch_to_blog( $site );
+		update_option( 'permalink_structure', '/%postname%/' );
+		$beta = $this->page( 'beta' );
+		restore_current_blog();
+		$alpha = $this->page( 'alpha' );
+		Change_Log::reset_request();
+
+		wp_update_post(
+			[
+				'ID'        => $alpha,
+				'post_name' => 'alpha-2',
+			]
+		);
+		switch_to_blog( $site );
+		wp_update_post(
+			[
+				'ID'        => $beta,
+				'post_name' => 'beta-2',
+			]
+		);
+		if ( $end_switched ) {
+			Change_Log::reset_request();
+		}
+		restore_current_blog();
+		Change_Log::reset_request();
+
+		$main = get_transient( Change_Log::key( $this->admin ) );
+		switch_to_blog( $site );
+		$other = get_transient( Change_Log::key( $this->admin ) );
+		restore_current_blog();
+
+		$this->assertIsArray( $main );
+		$this->assertSame( [ $alpha => 'alpha' ], array_column( $main['roots'], 'path', 'root' ), 'The main site’s change has its own save only.' );
+		$this->assertIsArray( $other, 'Site B keeps a change of its own.' );
+		$this->assertSame( [ $beta => 'beta' ], array_column( $other['roots'], 'path', 'root' ) );
+		$this->assertNotSame( $main['id'], $other['id'] );
+		$pairs = new Pairs();
+		$this->assertSame( [ '/alpha/' ], array_column( $pairs->page( $pairs->collect_change( $main ), 1, 100 )['pairs'], 'old' ) );
 	}
 
 	public function test_forgetting_drops_the_change_waiting_to_be_written(): void {

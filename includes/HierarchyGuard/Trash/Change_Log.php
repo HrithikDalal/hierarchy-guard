@@ -26,7 +26,9 @@ use HierarchyGuard\Subtree;
  * is queued only once the change is written, as a run in another process
  * reads only what is stored; a later write of the same change then replaces
  * only the roots the request recorded since, so it never takes back what
- * such a run stored in between.
+ * such a run stored in between. On a network each site keeps its own: a
+ * request that saves on two sites, as a plugin that switches sites does,
+ * records a change on each, and each is written on its own site.
  */
 final class Change_Log {
 
@@ -37,31 +39,31 @@ final class Change_Log {
 	public const COUNT_KEYS = [ 'moved', 'trashed', 'restored', 'kept', 'denied', 'left', 'renamed' ];
 
 	/**
-	 * The change each user started in this request, by user ID.
+	 * The change each user started in this request, by site ID and user ID.
 	 *
-	 * @var array<int,string>
+	 * @var array<int,array<int,string>>
 	 */
 	private static array $current = [];
 
 	/**
-	 * Changes of this request not written yet, by user ID.
+	 * Changes of this request not written yet, by site ID and user ID.
 	 *
-	 * @var array<int,array<string,mixed>>
+	 * @var array<int,array<int,array<string,mixed>>>
 	 */
 	private static array $pending = [];
 
 	/**
 	 * The roots of each pending change recorded or updated since it was last
-	 * written, by user ID.
+	 * written, by site ID and user ID.
 	 *
-	 * @var array<int,array<int,true>>
+	 * @var array<int,array<int,array<int,true>>>
 	 */
 	private static array $dirty = [];
 
 	/**
-	 * The change of each user this request has written already, by user ID.
+	 * The change of each user this request has written already, by site ID and user ID.
 	 *
-	 * @var array<int,string>
+	 * @var array<int,array<int,string>>
 	 */
 	private static array $written = [];
 
@@ -96,11 +98,14 @@ final class Change_Log {
 	}
 
 	/**
-	 * Writes the changes this request recorded. Runs first at shutdown.
+	 * Writes the changes this request recorded, each on its own site. Runs
+	 * first at shutdown.
 	 */
 	public static function flush(): void {
-		foreach ( array_keys( self::$pending ) as $user_id ) {
-			self::write( (int) $user_id );
+		foreach ( self::$pending as $site_id => $changes ) {
+			foreach ( array_keys( $changes ) as $user_id ) {
+				self::write( (int) $site_id, (int) $user_id );
+			}
 		}
 	}
 
@@ -111,7 +116,7 @@ final class Change_Log {
 	 * @param int $user_id User ID.
 	 */
 	public function write_now( int $user_id ): void {
-		self::write( $user_id );
+		self::write( get_current_blog_id(), $user_id );
 	}
 
 	/**
@@ -131,15 +136,16 @@ final class Change_Log {
 			return '';
 		}
 
+		$site   = get_current_blog_id();
 		$change = null;
-		if ( isset( self::$current[ $user_id ] ) ) {
-			$existing = self::$pending[ $user_id ] ?? $this->latest( $user_id );
-			if ( null !== $existing && self::$current[ $user_id ] === $existing['id'] && $action === $existing['action'] ) {
+		if ( isset( self::$current[ $site ][ $user_id ] ) ) {
+			$existing = self::$pending[ $site ][ $user_id ] ?? $this->latest( $user_id );
+			if ( null !== $existing && self::$current[ $site ][ $user_id ] === $existing['id'] && $action === $existing['action'] ) {
 				$change = $existing;
 			}
 		}
 		if ( null === $change ) {
-			$change                    = [
+			$change                             = [
 				'id'        => wp_generate_uuid4(),
 				'action'    => $action,
 				'post_type' => $post_type,
@@ -151,7 +157,7 @@ final class Change_Log {
 				'origin'    => $origin,
 				'shown'     => $shown,
 			];
-			self::$current[ $user_id ] = $change['id'];
+			self::$current[ $site ][ $user_id ] = $change['id'];
 		}
 
 		$root                     = (int) ( $entry['root'] ?? 0 );
@@ -206,8 +212,9 @@ final class Change_Log {
 	 * @return array<string,mixed>|null
 	 */
 	public function latest( int $user_id ): ?array {
-		if ( isset( self::$pending[ $user_id ] ) ) {
-			return self::summed( self::$pending[ $user_id ] );
+		$site = get_current_blog_id();
+		if ( isset( self::$pending[ $site ][ $user_id ] ) ) {
+			return self::summed( self::$pending[ $site ][ $user_id ] );
 		}
 		$change = get_transient( self::key( $user_id ) );
 		return is_array( $change ) && isset( $change['id'] ) ? $change : null;
@@ -234,7 +241,8 @@ final class Change_Log {
 	 * @param int $user_id User ID.
 	 */
 	public function forget( int $user_id ): void {
-		unset( self::$pending[ $user_id ], self::$dirty[ $user_id ], self::$written[ $user_id ] );
+		$site = get_current_blog_id();
+		unset( self::$pending[ $site ][ $user_id ], self::$dirty[ $site ][ $user_id ], self::$written[ $site ][ $user_id ] );
 		delete_transient( self::key( $user_id ) );
 	}
 
@@ -268,43 +276,55 @@ final class Change_Log {
 	 * @param int|null            $root_id The root recorded or updated, if any.
 	 */
 	private static function save( int $user_id, array $change, ?int $root_id = null ): void {
-		if ( ( self::$current[ $user_id ] ?? '' ) !== $change['id'] ) {
-			unset( self::$pending[ $user_id ], self::$dirty[ $user_id ] );
+		$site = get_current_blog_id();
+		if ( ( self::$current[ $site ][ $user_id ] ?? '' ) !== $change['id'] ) {
+			unset( self::$pending[ $site ][ $user_id ], self::$dirty[ $site ][ $user_id ] );
 			set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
 			return;
 		}
-		self::$pending[ $user_id ] = $change;
+		self::$pending[ $site ][ $user_id ] = $change;
 		if ( null !== $root_id ) {
-			self::$dirty[ $user_id ][ $root_id ] = true;
+			self::$dirty[ $site ][ $user_id ][ $root_id ] = true;
 		}
 		if ( did_action( 'shutdown' ) ) {
-			self::write( $user_id );
+			self::write( $site, $user_id );
 		} elseif ( false === has_action( 'shutdown', [ self::class, 'flush' ] ) ) {
 			add_action( 'shutdown', [ self::class, 'flush' ], 0 );
 		}
 	}
 
 	/**
-	 * Writes the change this request has waiting for a user. When the request
-	 * wrote it before, the stored copy is read back first and only the roots
-	 * recorded or updated since replace its own: a background run may have
-	 * updated another root in between.
+	 * Writes the change this request has waiting for a user on a site, with
+	 * that site current. When the request wrote it before, the stored copy is
+	 * read back first and only the roots recorded or updated since replace
+	 * its own: a background run may have updated another root in between.
 	 *
+	 * @param int $site_id Site ID.
 	 * @param int $user_id User ID.
 	 */
-	private static function write( int $user_id ): void {
-		if ( ! isset( self::$pending[ $user_id ] ) ) {
+	private static function write( int $site_id, int $user_id ): void {
+		if ( ! isset( self::$pending[ $site_id ][ $user_id ] ) ) {
 			return;
 		}
-		$change = self::$pending[ $user_id ];
-		$roots  = array_keys( self::$dirty[ $user_id ] ?? [] );
-		unset( self::$pending[ $user_id ], self::$dirty[ $user_id ] );
+		$change = self::$pending[ $site_id ][ $user_id ];
+		$roots  = array_keys( self::$dirty[ $site_id ][ $user_id ] ?? [] );
+		unset( self::$pending[ $site_id ][ $user_id ], self::$dirty[ $site_id ][ $user_id ] );
 
-		if ( ( self::$written[ $user_id ] ?? '' ) === $change['id'] ) {
-			$change = self::merged( $change, $roots, get_transient( self::key( $user_id ) ) );
+		$switched = is_multisite() && get_current_blog_id() !== $site_id;
+		if ( $switched ) {
+			switch_to_blog( $site_id );
 		}
-		set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
-		self::$written[ $user_id ] = (string) $change['id'];
+		try {
+			if ( ( self::$written[ $site_id ][ $user_id ] ?? '' ) === $change['id'] ) {
+				$change = self::merged( $change, $roots, get_transient( self::key( $user_id ) ) );
+			}
+			set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
+		} finally {
+			if ( $switched ) {
+				restore_current_blog();
+			}
+		}
+		self::$written[ $site_id ][ $user_id ] = (string) $change['id'];
 	}
 
 	/**
