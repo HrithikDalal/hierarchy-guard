@@ -277,9 +277,12 @@ final class Change_Listener {
 			return;
 		}
 
-		// Subpages trashed together with a parent are deleted with it, so their own
-		// paths would be carried onto pages about to be deleted too.
+		// A subpage trashed together with its parent: a page it was carried to
+		// could be deleted next, so each of its own subpages keeps its URL from
+		// before the trash itself. Only the trash-the-subpages policy makes such
+		// a row, and only for a subtree within the count cap.
 		if ( Markers::has_trashed_row( $post_id ) ) {
+			$this->record_on_children( $post_id, (string) $post->post_type );
 			return;
 		}
 
@@ -294,6 +297,35 @@ final class Change_Listener {
 		foreach ( $paths as $path ) {
 			$this->ledger->record_alias( (string) $post->post_type, (int) $post->post_parent, $path );
 		}
+	}
+
+	/**
+	 * Records each direct child's path from before the trash on the child.
+	 *
+	 * @param int    $post_id   The post being deleted.
+	 * @param string $post_type Its post type.
+	 */
+	private function record_on_children( int $post_id, string $post_type ): void {
+		$children = get_posts(
+			[
+				'post_parent'            => $post_id,
+				'post_type'              => $post_type,
+				'post_status'            => array_values( array_diff( array_keys( get_post_stati() ), [ 'auto-draft', 'inherit' ] ) ),
+				'posts_per_page'         => Subtree::count_cap(),
+				'orderby'                => 'ID',
+				'order'                  => 'ASC',
+				'no_found_rows'          => true,
+				'update_post_term_cache' => false,
+			]
+		);
+
+		Ledger::deferred(
+			function () use ( $children ): void {
+				foreach ( $children as $child ) {
+					$this->ledger->record( (int) $child->ID, Paths::untrashed_uri( $child ) );
+				}
+			}
+		);
 	}
 
 	/**

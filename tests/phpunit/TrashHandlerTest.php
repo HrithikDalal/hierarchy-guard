@@ -811,6 +811,62 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 'publish', get_post_status( $this->ids['team'] ) );
 	}
 
+	public function test_a_subpage_deleted_out_of_the_trash_before_its_parent_s_restore_leaves_its_subpage_its_old_url(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		wp_trash_post( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['team'], true );
+		wp_untrash_post( $this->ids['about'] );
+
+		$this->assertSame( $this->ids['about'], (int) get_post( $this->ids['leadership'] )->post_parent, 'Precondition: core moved leadership up under about.' );
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ) );
+		$this->assertSame( $this->ids['leadership'], $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertSame( [ 'company/about/team/leadership' ], $this->ledger->paths_for( $this->ids['leadership'] ), 'Recorded on the subpage itself.' );
+		$this->assertSame( [], $this->ledger->paths_for( $this->ids['about'] ), 'Not on the parent.' );
+		$this->assertFalse( get_option( Ledger::ROOT_OPTION ), 'Not in the root list.' );
+	}
+
+	/**
+	 * Trashes about under the trash-the-subpages policy while the user may not delete leadership.
+	 */
+	private function trash_about_keeping_leadership(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$locked = $this->ids['leadership'];
+		$deny   = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+			return 'delete_post' === $cap && isset( $args[0] ) && (int) $args[0] === $locked ? [ 'do_not_allow' ] : $caps;
+		};
+		add_filter( 'map_meta_cap', $deny, 10, 4 );
+		wp_trash_post( $this->ids['about'] );
+		remove_filter( 'map_meta_cap', $deny, 10 );
+
+		$this->assertSame( 'trash', get_post_status( $this->ids['team'] ), 'Precondition: team went with about.' );
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'Precondition: leadership stayed live.' );
+	}
+
+	public function test_empty_trash_keeps_the_url_of_a_subpage_the_user_could_not_trash(): void {
+		$this->trash_about_keeping_leadership();
+
+		// Child first: team, then about.
+		wp_delete_post( $this->ids['team'], true );
+		wp_delete_post( $this->ids['about'], true );
+
+		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['leadership'] )->post_parent );
+		$this->assertSame( $this->ids['leadership'], $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertSame( [ 'company/about/team/leadership' ], $this->ledger->paths_for( $this->ids['leadership'] ) );
+	}
+
+	public function test_empty_trash_parent_first_keeps_the_url_of_a_subpage_the_user_could_not_trash(): void {
+		$this->trash_about_keeping_leadership();
+
+		wp_delete_post( $this->ids['about'], true );
+		wp_delete_post( $this->ids['team'], true );
+
+		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['leadership'] )->post_parent );
+		$this->assertSame( $this->ids['leadership'], $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->ids['company'] ), 'Only the URL of about itself is on its parent.' );
+		$this->assertFalse( get_option( Ledger::ROOT_OPTION ), 'Nothing in the root list.' );
+	}
+
 	public function test_too_many_subpages_to_trash_move_up_instead(): void {
 		$this->policy( Settings::POLICY_TRASH_CHILDREN );
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
