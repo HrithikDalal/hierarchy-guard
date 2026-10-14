@@ -196,7 +196,9 @@ export default function HierarchyPlugin() {
 	// Resolves to the hierarchy, null when it couldn't be loaded, or undefined
 	// when the caller no longer waits for it. Only the latest load's answer
 	// is shown, as an earlier one may be from before a later save; a load
-	// after a save answers that save until a later save's load starts.
+	// after a save answers that save until a later save's load starts. When
+	// the load on screen fails, the next trigger asks again, whichever load
+	// it superseded.
 	const load = useCallback(
 		( afterSaving = false ) => {
 			const ticket = loads.current.start( afterSaving );
@@ -213,6 +215,7 @@ export default function HierarchyPlugin() {
 				} )
 				.catch( ( failure ) => {
 					if ( ticket.shows() ) {
+						requested.current = false;
 						setError(
 							failure.message ||
 								__(
@@ -233,12 +236,7 @@ export default function HierarchyPlugin() {
 	useEffect( () => {
 		if ( needed && ! requested.current ) {
 			requested.current = true;
-			load().then( ( result ) => {
-				// A failed first load is asked again at the next trigger.
-				if ( null === result ) {
-					requested.current = false;
-				}
-			} );
+			load();
 		}
 	}, [ needed, load ] );
 
