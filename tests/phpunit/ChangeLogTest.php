@@ -183,6 +183,97 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_the_roots_of_one_request_are_written_once(): void {
+		$writes = 0;
+		add_filter(
+			'pre_set_transient_' . Change_Log::key( $this->admin ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes;
+				return $value;
+			}
+		);
+		$queries = get_num_queries();
+
+		for ( $root = 1; $root <= 200; $root++ ) {
+			$id = $this->log->record( $this->admin, 'save', 'page', $this->entry( $root, [ 'moved' => 1 ] ), [ $root ] );
+		}
+
+		$this->assertSame( 0, $writes, 'Nothing is written while the request records.' );
+		$this->assertSame( $queries, get_num_queries(), 'Recording 200 roots costs no query.' );
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( $id, $change['id'], 'The request sees its own change.' );
+		$this->assertCount( 200, $change['roots'] );
+		$this->assertSame( 200, $change['counts']['moved'], 'Its counts are summed.' );
+
+		Change_Log::reset_request();
+
+		$this->assertSame( 1, $writes, 'The request’s change is written once, when it ends.' );
+		$stored = get_transient( Change_Log::key( $this->admin ) );
+		$this->assertSame( $id, $stored['id'] );
+		$this->assertCount( 200, $stored['roots'] );
+		$this->assertSame( range( 1, Change_Log::MAX_IDS ), $stored['ids'] );
+	}
+
+	public function test_a_change_waiting_to_be_written_is_written_at_shutdown(): void {
+		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [] ) );
+
+		$this->assertSame( 0, has_action( 'shutdown', [ Change_Log::class, 'flush' ] ), 'Before anything else at shutdown, so it is saved before the response ends.' );
+		$this->assertFalse( get_transient( Change_Log::key( $this->admin ) ) );
+
+		Change_Log::flush();
+		$this->assertSame( [ 12 ], array_keys( get_transient( Change_Log::key( $this->admin ) )['roots'] ) );
+	}
+
+	public function test_a_change_recorded_at_shutdown_is_written_at_once(): void {
+		$GLOBALS['wp_actions']['shutdown'] = 1;
+
+		$this->log->record( $this->admin, 'restore', 'page', $this->entry( 12, [] ) );
+
+		$this->assertSame( [ 12 ], array_keys( get_transient( Change_Log::key( $this->admin ) )['roots'] ), 'Shutdown has begun, so nothing would write it later.' );
+	}
+
+	public function test_marking_the_request_s_change_shown_is_written_with_it(): void {
+		$writes = 0;
+		add_filter(
+			'pre_set_transient_' . Change_Log::key( $this->admin ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes;
+				return $value;
+			}
+		);
+		$id = $this->log->record( $this->admin, 'save', 'page', $this->entry( 12, [] ) );
+		$this->log->mark_shown( $this->admin, $id );
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 2 ], [], [], [], false );
+
+		Change_Log::reset_request();
+
+		$this->assertSame( 1, $writes );
+		$stored = get_transient( Change_Log::key( $this->admin ) );
+		$this->assertTrue( $stored['shown'] );
+		$this->assertSame( 2, $stored['counts']['moved'] );
+	}
+
+	public function test_a_change_from_an_earlier_request_is_updated_at_once(): void {
+		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 200 ], true ) );
+		Change_Log::reset_request();
+
+		$this->log->update( $this->admin, $id, 12, [ 'moved' => 400 ], [], [], [], true );
+		$this->assertSame( 400, get_transient( Change_Log::key( $this->admin ) )['counts']['moved'], 'A background batch writes its progress as it goes.' );
+
+		$this->log->mark_shown( $this->admin, $id );
+		$this->assertTrue( get_transient( Change_Log::key( $this->admin ) )['shown'] );
+	}
+
+	public function test_forgetting_drops_the_change_waiting_to_be_written(): void {
+		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [] ) );
+
+		$this->log->forget( $this->admin );
+		Change_Log::reset_request();
+
+		$this->assertNull( $this->log->latest( $this->admin ) );
+		$this->assertFalse( get_transient( Change_Log::key( $this->admin ) ) );
+	}
+
 	public function test_nothing_is_stored_without_a_user(): void {
 		$this->assertSame( '', $this->log->record( 0, 'trash', 'page', $this->entry( 12, [] ) ) );
 		$this->assertFalse( get_transient( Change_Log::key( 0 ) ) );

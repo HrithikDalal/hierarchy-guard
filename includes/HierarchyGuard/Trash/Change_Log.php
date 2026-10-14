@@ -19,6 +19,10 @@ use HierarchyGuard\Subtree;
  * page as its root. Background batches keep their root's entry current.
  * Titles, URLs and old/new pairs are never stored; they are computed when
  * shown.
+ *
+ * The change a request records is kept in memory and written once, at
+ * shutdown, so a request of many roots writes it once, not once per root.
+ * Until then latest() answers from memory.
  */
 final class Change_Log {
 
@@ -34,6 +38,13 @@ final class Change_Log {
 	 * @var array<int,string>
 	 */
 	private static array $current = [];
+
+	/**
+	 * Changes of this request not written yet, by user ID.
+	 *
+	 * @var array<int,array<string,mixed>>
+	 */
+	private static array $pending = [];
 
 	/**
 	 * Transient key for a user.
@@ -55,11 +66,24 @@ final class Change_Log {
 	}
 
 	/**
-	 * Starts a new request: the next record() begins a new change. The plugin
-	 * never calls this; long-running processes and tests do.
+	 * Starts a new request: what this one recorded is written, and the next
+	 * record() begins a new change. The plugin never calls this; long-running
+	 * processes and tests do.
 	 */
 	public static function reset_request(): void {
+		self::flush();
 		self::$current = [];
+	}
+
+	/**
+	 * Writes the changes this request recorded. Runs first at shutdown.
+	 */
+	public static function flush(): void {
+		$pending       = self::$pending;
+		self::$pending = [];
+		foreach ( $pending as $user_id => $change ) {
+			set_transient( self::key( (int) $user_id ), self::summed( $change ), self::TTL );
+		}
 	}
 
 	/**
@@ -79,7 +103,7 @@ final class Change_Log {
 
 		$change = null;
 		if ( isset( self::$current[ $user_id ] ) ) {
-			$existing = $this->latest( $user_id );
+			$existing = self::$pending[ $user_id ] ?? $this->latest( $user_id );
 			if ( null !== $existing && self::$current[ $user_id ] === $existing['id'] && $action === $existing['action'] ) {
 				$change = $existing;
 			}
@@ -151,6 +175,9 @@ final class Change_Log {
 	 * @return array<string,mixed>|null
 	 */
 	public function latest( int $user_id ): ?array {
+		if ( isset( self::$pending[ $user_id ] ) ) {
+			return self::summed( self::$pending[ $user_id ] );
+		}
 		$change = get_transient( self::key( $user_id ) );
 		return is_array( $change ) && isset( $change['id'] ) ? $change : null;
 	}
@@ -167,7 +194,7 @@ final class Change_Log {
 			return;
 		}
 		$change['shown'] = true;
-		set_transient( self::key( $user_id ), $change, self::TTL );
+		self::save( $user_id, $change );
 	}
 
 	/**
@@ -176,17 +203,28 @@ final class Change_Log {
 	 * @param int $user_id User ID.
 	 */
 	public function forget( int $user_id ): void {
+		unset( self::$pending[ $user_id ] );
 		delete_transient( self::key( $user_id ) );
 	}
 
 	/**
-	 * Sums the roots, keeps the reparent roots' own IDs within one budget, merges the IDs and saves.
+	 * Merges the IDs and saves.
 	 *
-	 * The IDs and slugs of the roots whose subpages moved up together stay
-	 * within the count cap, later roots trimmed first, so a bulk trash of many
-	 * parents stays a small transient. Only the pairs read them, and only for
-	 * those roots; every other root keeps its own IDs, at most MAX_IDS each, as
-	 * before. A trimmed root keeps its counts, so its pairs show as incomplete.
+	 * @param int                 $user_id User ID.
+	 * @param array<string,mixed> $change  Change.
+	 * @param int[]               $ids     IDs to add.
+	 */
+	private function store( int $user_id, array $change, array $ids ): void {
+		$change['ids']     = array_slice( array_values( array_unique( array_merge( array_map( 'intval', (array) $change['ids'] ), array_map( 'intval', $ids ) ) ) ), 0, self::MAX_IDS );
+		$change['updated'] = time();
+		self::save( $user_id, $change );
+	}
+
+	/**
+	 * Saves a change: the one this request recorded waits in memory until the
+	 * request ends, and one from an earlier request, which a background batch
+	 * or a notice updates, is written now. Once shutdown has begun nothing
+	 * would write it later, so it is written now too.
 	 *
 	 * set_transient() returns false both when the save fails and when nothing
 	 * changed, so its result says nothing reliable here. Nothing depends on it:
@@ -194,9 +232,34 @@ final class Change_Log {
 	 *
 	 * @param int                 $user_id User ID.
 	 * @param array<string,mixed> $change  Change.
-	 * @param int[]               $ids     IDs to add.
 	 */
-	private function store( int $user_id, array $change, array $ids ): void {
+	private static function save( int $user_id, array $change ): void {
+		if ( ( self::$current[ $user_id ] ?? '' ) !== $change['id'] ) {
+			unset( self::$pending[ $user_id ] );
+			set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
+			return;
+		}
+		self::$pending[ $user_id ] = $change;
+		if ( did_action( 'shutdown' ) ) {
+			self::flush();
+		} elseif ( false === has_action( 'shutdown', [ self::class, 'flush' ] ) ) {
+			add_action( 'shutdown', [ self::class, 'flush' ], 0 );
+		}
+	}
+
+	/**
+	 * The change with its roots summed and the reparent roots' own IDs within one budget.
+	 *
+	 * The IDs and slugs of the roots whose subpages moved up together stay
+	 * within the count cap, later roots trimmed first, so a bulk trash of many
+	 * parents stays a small transient. Only the pairs read them, and only for
+	 * those roots; every other root keeps its own IDs, at most MAX_IDS each, as
+	 * before. A trimmed root keeps its counts, so its pairs show as incomplete.
+	 *
+	 * @param array<string,mixed> $change Change.
+	 * @return array<string,mixed>
+	 */
+	private static function summed( array $change ): array {
 		$counts = self::empty_counts();
 		$budget = Subtree::count_cap();
 		foreach ( $change['roots'] as $root_id => $root ) {
@@ -212,11 +275,9 @@ final class Change_Log {
 			$change['roots'][ $root_id ]['ids']   = $own;
 			$change['roots'][ $root_id ]['slugs'] = array_intersect_key( (array) ( $root['slugs'] ?? [] ), array_flip( $own ) );
 		}
-		$change['counts']  = $counts;
-		$change['ids']     = array_slice( array_values( array_unique( array_merge( array_map( 'intval', (array) $change['ids'] ), array_map( 'intval', $ids ) ) ) ), 0, self::MAX_IDS );
-		$change['updated'] = time();
+		$change['counts'] = $counts;
 
-		set_transient( self::key( $user_id ), $change, self::TTL );
+		return $change;
 	}
 
 	/**
