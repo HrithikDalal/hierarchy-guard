@@ -49,18 +49,17 @@ final class Batch_Resolver {
 	 * a model of the server can tell it: the request must be a 404 by
 	 * Rules::is_404(), and Rules::resolve() must lead to the page, on facts
 	 * read ahead. Where the model cannot tell for sure, the path is not
-	 * served. A path with more segments than the server's cap is not served,
-	 * though whether a page in the trash holds it is still read. The server
-	 * tries a type whose rewrite prefix starts the request before this one,
-	 * longest prefix first, so a path one of those resolves is that post's.
+	 * served. A path with more segments than the server's cap is not served.
+	 * The server tries a type whose rewrite prefix starts the request before
+	 * this one, longest prefix first, so a path one of those resolves is that
+	 * post's.
 	 *
-	 * @param string[]                                $paths         Normalized old paths, at most the count cap.
-	 * @param string                                  $post_type     Post type name.
-	 * @param array<string,array{live:int,held:bool}> $facts         Ledger facts read so far, by path; more are added, for every path.
-	 * @param bool                                    $every_request Whether every path is looked up as a request, so each answer that is no redirect says whether WordPress shows something there.
-	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is shown there (always told with $every_request, otherwise when known).
+	 * @param string[]                                $paths     Normalized old paths, at most the count cap.
+	 * @param string                                  $post_type Post type name.
+	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts read so far, by path; more are added, for every path.
+	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there.
 	 */
-	public static function served( array $paths, string $post_type, array &$facts, bool $every_request = false ): array {
+	public static function served( array $paths, string $post_type, array &$facts ): array {
 		$prefix = Server::prefix( $post_type );
 		$room   = self::room( $post_type );
 		$out    = [];
@@ -74,7 +73,7 @@ final class Batch_Resolver {
 			}
 			$within[ $path ] = true;
 		}
-		$found = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, $every_request, true, array_map( 'strval', array_keys( $out ) ) );
+		$found = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true );
 
 		// The candidates the server tries before this type's own, by path.
 		$before = [];
@@ -102,7 +101,7 @@ final class Batch_Resolver {
 		$resolved = [];
 		foreach ( $asks as $type => $by_path ) {
 			$other             = [];
-			$resolved[ $type ] = self::run( array_map( 'strval', array_keys( $by_path ) ), (string) $type, $other, false, false );
+			$resolved[ $type ] = self::run( array_map( 'strval', array_keys( $by_path ) ), (string) $type, $other, false );
 		}
 		foreach ( $before as $start => [ $list, $own ] ) {
 			$target = $own ? $found[ $start ] : 0;
@@ -146,22 +145,20 @@ final class Batch_Resolver {
 	 * that reaches a rewritten path core could not be asked about any more
 	 * ends UNKNOWN, as does one the waves do not finish.
 	 *
-	 * @param string[]                                $paths         Normalized old paths.
-	 * @param string                                  $post_type     Post type name.
-	 * @param array<string,array{live:int,held:bool}> $facts         Ledger facts read so far, by path; more are added.
-	 * @param bool                                    $every_request See served().
-	 * @param bool                                    $requests      Whether each path is a request that must be a 404 first.
-	 * @param string[]                                $also          More paths whose own ledger facts are read with the first.
+	 * @param string[]                                $paths     Normalized old paths.
+	 * @param string                                  $post_type Post type name.
+	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts read so far, by path; more are added.
+	 * @param bool                                    $requests  Whether each path is a request that must be a 404 first.
 	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, UNKNOWN when it cannot be told.
 	 */
-	private static function run( array $paths, string $post_type, array &$facts, bool $every_request, bool $requests, array $also = [] ): array {
+	private static function run( array $paths, string $post_type, array &$facts, bool $requests ): array {
 		$view    = new Prefetched_View( $post_type, $facts );
 		$out     = [];
 		$pending = [];
 		foreach ( $paths as $path ) {
 			$pending[ $path ] = $path;
 		}
-		$first = array_values( array_filter( array_unique( array_merge( self::prefixes( $paths ), $also ) ), static fn( string $path ): bool => ! isset( $facts[ $path ] ) ) );
+		$first = array_values( array_filter( self::prefixes( $paths ), static fn( string $path ): bool => ! isset( $facts[ $path ] ) ) );
 		if ( [] !== $first ) {
 			$facts += self::ledger_facts( $first, $post_type );
 		}
@@ -202,7 +199,7 @@ final class Batch_Resolver {
 						$out[ $start ] = (int) $target->ID;
 						continue;
 					}
-					if ( null === $target && ( ! $every_request || ! $view->guessed() ) ) {
+					if ( null === $target ) {
 						$out[ $start ] = $view->knows( $start ) && ! $view->is_404( $start, $post_type ) ? self::NOT_404 : 0;
 						continue;
 					}
@@ -210,12 +207,10 @@ final class Batch_Resolver {
 					// The facts it asked for are read next; it runs again then.
 					unset( $unread );
 				} catch ( UnexpectedValueException $unknown ) {
-					// Which of the posts at a rewritten path core finds is not known: unless the request is read yet, that ends it.
+					// Which of the posts at a rewritten path core finds is not known: that ends it.
 					unset( $unknown );
-					if ( ! $every_request || ! $view->guessed() ) {
-						$out[ $start ] = self::UNKNOWN;
-						continue;
-					}
+					$out[ $start ] = self::UNKNOWN;
+					continue;
 				}
 				$view->keep();
 				$next[ $start ] = [] !== $trace ? (string) $trace[ count( $trace ) - 1 ][2] : $start;

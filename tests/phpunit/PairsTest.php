@@ -691,7 +691,7 @@ final class PairsTest extends WP_UnitTestCase {
 		);
 		$facts = [];
 
-		$served = Batch_Resolver::served( [ 'news', 'company', 'company/services', 'company/about', 'company/about/history' ], 'page', $facts, true );
+		$served = Batch_Resolver::served( [ 'news', 'company', 'company/services', 'company/about', 'company/about/history' ], 'page', $facts );
 		ksort( $served );
 
 		$this->assertSame(
