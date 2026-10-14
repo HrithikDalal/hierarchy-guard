@@ -471,7 +471,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertFalse( $root['job'], 'Nothing is still moving.' );
 		$this->assertSame( 5, $root['counts']['moved'] );
 		$this->assertSame( 5, $change['counts']['moved'] );
-		$this->assertEqualsCanonicalizing( [ $this->ids['team'], $this->ids['history'], $this->ids['a'], $this->ids['b'], $this->ids['c'] ], $root['ids'], 'Every page the run moved stays listable after a delete for good.' );
 	}
 
 	public function test_the_end_of_the_trash_request_keeps_what_a_background_run_did_since(): void {
@@ -489,7 +488,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$root   = $change['roots'][ $this->ids['about'] ];
 		$this->assertFalse( $root['job'], 'The request’s own write does not take back what the run stored.' );
 		$this->assertSame( 5, $root['counts']['moved'] );
-		$this->assertCount( 5, $root['ids'] );
 		$this->assertSame( 1, $change['roots'][ $services ]['counts']['kept'], 'What the request recorded after the job was queued is written too.' );
 		$this->assertSame( 5, $change['counts']['moved'] );
 		$this->assertSame( 1, $change['counts']['kept'] );
@@ -535,7 +533,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$about  = $change['roots'][ $this->ids['about'] ];
 		$this->assertFalse( $about['job'] );
 		$this->assertSame( 5, $about['counts']['moved'] );
-		$this->assertCount( 5, $about['ids'] );
 		$this->assertSame( 1, $change['roots'][ $services ]['counts']['kept'] );
 		$this->assertSame( [ '5 subpages moved up one level.', '1 subpage stayed where it is.' ], Notices::sentences( $change ), 'Nothing says pages are still moving.' );
 		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'No job is left that could correct it later.' );
@@ -572,7 +569,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$change = $this->stored_change( $this->admin );
 		$this->assertFalse( $change['roots'][ $about ]['job'] );
 		$this->assertSame( 5, $change['roots'][ $about ]['counts']['moved'] );
-		$this->assertCount( 5, $change['roots'][ $about ]['ids'] );
 		$this->assertFalse( $change['roots'][ $careers ]['job'] );
 		$this->assertSame( 4, $change['roots'][ $careers ]['counts']['moved'] );
 		$this->assertSame( [ '9 subpages moved up one level.' ], Notices::sentences( $change ) );

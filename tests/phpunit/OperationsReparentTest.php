@@ -85,7 +85,6 @@ final class OperationsReparentTest extends WP_UnitTestCase {
 		}
 		$this->assertSame( $this->ids['team'], (int) get_post( $this->ids['leadership'] )->post_parent, 'Grandchildren travel with their parent.' );
 		$this->assertSame( 2, $job['counts']['moved'] );
-		$this->assertSame( [ $this->ids['team'], $this->ids['history'] ], $job['ids'] );
 	}
 
 	public function test_records_one_alias_on_the_new_parent_and_remembers_it_on_the_root(): void {

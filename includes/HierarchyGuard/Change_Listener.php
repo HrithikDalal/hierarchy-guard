@@ -191,7 +191,6 @@ final class Change_Listener {
 					'policy' => '',
 					'counts' => Change_Log::empty_counts(),
 				],
-				[],
 				$origin,
 				'editor' === $origin || ( 'list' === $origin && wp_doing_ajax() )
 			);

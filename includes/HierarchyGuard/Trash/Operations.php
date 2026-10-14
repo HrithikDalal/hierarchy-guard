@@ -29,7 +29,6 @@ final class Operations {
 
 	public const DEFAULT_THRESHOLD      = 200;
 	public const DEFAULT_CORE_THRESHOLD = 25;
-	public const MAX_REMEMBERED         = 200;
 
 	/**
 	 * A move younger than this is taken back without recording its interim URL:
@@ -126,8 +125,6 @@ final class Operations {
 			'stack'     => [ [ $root_id, 0 ] ],
 			'counts'    => Change_Log::empty_counts(),
 			'kept_ids'  => [],
-			'ids'       => [],
-			'slugs'     => [],
 			'work'      => [
 				'moves' => 0,
 				'calls' => 0,
@@ -244,9 +241,6 @@ final class Operations {
 			}
 
 			Markers::add( $child_id, Markers::moved_key( $root ), Markers::encode_moved( $to, $result['old_slug'], $result['slug'], $now ) );
-			if ( count( (array) ( $job['slugs'] ?? [] ) ) < self::MAX_REMEMBERED ) {
-				$job['slugs'][ $child_id ] = $result['old_slug'];
-			}
 			if ( $result['renamed'] ) {
 				++$job['counts']['renamed'];
 				if ( $result['recordable'] && $this->recording() ) {
@@ -278,7 +272,7 @@ final class Operations {
 		}
 
 		$job['finished'] = count( $children ) < $moves;
-		return $this->remember( $job, $moved );
+		return $job;
 	}
 
 	/**
@@ -303,7 +297,6 @@ final class Operations {
 		$stack   = (array) $job['stack'];
 		$seen    = 0;
 		$used    = 0;
-		$trashed = [];
 
 		while ( [] !== $stack && $used < $calls && $seen < $moves ) {
 			$top    = count( $stack ) - 1;
@@ -350,7 +343,6 @@ final class Operations {
 			foreach ( array_reverse( Subtree::with_live_children( $now_trashed, $type ) ) as $parent_id ) {
 				$stack[] = [ $parent_id, 0 ];
 			}
-			$trashed = array_merge( $trashed, $now_trashed );
 		}
 
 		$job['stack']    = $stack;
@@ -360,7 +352,7 @@ final class Operations {
 		];
 		$job['finished'] = [] === $stack;
 
-		return $this->remember( $job, $trashed );
+		return $job;
 	}
 
 	/**
@@ -404,11 +396,10 @@ final class Operations {
 			return $job;
 		}
 
-		$root     = (int) $job['root'];
-		$rows     = Markers::rows( Markers::moved_key( $root ), $moves, (int) $job['cursor'] );
-		$restored = [];
-		$by_from  = [];
-		$now      = time();
+		$root    = (int) $job['root'];
+		$rows    = Markers::rows( Markers::moved_key( $root ), $moves, (int) $job['cursor'] );
+		$by_from = [];
+		$now     = time();
 		_prime_post_caches( array_column( $rows, 'post_id' ), false, false );
 
 		foreach ( $rows as $row ) {
@@ -433,7 +424,6 @@ final class Operations {
 					update_post_meta( $id, '_wp_desired_post_slug', $moved['original'] );
 				}
 				++$job['counts']['moved'];
-				$restored[] = $id;
 				continue;
 			}
 
@@ -458,7 +448,6 @@ final class Operations {
 				++$job['counts']['renamed'];
 			}
 			++$job['counts']['moved'];
-			$restored[]                = $id;
 			$by_from[ $moved['to'] ][] = $id;
 		}
 
@@ -473,7 +462,7 @@ final class Operations {
 			$job['cursor'] = 0;
 		}
 
-		return $this->remember( $job, $restored );
+		return $job;
 	}
 
 	/**
@@ -489,12 +478,11 @@ final class Operations {
 			return $job;
 		}
 
-		$root     = (int) $job['root'];
-		$core     = Request::core_ids();
-		$rows     = Markers::rows( Markers::trashed_key( $root ), $calls, (int) $job['cursor'] );
-		$done     = [];
-		$restored = [];
-		$used     = 0;
+		$root = (int) $job['root'];
+		$core = Request::core_ids();
+		$rows = Markers::rows( Markers::trashed_key( $root ), $calls, (int) $job['cursor'] );
+		$done = [];
+		$used = 0;
 		_prime_post_caches( array_column( $rows, 'post_id' ), false, false );
 
 		foreach ( $rows as $row ) {
@@ -521,7 +509,6 @@ final class Operations {
 			$done[] = $row;
 			if ( '' !== $status ) {
 				++$job['counts']['restored'];
-				$restored[] = $id;
 			}
 		}
 
@@ -529,7 +516,7 @@ final class Operations {
 		$job['work']['calls'] += $used;
 		$job['finished']       = count( $rows ) < $calls;
 
-		return $this->remember( $job, $restored );
+		return $job;
 	}
 
 	/**
@@ -668,17 +655,5 @@ final class Operations {
 	 */
 	private function recording(): bool {
 		return '' !== (string) get_option( 'permalink_structure' );
-	}
-
-	/**
-	 * Adds affected IDs to the job, up to MAX_REMEMBERED.
-	 *
-	 * @param array<string,mixed> $job Job.
-	 * @param int[]               $ids Affected IDs.
-	 * @return array<string,mixed>
-	 */
-	private function remember( array $job, array $ids ): array {
-		$job['ids'] = array_slice( array_merge( (array) $job['ids'], $ids ), 0, self::MAX_REMEMBERED );
-		return $job;
 	}
 }
