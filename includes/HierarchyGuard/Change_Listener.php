@@ -214,7 +214,7 @@ final class Change_Listener {
 		if ( wp_doing_ajax() ) {
 			return 'inline-save' === $action ? 'list' : '';
 		}
-		if ( [] !== Request::bulk_edit_ids() ) {
+		if ( '' !== Request::bulk_edit_key() ) {
 			return 'list';
 		}
 		return 'post.php' === ( $GLOBALS['pagenow'] ?? '' ) && 'editpost' === $action ? 'classic' : '';
@@ -231,12 +231,12 @@ final class Change_Listener {
 	 * @return string|null
 	 */
 	private function bulk_path( int $post_id, WP_Post $before ): ?string {
-		$ids = Request::bulk_edit_ids();
-		if ( [] === $ids ) {
+		$key = Request::bulk_edit_key();
+		if ( '' === $key ) {
 			return null;
 		}
-		$key = implode( ',', $ids );
 		if ( null === $this->bulk || $key !== $this->bulk['ids'] ) {
+			$ids = Request::bulk_edit_ids();
 			Batch_Resolver::prime_with_ancestors( $ids );
 			$as_before = [ $post_id => $before ];
 			$paths     = [];

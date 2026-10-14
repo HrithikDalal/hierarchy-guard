@@ -373,6 +373,39 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$this->assertSame( 1, $writes, 'One write for the whole Bulk Edit, not one per page.' );
 	}
 
+	public function test_a_bulk_edit_of_a_999_page_selection_reads_the_selection_once(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		$target = $this->page( 'target' );
+		$ids    = [];
+		for ( $i = 0; $i < 20; $i++ ) {
+			$ids[] = $this->page( 'bulk-' . $i, $this->company );
+		}
+		// The rest of a 999-row selection, ending with one ID to count the reads by.
+		$selection = array_merge( $ids, range( 900000001, 900000978 ), [ 999999999 ] );
+		$this->assertCount( 999, $selection );
+		$parses = 0;
+		add_filter(
+			'sanitize_text_field',
+			static function ( $filtered, $str ) use ( &$parses ) {
+				if ( '999999999' === $str ) {
+					++$parses;
+				}
+				return $filtered;
+			},
+			10,
+			2
+		);
+
+		$this->bulk_edit( $selection, $target );
+
+		$this->assertSame( 1, $parses, 'Each of the 20 saves asks for the selection; it is parsed once.' );
+		$change = $this->log->latest( $user );
+		$this->assertSame( $ids, array_keys( $change['roots'] ) );
+		$this->assertSame( 'company/bulk-0', $change['roots'][ $ids[0] ]['path'] );
+		$this->assertSame( 'list', $change['origin'] );
+	}
+
 	public function test_a_save_records_where_it_was_made_and_whether_it_was_shown_there(): void {
 		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
 		wp_set_current_user( $user );
