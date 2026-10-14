@@ -2,7 +2,8 @@
 /**
  * Seeded random histories against the resolver: every pair a change lists is
  * one the site serves, a save or a trash lists the URLs it changed, and a
- * list is gone once a page it lists redirects for is deleted for good.
+ * list is gone once the page a save moved, or a trashed parent whose subpages
+ * moved up, is deleted for good.
  *
  * @package HierarchyGuard
  */

@@ -19,8 +19,8 @@ use WP_Post;
  * The block sources: one per page a save moved or renamed, one per root of a
  * trash change that is still in the trash. A block names its old path, its
  * head, the page its new URLs start under, and the first-level pages its walk
- * starts from. Once a page a change lists redirects for is deleted for good,
- * the change has no blocks: its list is gone.
+ * starts from. Once the page a save moved, or a trashed parent whose subpages
+ * moved up, is deleted for good, the change has no blocks: its list is gone.
  */
 final class Pairs_Blocks {
 
