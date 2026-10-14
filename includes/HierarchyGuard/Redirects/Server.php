@@ -198,7 +198,7 @@ final class Server {
 	 * Splits $wp->request into the page path and the suffixes core appends to it.
 	 *
 	 * @param string $request Home path removed, slashes trimmed, still percent-encoded.
-	 * @return array{path:string,page:int,paged:int,feed:string,embed:bool}
+	 * @return array{path:string,page:int,paged:int,cpage:int,trackback:bool,feed:string,embed:bool}
 	 */
 	private function parse_request( string $request ): array {
 		global $wp_rewrite;
@@ -206,12 +206,15 @@ final class Server {
 		$index = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->index : 'index.php';
 		$feeds = $wp_rewrite instanceof WP_Rewrite ? (array) $wp_rewrite->feeds : [ 'feed', 'rdf', 'rss', 'rss2', 'atom' ];
 		$base  = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->pagination_base : 'page';
+		$cbase = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->comments_pagination_base : 'comment-page';
 		$parts = [
-			'path'  => '',
-			'page'  => 0,
-			'paged' => 0,
-			'feed'  => '',
-			'embed' => false,
+			'path'      => '',
+			'page'      => 0,
+			'paged'     => 0,
+			'cpage'     => 0,
+			'trackback' => false,
+			'feed'      => '',
+			'embed'     => false,
 		];
 
 		$request = trim( $request, '/' );
@@ -225,6 +228,12 @@ final class Server {
 		if ( 'embed' === $last ) {
 			array_pop( $segments );
 			$parts['embed'] = true;
+		} elseif ( 'trackback' === $last && count( $segments ) > 1 ) {
+			array_pop( $segments );
+			$parts['trackback'] = true;
+		} elseif ( count( $segments ) > 1 && 1 === preg_match( '/^' . preg_quote( $cbase, '/' ) . '-(\d+)$/', $last, $cpage ) ) {
+			array_pop( $segments );
+			$parts['cpage'] = (int) $cpage[1];
 		} elseif ( in_array( $last, $feeds, true ) ) {
 			array_pop( $segments );
 			$parts['feed'] = 'feed' === $last ? get_default_feed() : $last;
@@ -284,15 +293,24 @@ final class Server {
 	 *
 	 * @param string                                                       $url     Target permalink.
 	 * @param WP_Post                                                      $target  Target post.
-	 * @param array{path:string,page:int,paged:int,feed:string,embed:bool} $request Parsed request.
+	 * @param array{path:string,page:int,paged:int,cpage:int,trackback:bool,feed:string,embed:bool} $request Parsed request.
 	 */
 	private function reapply_suffixes( string $url, WP_Post $target, array $request ): string {
+		global $wp_rewrite;
+
 		if ( $request['embed'] ) {
 			return user_trailingslashit( trailingslashit( $url ) . 'embed', 'embed' );
 		}
 		if ( '' !== $request['feed'] ) {
 			$feed = (string) get_post_comments_feed_link( $target->ID, $request['feed'] );
 			return '' !== $feed ? $feed : $url;
+		}
+		if ( $request['trackback'] ) {
+			return user_trailingslashit( trailingslashit( $url ) . 'trackback', 'single_trackback' );
+		}
+		if ( $request['cpage'] > 0 ) {
+			$base = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->comments_pagination_base : 'comment-page';
+			return user_trailingslashit( trailingslashit( $url ) . $base . '-' . $request['cpage'], 'commentpaged' );
 		}
 		if ( $request['paged'] > 1 ) {
 			return user_trailingslashit( trailingslashit( $url ) . 'page/' . $request['paged'], 'paged' );
