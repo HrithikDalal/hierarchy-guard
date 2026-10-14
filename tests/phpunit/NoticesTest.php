@@ -100,11 +100,13 @@ final class NoticesTest extends WP_UnitTestCase {
 	 */
 	private function save_about(): array {
 		$this->set_permalink_structure( '/%postname%/' );
-		wp_update_post(
-			[
-				'ID'        => $this->ids['about'],
-				'post_name' => 'about-us',
-			]
+		$this->as_classic_save(
+			fn() => wp_update_post(
+				[
+					'ID'        => $this->ids['about'],
+					'post_name' => 'about-us',
+				]
+			)
 		);
 		return $this->log->latest( $this->admin );
 	}
@@ -329,6 +331,38 @@ final class NoticesTest extends WP_UnitTestCase {
 
 		$this->trash_about();
 		$this->assertSame( '', $this->rendered_on_edit( $this->ids['company'] ), 'A trash is no save.' );
+	}
+
+	public function test_a_save_made_elsewhere_prints_nothing_on_the_classic_screen(): void {
+		$this->set_permalink_structure( '/%postname%/' );
+		$saves = [
+			'Quick Edit'   => fn() => $this->as_quick_edit(
+				fn() => wp_update_post(
+					[
+						'ID'        => $this->ids['about'],
+						'post_name' => 'about-quick',
+					]
+				)
+			),
+			'block editor' => fn() => $this->assertSame( 200, $this->rest_save( $this->ids['about'], 'about-blocks' ) ),
+			'Bulk Edit'    => fn() => $this->bulk_edit( [ $this->ids['about'] ], 0 ),
+			'code'         => fn() => wp_update_post(
+				[
+					'ID'        => $this->ids['about'],
+					'post_name' => 'about-code',
+				]
+			),
+		];
+		foreach ( $saves as $where => $save ) {
+			Change_Log::reset_request();
+			$save();
+			$change = $this->log->latest( $this->admin );
+			$this->assertSame( 'save', $change['action'], $where );
+			$this->assertNotNull( $this->notice->urls_notice( $change ), $where . ': the save changed URLs.' );
+
+			Change_Log::reset_request();
+			$this->assertSame( '', $this->rendered_on_edit( $this->ids['about'] ), $where . ': a later visit to the classic edit screen.' );
+		}
 	}
 
 	public function test_trash_sentences_for_one_page(): void {

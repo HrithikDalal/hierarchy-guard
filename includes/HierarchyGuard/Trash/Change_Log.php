@@ -94,9 +94,11 @@ final class Change_Log {
 	 * @param string              $post_type Post type of the root.
 	 * @param array<string,mixed> $entry     Keys: root, to, policy, fallback, path, counts, kept_ids, ids, slugs, urls, job.
 	 * @param int[]               $ids       Affected post IDs.
+	 * @param string              $origin    Where a save was made: classic, list, editor, or '' elsewhere. Kept from the change's first root.
+	 * @param bool                $shown     Whether the screen it was made on already shows it. Kept from the change's first root.
 	 * @return string The change ID, or an empty string when nothing was stored.
 	 */
-	public function record( int $user_id, string $action, string $post_type, array $entry, array $ids = [] ): string {
+	public function record( int $user_id, string $action, string $post_type, array $entry, array $ids = [], string $origin = '', bool $shown = false ): string {
 		if ( $user_id <= 0 ) {
 			return '';
 		}
@@ -118,7 +120,8 @@ final class Change_Log {
 				'ids'       => [],
 				'time'      => time(),
 				'updated'   => time(),
-				'shown'     => false,
+				'origin'    => $origin,
+				'shown'     => $shown,
 			];
 			self::$current[ $user_id ] = $change['id'];
 		}

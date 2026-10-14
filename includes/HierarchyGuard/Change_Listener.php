@@ -67,6 +67,14 @@ final class Change_Listener {
 	private ?array $bulk = null;
 
 	/**
+	 * REST route callbacks running now: a save inside one is the block
+	 * editor's, or another REST client's.
+	 *
+	 * @var int
+	 */
+	private int $rest = 0;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Ledger     $ledger Ledger.
@@ -87,6 +95,30 @@ final class Change_Listener {
 		add_action( 'trashed_post', [ $this, 'on_holder_changed' ] );
 		add_action( 'untrashed_post', [ $this, 'on_holder_changed' ] );
 		add_action( 'deleted_post', [ $this, 'on_deleted' ] );
+		add_filter( 'rest_request_before_callbacks', [ $this, 'enter_rest' ] );
+		add_filter( 'rest_request_after_callbacks', [ $this, 'leave_rest' ] );
+	}
+
+	/**
+	 * A REST route callback is about to run.
+	 *
+	 * @param mixed $response The response so far, unchanged.
+	 * @return mixed
+	 */
+	public function enter_rest( $response ) {
+		++$this->rest;
+		return $response;
+	}
+
+	/**
+	 * A REST route callback has run.
+	 *
+	 * @param mixed $response The response, unchanged.
+	 * @return mixed
+	 */
+	public function leave_rest( $response ) {
+		$this->rest = max( 0, $this->rest - 1 );
+		return $response;
 	}
 
 	/**
@@ -114,6 +146,8 @@ final class Change_Listener {
 	 * user, as in cron, nothing is shown. In a Bulk Edit the old path is the
 	 * one the page had before the request, as a parent saved before its
 	 * subpage would otherwise give the subpage a path it had only inside it.
+	 * The change says where the save was made; a screen that shows it in
+	 * place, the block editor's or Quick Edit's, records it as shown.
 	 *
 	 * @param int     $post_id Post ID.
 	 * @param WP_Post $after   Post after the update.
@@ -145,6 +179,7 @@ final class Change_Listener {
 		// Only an old path the ledger now holds on the post is redirected to it; anything else is no change to offer.
 		$user = get_current_user_id();
 		if ( $user > 0 && metadata_exists( 'post', $post_id, Ledger::key( (string) $after->post_type, Paths::normalize( $path ) ) ) ) {
+			$origin = $this->origin();
 			$this->log->record(
 				$user,
 				'save',
@@ -155,9 +190,34 @@ final class Change_Listener {
 					'path'   => $path,
 					'policy' => '',
 					'counts' => Change_Log::empty_counts(),
-				]
+				],
+				[],
+				$origin,
+				'editor' === $origin || ( 'list' === $origin && wp_doing_ajax() )
 			);
 		}
+	}
+
+	/**
+	 * Where a save is being made: `editor` inside a REST route, as the block
+	 * editor saves; `list` for the Pages list's Quick Edit or Bulk Edit;
+	 * `classic` for the classic editor's form; '' for anything else.
+	 *
+	 * @return string
+	 */
+	private function origin(): string {
+		if ( $this->rest > 0 ) {
+			return 'editor';
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read only; core checked the save's own nonce before saving.
+		$action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
+		if ( wp_doing_ajax() ) {
+			return 'inline-save' === $action ? 'list' : '';
+		}
+		if ( [] !== Request::bulk_edit_ids() ) {
+			return 'list';
+		}
+		return 'post.php' === ( $GLOBALS['pagenow'] ?? '' ) && 'editpost' === $action ? 'classic' : '';
 	}
 
 	/**

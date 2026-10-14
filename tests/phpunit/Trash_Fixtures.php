@@ -148,6 +148,53 @@ trait Trash_Fixtures {
 	}
 
 	/**
+	 * Runs a save as the classic editor's form sends it: to post.php, as editpost.
+	 *
+	 * @param callable $save The save.
+	 * @return mixed What the save returns.
+	 */
+	protected function as_classic_save( callable $save ) {
+		$GLOBALS['pagenow'] = 'post.php';
+		$_REQUEST['action'] = 'editpost';
+		try {
+			return $save();
+		} finally {
+			$GLOBALS['pagenow'] = 'index.php';
+			unset( $_REQUEST['action'] );
+		}
+	}
+
+	/**
+	 * Runs a save as the Pages list's Quick Edit sends it: admin-ajax.php's inline-save.
+	 *
+	 * @param callable $save The save.
+	 * @return mixed What the save returns.
+	 */
+	protected function as_quick_edit( callable $save ) {
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		$_REQUEST['action'] = 'inline-save';
+		try {
+			return $save();
+		} finally {
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			unset( $_REQUEST['action'] );
+		}
+	}
+
+	/**
+	 * Saves a page's slug as the block editor does, over the REST API.
+	 *
+	 * @param int    $post_id Page.
+	 * @param string $slug    New slug.
+	 * @return int The response status.
+	 */
+	protected function rest_save( int $post_id, string $slug ): int {
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/pages/' . $post_id );
+		$request->set_body_params( [ 'slug' => $slug ] );
+		return rest_do_request( $request )->get_status();
+	}
+
+	/**
 	 * Saves pages the way the Pages list's Bulk Edit does: core's
 	 * bulk_edit_posts() in edit.php, on the selection in the list's order,
 	 * giving them a new parent.

@@ -373,6 +373,29 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$this->assertSame( 1, $writes, 'One write for the whole Bulk Edit, not one per page.' );
 	}
 
+	public function test_a_save_records_where_it_was_made_and_whether_it_was_shown_there(): void {
+		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
+		wp_set_current_user( $user );
+		$made   = function ( callable $save ) use ( $user ): array {
+			Change_Log::reset_request();
+			$save();
+			$change = $this->log->latest( $user );
+			return [ $change['origin'], $change['shown'] ];
+		};
+		$rename = static fn( int $id, string $slug ): callable => static fn() => wp_update_post(
+			[
+				'ID'        => $id,
+				'post_name' => $slug,
+			]
+		);
+
+		$this->assertSame( [ 'classic', false ], $made( fn() => $this->as_classic_save( $rename( $this->about, 'a1' ) ) ), 'Its notice prints on the edit screen it lands on.' );
+		$this->assertSame( [ 'list', true ], $made( fn() => $this->as_quick_edit( $rename( $this->about, 'a2' ) ) ), 'Quick Edit shows it in place.' );
+		$this->assertSame( [ 'list', false ], $made( fn() => $this->bulk_edit( [ $this->team ], $this->company ) ), 'The Pages list prints it when core redirects back.' );
+		$this->assertSame( [ 'editor', true ], $made( fn() => $this->assertSame( 200, $this->rest_save( $this->about, 'a3' ) ) ), 'The block editor shows it in place.' );
+		$this->assertSame( [ '', false ], $made( $rename( $this->about, 'a4' ) ), 'Code saves it nowhere in particular.' );
+	}
+
 	public function test_a_rest_save_that_changes_the_slug_records_a_change(): void {
 		$user = self::factory()->user->create( [ 'role' => 'administrator' ] );
 		wp_set_current_user( $user );

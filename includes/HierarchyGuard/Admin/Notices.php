@@ -29,8 +29,8 @@ use WP_Screen;
  * change, keeping core's Undo link last, and prints the URLs the trash
  * changed as a notice of its own, styled by what handles them. A save in
  * the classic editor that changed URLs gets the same URLs notice on the
- * edit screen it lands on. While a background batch runs, the list screen
- * says how far it got.
+ * edit screen it lands on, and only there. While a background batch runs,
+ * the list screen says how far it got.
  */
 final class Notices {
 
@@ -294,9 +294,10 @@ final class Notices {
 
 	/**
 	 * Prints the URLs notice of the user's latest change on the classic edit
-	 * screen, once, when that change is a save of the post being edited. Its
-	 * link downloads the CSV, which needs no script. The block editor raises
-	 * its own notice.
+	 * screen, once, when that change is a save of the post being edited made
+	 * in the classic editor: the screen that save lands on. Its link
+	 * downloads the CSV, which needs no script. The block editor and Quick
+	 * Edit raise their own notice, and a Bulk Edit's prints on the Pages list.
 	 *
 	 * @param WP_Screen $screen Edit screen.
 	 */
@@ -307,7 +308,7 @@ final class Notices {
 		}
 		$user   = get_current_user_id();
 		$change = $this->log->latest( $user );
-		if ( null === $change || 'save' !== $change['action'] || ! empty( $change['shown'] ) || ! isset( $change['roots'][ (int) $post->ID ] ) ) {
+		if ( null === $change || 'save' !== $change['action'] || 'classic' !== ( $change['origin'] ?? '' ) || ! empty( $change['shown'] ) || ! isset( $change['roots'][ (int) $post->ID ] ) ) {
 			return;
 		}
 
