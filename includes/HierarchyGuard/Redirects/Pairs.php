@@ -184,8 +184,7 @@ final class Pairs {
 				$headless[ $index ] = true;
 				$unresolved[]       = [
 					'old'    => $old,
-					// A target deleted since is no page at all, not an unpublished one.
-					'reason' => '' !== $reason ? $reason : ( $post instanceof WP_Post ? 'unpublished' : 'none' ),
+					'reason' => '' !== $reason ? $reason : 'unpublished',
 				];
 			}
 
