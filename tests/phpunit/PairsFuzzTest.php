@@ -707,7 +707,8 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Every listed pair the site does not serve, one line each.
+	 * Every listed pair the site does not serve, or serves with another
+	 * status than its CSV row gives it, one line each.
 	 *
 	 * @param array<string,array<string,mixed>> $lists Collected pairs by list.
 	 * @return string[]
@@ -716,6 +717,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		$resolver = new Resolver( new Ledger() );
 		$out      = [];
 		$asked    = [];
+		$codes    = [];
 
 		foreach ( $lists as $name => $collected ) {
 			foreach ( $collected['pairs'] as $pair ) {
@@ -724,6 +726,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 					$out[] = sprintf( 'A: %s lists /%s/ -> %s, the site serves %s [%s]', $name, $pair['old'], $this->name( $pair['id'] ), $this->name( $served ), $this->describe( $pair['old'] ) );
 				}
 				$asked[ $pair['old'] ][ $pair['id'] ] = $name;
+				$codes[ $pair['old'] ][ $pair['id'] ] = ! empty( $pair['temporary'] ) ? 302 : 301;
 			}
 		}
 		if ( [] === $asked ) {
@@ -735,12 +738,15 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		wp_set_current_user( 0 );
 		$server = new Server( new Resolver( new Ledger() ) );
 		foreach ( $asked as $old => $ids ) {
-			$got = $this->request( $server, (string) $old );
+			$got = $this->request( $server, (string) $old, $status );
 			foreach ( $ids as $id => $name ) {
 				++self::$requests;
 				if ( Paths::relative( (string) get_permalink( $id ) ) !== $got ) {
 					$out[] = sprintf( 'A: %s lists /%s/ -> %s, a request for it gets %s', $name, $old, $this->name( $id ), '' !== $got ? $got : 'no redirect' );
+				} elseif ( $codes[ $old ][ $id ] !== $status ) {
+					$out[] = sprintf( 'C: %s lists /%s/ -> %s as a %d, a request for it gets a %d [%s]', $name, $old, $this->name( $id ), $codes[ $old ][ $id ], $status, $this->describe( (string) $old ) );
 				}
+				$this->tally( 302 === $status ? 'pairs served 302' : 'pairs served 301' );
 			}
 		}
 		wp_set_current_user( $user );
@@ -751,13 +757,15 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	/**
 	 * Where the Server redirects a logged-out request for a path, on a real main query.
 	 *
-	 * @param Server $server Server.
-	 * @param string $path   Normalized path.
+	 * @param Server   $server Server.
+	 * @param string   $path   Normalized path.
+	 * @param int|null $status Set to the redirect's status, 0 for none.
 	 * @return string The target relative to the home URL, or an empty string for none.
 	 */
-	private function request( Server $server, string $path ): string {
+	private function request( Server $server, string $path, ?int &$status = null ): string {
 		$this->go_to( Paths::url( 'page', $path ) );
 		$target = $server->target_for_current_request();
+		$status = null === $target ? 0 : (int) $target['status'];
 		return null === $target ? '' : Paths::relative( $target['url'] );
 	}
 

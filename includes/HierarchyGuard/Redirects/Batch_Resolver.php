@@ -11,6 +11,7 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use HierarchyGuard\Trash\Markers;
 use OutOfBoundsException;
 use UnexpectedValueException;
 use WP_Post;
@@ -52,14 +53,17 @@ final class Batch_Resolver {
 	 * served. A path with more segments than the server's cap is not served.
 	 * The server tries a type whose rewrite prefix starts the request before
 	 * this one, longest prefix first, so a path one of those resolves is that
-	 * post's.
+	 * post's. A path redirected to a post of this type is temporary when the
+	 * server would answer it with a 302: a restore from the trash could still
+	 * undo the move the redirect follows.
 	 *
 	 * @param string[]                                $paths     Normalized old paths, at most the count cap.
 	 * @param string                                  $post_type Post type name.
 	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts read so far, by path; more are added, for every path.
+	 * @param array<string,true>|null                 $temporary Set to the paths redirected to a post of this type that are temporary.
 	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there.
 	 */
-	public static function served( array $paths, string $post_type, array &$facts ): array {
+	public static function served( array $paths, string $post_type, array &$facts, ?array &$temporary = null ): array {
 		$prefix = Server::prefix( $post_type );
 		$room   = self::room( $post_type );
 		$out    = [];
@@ -73,7 +77,9 @@ final class Batch_Resolver {
 			}
 			$within[ $path ] = true;
 		}
-		$found = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true );
+		$held  = [];
+		$found = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true, $held );
+		$ours  = $found;
 
 		// The candidates the server tries before this type's own, by path.
 		$before = [];
@@ -116,8 +122,33 @@ final class Batch_Resolver {
 			$found[ $start ] = $target;
 		}
 
+		$chains = [];
 		foreach ( $found as $start => $target ) {
 			$out[ (string) $start ] = self::UNKNOWN === $target ? 0 : $target;
+			if ( $target > 0 && $target === $ours[ $start ] ) {
+				$chains[ (string) $start ] = array_merge( [ $target ], array_map( 'intval', get_post_ancestors( $target ) ) );
+			}
+		}
+		$temporary = self::temporary( $chains, $held );
+		return $out;
+	}
+
+	/**
+	 * The paths the server answers with a 302, as Resolver::resolve() tells
+	 * it: a prefix the rules used is held by a page in the trash, or the
+	 * target or a page above it sits where the trash flow moved it. One query.
+	 *
+	 * @param array<string,int[]> $chains Each path's target and the pages above it, by path.
+	 * @param array<string,true>  $held   Paths whose rules used a prefix a page in the trash holds.
+	 * @return array<string,true>
+	 */
+	private static function temporary( array $chains, array $held ): array {
+		$moved = Markers::moved_among( array_merge( [], ...array_values( $chains ) ) );
+		$out   = [];
+		foreach ( $chains as $path => $ids ) {
+			if ( isset( $held[ $path ] ) || [] !== array_intersect_key( array_flip( $ids ), $moved ) ) {
+				$out[ (string) $path ] = true;
+			}
 		}
 		return $out;
 	}
@@ -149,9 +180,11 @@ final class Batch_Resolver {
 	 * @param string                                  $post_type Post type name.
 	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts read so far, by path; more are added.
 	 * @param bool                                    $requests  Whether each path is a request that must be a 404 first.
+	 * @param array<string,true>|null                 $held      Set to the paths led to a post through a prefix a page in the trash holds.
 	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, UNKNOWN when it cannot be told.
 	 */
-	private static function run( array $paths, string $post_type, array &$facts, bool $requests ): array {
+	private static function run( array $paths, string $post_type, array &$facts, bool $requests, ?array &$held = null ): array {
+		$held    = [];
 		$view    = new Prefetched_View( $post_type, $facts );
 		$out     = [];
 		$pending = [];
@@ -197,6 +230,9 @@ final class Batch_Resolver {
 					$target = ! $requests || $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace ) : null;
 					if ( null !== $target && ! $view->guessed() ) {
 						$out[ $start ] = (int) $target->ID;
+						if ( $temporary ) {
+							$held[ $start ] = true;
+						}
 						continue;
 					}
 					if ( null === $target ) {

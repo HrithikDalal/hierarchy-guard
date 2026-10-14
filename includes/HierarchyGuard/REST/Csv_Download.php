@@ -52,8 +52,8 @@ final class Csv_Download {
 	/**
 	 * A CSV response for pairs in a layout.
 	 *
-	 * @param string                                  $layout Layout name.
-	 * @param array<int,array{old:string,new:string}> $pairs  Pairs.
+	 * @param string                                                  $layout Layout name.
+	 * @param array<int,array{old:string,new:string,temporary?:bool}> $pairs  Pairs.
 	 * @return WP_REST_Response
 	 */
 	public static function response( string $layout, array $pairs ): WP_REST_Response {

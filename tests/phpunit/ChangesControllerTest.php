@@ -99,7 +99,42 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 	public function test_the_csv_of_the_change(): void {
 		$response = $this->get( '/changes/' . $this->change_id . '/csv', [ 'format' => 'generic' ] );
 
-		$this->assertSame( "source,target,code\r\n/company/about/history/,/company/history/,301\r\n/company/about/team/,/company/team/,301\r\n/company/about/team/leadership/,/company/team/leadership/,301\r\n", $response->get_data() );
+		$this->assertSame( "source,target,code\r\n/company/about/history/,/company/history/,302\r\n/company/about/team/,/company/team/,302\r\n/company/about/team/leadership/,/company/team/leadership/,302\r\n", $response->get_data(), 'Restoring about would move its subpages back, so the server answers 302.' );
+	}
+
+	public function test_the_pairs_and_the_csv_of_a_save(): void {
+		Change_Log::reset_request();
+		add_filter( 'wp_untrash_post_status', 'wp_untrash_post_set_previous_status', 10, 3 );
+		wp_untrash_post( $this->ids['about'] );
+		Change_Log::reset_request();
+		$this->assertSame( 200, $this->rest_save( $this->ids['company'], 'firm' ) );
+		$change = ( new Change_Log() )->latest( $this->admin );
+		$this->assertSame( 'save', $change['action'] );
+		Change_Log::reset_request();
+
+		$data = $this->get( '/changes/' . $change['id'] . '/pairs', [ 'per_page' => 2 ] )->get_data();
+		$this->assertSame( 5, $data['total'] );
+		$this->assertSame( 3, $data['pages'] );
+		$this->assertSame(
+			[
+				[
+					'old'       => '/company/',
+					'new'       => '/firm/',
+					'temporary' => false,
+				],
+				[
+					'old'       => '/company/about/',
+					'new'       => '/firm/about/',
+					'temporary' => false,
+				],
+			],
+			$data['pairs']
+		);
+		$this->assertSame(
+			"source,target,regex,code\r\n/company/,/firm/,0,301\r\n/company/about/,/firm/about/,0,301\r\n/company/about/history/,/firm/about/history/,0,301\r\n/company/about/team/,/firm/about/team/,0,301\r\n/company/about/team/leadership/,/firm/about/team/leadership/,0,301\r\n",
+			$this->get( '/changes/' . $change['id'] . '/csv', [ 'format' => 'redirection' ] )->get_data()
+		);
+		$this->assertSame( 404, $this->get( '/changes/' . $this->change_id . '/csv' )->get_status(), 'The save replaced the trash.' );
 	}
 
 	public function test_the_csv_route_answers_with_a_flagged_csv_body(): void {
@@ -111,7 +146,7 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'text/csv; charset=utf-8', $headers['Content-Type'] );
 		$this->assertStringContainsString( 'attachment; filename="hierarchy-guard-redirects-redirection-', $headers['Content-Disposition'] );
-		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,301\r\n", $response->get_data() );
+		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,302\r\n", $response->get_data() );
 
 		ob_start();
 		$served = ( new Csv_Download() )->serve( false, $response, $request );
@@ -136,7 +171,7 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$response = apply_filters( 'rest_post_dispatch', rest_ensure_response( rest_do_request( $request ) ), rest_get_server(), $request ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's hook, run the way the REST server runs it.
 
 		$this->assertSame( 200, $response->get_status() );
-		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,301\r\n", $response->get_data() );
+		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,302\r\n", $response->get_data() );
 	}
 
 	public function test_an_unknown_csv_layout_is_refused(): void {

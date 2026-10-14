@@ -12,7 +12,9 @@ namespace HierarchyGuard\Export;
 /**
  * Builds the CSV a detected redirect plugin imports without editing.
  * Redirection and Safe Redirect Manager read source, target, regex and code;
- * every other plugin gets a plain source, target and code layout.
+ * every other plugin gets a plain source, target and code layout. The code
+ * is the one the built-in server answers with: 302 while a restore from the
+ * trash could still undo the move a redirect follows, 301 otherwise.
  */
 final class Csv {
 
@@ -35,15 +37,15 @@ final class Csv {
 	/**
 	 * The whole file: a header row, then one row per pair.
 	 *
-	 * @param string                                  $layout Layout name.
-	 * @param array<int,array{old:string,new:string}> $pairs  Old and new URLs relative to the home URL.
+	 * @param string                                                  $layout Layout name.
+	 * @param array<int,array{old:string,new:string,temporary?:bool}> $pairs  Old and new URLs relative to the home URL, and whether each is temporary.
 	 * @return string
 	 */
 	public static function build( string $layout, array $pairs ): string {
 		$layout = self::layout( $layout );
 		$lines  = [ self::line( self::LAYOUTS[ $layout ] ) ];
 		foreach ( $pairs as $pair ) {
-			$lines[] = self::line( self::row( $layout, (string) $pair['old'], (string) $pair['new'] ) );
+			$lines[] = self::line( self::row( $layout, (string) $pair['old'], (string) $pair['new'], ! empty( $pair['temporary'] ) ) );
 		}
 		return implode( "\r\n", $lines ) . "\r\n";
 	}
@@ -51,17 +53,18 @@ final class Csv {
 	/**
 	 * One pair's cells in a layout.
 	 *
-	 * @param string $layout  Layout name.
-	 * @param string $old_url Old URL.
-	 * @param string $new_url New URL.
+	 * @param string $layout    Layout name.
+	 * @param string $old_url   Old URL.
+	 * @param string $new_url   New URL.
+	 * @param bool   $temporary Whether a restore from the trash could still undo it.
 	 * @return string[]
 	 */
-	public static function row( string $layout, string $old_url, string $new_url ): array {
+	public static function row( string $layout, string $old_url, string $new_url, bool $temporary = false ): array {
 		$cells = [
 			'source' => $old_url,
 			'target' => $new_url,
 			'regex'  => '0',
-			'code'   => '301',
+			'code'   => $temporary ? '302' : '301',
 		];
 		return array_map( static fn( string $column ): string => $cells[ $column ], self::LAYOUTS[ self::layout( $layout ) ] );
 	}

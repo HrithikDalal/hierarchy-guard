@@ -50,6 +50,22 @@ final class CsvTest extends WP_UnitTestCase {
 		$this->assertSame( "source,target,code\r\n/about/team/,/company/team/,301\r\n", Csv::build( 'generic', [ $this->pairs()[0] ] ) );
 	}
 
+	public function test_a_redirect_a_restore_could_undo_is_a_302_in_every_layout(): void {
+		$pairs                 = $this->pairs();
+		$pairs[0]['temporary'] = false;
+		$pairs[1]['temporary'] = true;
+
+		$this->assertSame(
+			"source,target,regex,code\r\n/about/team/,/company/team/,0,301\r\n/about/team/leadership/,/company/team/leadership/,0,302\r\n",
+			Csv::build( 'redirection', $pairs )
+		);
+		$this->assertSame( Csv::build( 'redirection', $pairs ), Csv::build( 'srm', $pairs ) );
+		$this->assertSame(
+			"source,target,code\r\n/about/team/,/company/team/,301\r\n/about/team/leadership/,/company/team/leadership/,302\r\n",
+			Csv::build( 'generic', $pairs )
+		);
+	}
+
 	public function test_an_unknown_layout_falls_back_to_generic(): void {
 		$this->assertSame( 'generic', Csv::layout( 'nope' ) );
 		$this->assertSame( Csv::build( 'generic', $this->pairs() ), Csv::build( 'nope', $this->pairs() ) );

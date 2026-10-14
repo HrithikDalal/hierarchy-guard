@@ -40,7 +40,7 @@ final class Pairs {
 	 * per root of a trash whose subpages moved up.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
-	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
 	 */
 	public function collect_change( array $change ): array {
 		return $this->cached(
@@ -71,7 +71,7 @@ final class Pairs {
 	 *
 	 * @param array<int,array<string,mixed>> $blocks    Blocks.
 	 * @param string                         $post_type Post type name.
-	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
 	 */
 	public function collect( array $blocks, string $post_type ): array {
 		$cap        = Subtree::count_cap();
@@ -290,7 +290,8 @@ final class Pairs {
 	 * What the resolver does not serve is not listed; a block's own old path it
 	 * serves elsewhere, or that something else is shown at, is in use, and one
 	 * it serves nowhere leads nowhere, or is in the trash when the newest live
-	 * page that held it sits under the trash.
+	 * page that held it sits under the trash. A pair the server answers with a
+	 * 302, as a restore from the trash could still undo it, is temporary.
 	 *
 	 * @param array<int,array<string,mixed>>             $open       Blocks by index.
 	 * @param array<string,mixed>                        $listing    From listing().
@@ -298,7 +299,7 @@ final class Pairs {
 	 * @param string                                     $post_type  Post type name.
 	 * @param array<string,array{live:int,held:bool}>    $facts      Ledger facts read so far, by path.
 	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; one is added per old path with no new URL.
-	 * @return array<int,array{old:string,id:int}>
+	 * @return array<int,array{old:string,id:int,temporary:bool}>
 	 */
 	private static function served_only( array $open, array $listing, array $gone, string $post_type, array $facts, array &$unresolved ): array {
 		$pairs = $listing['pairs'];
@@ -309,8 +310,9 @@ final class Pairs {
 				$heads[ $index ] = (string) $open[ $index ]['old'];
 			}
 		}
-		$served = Batch_Resolver::served( array_values( array_unique( array_merge( array_column( $left, 'old' ), array_values( $heads ) ) ) ), $post_type, $facts );
-		$reason = static fn( int $target, bool $trashed ): string => 0 !== $target ? 'in_use' : ( $trashed ? 'trash' : 'none' );
+		$temporary = [];
+		$served    = Batch_Resolver::served( array_values( array_unique( array_merge( array_column( $left, 'old' ), array_values( $heads ) ) ) ), $post_type, $facts, $temporary );
+		$reason    = static fn( int $target, bool $trashed ): string => 0 !== $target ? 'in_use' : ( $trashed ? 'trash' : 'none' );
 
 		foreach ( $heads as $old ) {
 			$unresolved[] = [
@@ -338,7 +340,12 @@ final class Pairs {
 				];
 			}
 		}
-		return array_values( array_diff_key( $pairs, $dropped, $gone['unheld'] ) );
+		return array_values(
+			array_map(
+				static fn( array $pair ): array => $pair + [ 'temporary' => isset( $temporary[ $pair['old'] ] ) ],
+				array_diff_key( $pairs, $dropped, $gone['unheld'] )
+			)
+		);
 	}
 
 	/**
@@ -347,7 +354,7 @@ final class Pairs {
 	 * @param array<string,mixed> $collected From collect_change().
 	 * @param int                 $page      Page number, from 1.
 	 * @param int                 $per_page  Pairs per page.
-	 * @return array{pairs:array<int,array{old:string,new:string}>,unresolved:array<int,array{old:string,reason:string}>,total:int,capped:bool,page:int,pages:int}
+	 * @return array{pairs:array<int,array{old:string,new:string,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,total:int,capped:bool,page:int,pages:int}
 	 */
 	public function page( array $collected, int $page, int $per_page ): array {
 		$type     = (string) $collected['post_type'];
@@ -376,7 +383,7 @@ final class Pairs {
 	 * Every pair as URLs relative to the home URL, for a download.
 	 *
 	 * @param array<string,mixed> $collected From collect_change().
-	 * @return array<int,array{old:string,new:string}>
+	 * @return array<int,array{old:string,new:string,temporary:bool}>
 	 */
 	public function all( array $collected ): array {
 		$out = [];
@@ -497,11 +504,12 @@ final class Pairs {
 	}
 
 	/**
-	 * Old and new URLs for pairs, priming the posts first.
+	 * Old and new URLs for pairs, priming the posts first, each saying
+	 * whether the server answers it with a 302.
 	 *
-	 * @param array<int,array{old:string,id:int}> $pairs Pairs.
-	 * @param string                              $type  Post type name.
-	 * @return array<int,array{old:string,new:string}>
+	 * @param array<int,array{old:string,id:int,temporary?:bool}> $pairs Pairs.
+	 * @param string                                              $type  Post type name.
+	 * @return array<int,array{old:string,new:string,temporary:bool}>
 	 */
 	private function urls( array $pairs, string $type ): array {
 		_prime_post_caches( array_map( static fn( array $pair ): int => $pair['id'], $pairs ), false, false );
@@ -514,8 +522,9 @@ final class Pairs {
 				continue;
 			}
 			$out[] = [
-				'old' => Paths::relative( $old ),
-				'new' => Paths::relative( $new ),
+				'old'       => Paths::relative( $old ),
+				'new'       => Paths::relative( $new ),
+				'temporary' => ! empty( $pair['temporary'] ),
 			];
 		}
 		return $out;

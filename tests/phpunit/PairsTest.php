@@ -621,13 +621,41 @@ final class PairsTest extends WP_UnitTestCase {
 	 * @return string
 	 */
 	private function served_on_request( string $path ): string {
+		$target = $this->target_on_request( $path );
+		return null === $target ? '' : Paths::relative( $target['url'] );
+	}
+
+	/**
+	 * The Server's redirect for a logged-out request for an old path, on a real main query.
+	 *
+	 * @param string $path Normalized path.
+	 * @return array{url:string,status:int}|null
+	 */
+	private function target_on_request( string $path ): ?array {
 		$user = get_current_user_id();
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		wp_set_current_user( 0 );
 		$this->go_to( Paths::url( 'page', $path ) );
 		$target = ( new Server( new Resolver( new Ledger() ) ) )->target_for_current_request();
 		wp_set_current_user( $user );
-		return null === $target ? '' : Paths::relative( $target['url'] );
+		delete_option( Settings::OPTION );
+		return $target;
+	}
+
+	/**
+	 * Each listed pair with the status the CSV gives it, and the status a
+	 * request for its old URL gets from the Server.
+	 *
+	 * @param array<string,mixed> $collected Collected pairs.
+	 * @return array<string,array{0:int,1:int}> CSV status and served status, by "old -> new" line.
+	 */
+	private function statuses( array $collected ): array {
+		$out = [];
+		foreach ( $this->pairs->all( $collected ) as $row ) {
+			$target                                    = $this->target_on_request( Paths::normalize( $row['old'] ) );
+			$out[ $row['old'] . ' -> ' . $row['new'] ] = [ $row['temporary'] ? 302 : 301, null === $target ? 0 : $target['status'] ];
+		}
+		return $out;
 	}
 
 	/**
@@ -810,6 +838,45 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assert_the_resolver_agrees( $collected );
 	}
 
+	public function test_a_pair_is_temporary_where_the_server_answers_302(): void {
+		$this->assertSame(
+			[
+				'/company/about/ -> /company/about-us/' => [ 301, 301 ],
+				'/company/about/history/ -> /company/about-us/history/' => [ 301, 301 ],
+				'/company/about/team/ -> /company/about-us/team/' => [ 301, 301 ],
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/' => [ 301, 301 ],
+			],
+			$this->statuses( $this->pairs->collect_change( $this->rename( $this->ids['about'], 'about-us' ) ) ),
+			'A rename nothing can undo.'
+		);
+
+		// The trash moved team up; restoring about would move it back.
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['about'] );
+		$this->assertSame(
+			[
+				'/company/team/ -> /company/crew/' => [ 302, 302 ],
+				'/company/team/leadership/ -> /company/crew/leadership/' => [ 302, 302 ],
+			],
+			$this->statuses( $this->pairs->collect_change( $this->rename( $this->ids['team'], 'crew' ) ) ),
+			'A target the trash moved.'
+		);
+	}
+
+	public function test_a_pair_through_an_old_path_a_page_in_the_trash_holds_is_temporary(): void {
+		// An earlier page left /promo/ and went to the trash, keeping its claim on it.
+		$earlier = $this->page( 'promo' );
+		$this->rename( $earlier, 'promo-old' );
+		wp_trash_post( $earlier );
+		$promo = $this->page( 'promo' );
+		$this->page( 'kid', $promo );
+
+		$collected = $this->pairs->collect_change( $this->rename( $promo, 'sale' ) );
+
+		$this->assertSame( [ '/promo/kid/ -> /sale/kid/' => [ 302, 302 ] ], $this->statuses( $collected ) );
+		$this->assertSame( [ '/promo/' ], array_column( $this->pairs->page( $collected, 1, 20 )['unresolved'], 'old' ), 'A restore of the earlier page would take /promo/ back.' );
+	}
+
 	public function test_a_save_lists_no_draft_subpage_but_its_published_subpages(): void {
 		wp_update_post(
 			[
@@ -883,7 +950,7 @@ final class PairsTest extends WP_UnitTestCase {
 
 		$this->pairs->collect_change( $change );
 
-		$this->assertLessThanOrEqual( 9, get_num_queries() - $queries, 'One path lookup for the old path, an index read and a sort per level (about; team and history; leadership), the ledger for the paths listed and their prefixes, and the lookups of the resolver’s check of every pair at once.' );
+		$this->assertLessThanOrEqual( 10, get_num_queries() - $queries, 'One path lookup for the old path, an index read and a sort per level (about; team and history; leadership), the ledger for the paths listed and their prefixes, the lookups of the resolver’s check of every pair at once, and which pages listed a trash moved.' );
 
 		$queries = get_num_queries();
 		$this->pairs->collect_change( $change );
@@ -981,7 +1048,7 @@ final class PairsTest extends WP_UnitTestCase {
 		$fifty = $this->queries_to_collect_save( 'products', 50 );
 
 		$this->assertSame( $five, $fifty, 'Lookups are batched for every block and page, never one per subpage.' );
-		$this->assertLessThanOrEqual( 11, $fifty );
+		$this->assertLessThanOrEqual( 12, $fifty );
 	}
 
 	public function test_collecting_a_save_under_a_hidden_page_costs_the_same_few_queries_for_fifty_subpages(): void {
