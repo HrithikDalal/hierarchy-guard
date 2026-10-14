@@ -2,7 +2,12 @@
  * What the editors say after a save that changed URLs.
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { changeNotice, newChange } from '../change-notice';
+import {
+	afterSave,
+	changeNotice,
+	newChange,
+	requestCounter,
+} from '../change-notice';
 import config from '../config';
 
 const pairs = ( total, capped = false ) => ( { total, capped } );
@@ -28,6 +33,59 @@ describe( 'the change a save made', () => {
 		expect( newChange( 'a', 'a' ) ).toBe( null );
 		expect( newChange( 'a', null ) ).toBe( null );
 		expect( newChange( undefined, null ) ).toBe( null );
+	} );
+} );
+
+describe( 'what a save that edited the URL says once the page is reloaded', () => {
+	const page = ( latest ) => ( { latest_change: latest } );
+
+	it( 'announces a change new to the editor', () => {
+		expect( afterSave( 'a', page( 'b' ) ) ).toEqual( {
+			action: 'announce',
+			change: 'b',
+		} );
+		expect( afterSave( undefined, page( 'b' ) ).change ).toBe( 'b' );
+	} );
+
+	it( 'keeps the notice on screen when the save recorded no new change', () => {
+		expect( afterSave( 'a', page( 'a' ) ) ).toEqual( {
+			action: 'keep',
+			change: null,
+		} );
+		expect( afterSave( 'a', page( null ) ).action ).toBe( 'keep' );
+	} );
+
+	it( 'warns when the page could not be reloaded', () => {
+		expect( afterSave( 'a', null ) ).toEqual( {
+			action: 'failed',
+			change: null,
+		} );
+	} );
+
+	it( 'leaves an answer a later request superseded to that request', () => {
+		expect( afterSave( 'a', undefined ) ).toEqual( {
+			action: 'ignore',
+			change: null,
+		} );
+	} );
+} );
+
+describe( 'a request counter', () => {
+	it( 'says whether a later request was made since', () => {
+		const loads = requestCounter();
+		const first = loads.next();
+		expect( loads.isLatest( first ) ).toBe( true );
+		const second = loads.next();
+		expect( loads.isLatest( first ) ).toBe( false );
+		expect( loads.isLatest( second ) ).toBe( true );
+	} );
+
+	it( 'counts each kind of request on its own', () => {
+		const loads = requestCounter();
+		const other = requestCounter();
+		const ticket = loads.next();
+		other.next();
+		expect( loads.isLatest( ticket ) ).toBe( true );
 	} );
 } );
 

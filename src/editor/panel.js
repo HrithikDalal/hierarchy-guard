@@ -14,7 +14,11 @@ import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { store as noticesStore } from '@wordpress/notices';
 import { fetchHierarchy, fetchPairs } from '../common/api';
-import { changeNotice, newChange } from '../common/change-notice';
+import {
+	afterSave,
+	changeNotice,
+	requestCounter,
+} from '../common/change-notice';
 import config from '../common/config';
 import {
 	countsLine,
@@ -188,30 +192,42 @@ export default function HierarchyPlugin() {
 	// The page's latest change as first loaded: a save's change is the one after it.
 	const baseline = useRef( undefined );
 	const savingUrl = useRef( false );
+	const loads = useRef( null );
+	if ( null === loads.current ) {
+		loads.current = requestCounter();
+	}
 
-	const load = useCallback(
-		() =>
-			fetchHierarchy( postId )
-				.then( ( result ) => {
-					setData( result );
-					setError( '' );
-					if ( undefined === baseline.current ) {
-						baseline.current = result.latest_change || null;
-					}
-					return result;
-				} )
-				.catch( ( failure ) => {
-					setError(
-						failure.message ||
-							__(
-								'The hierarchy couldn’t be loaded.',
-								'hierarchy-guard'
-							)
-					);
-					return null;
-				} ),
-		[ postId ]
-	);
+	// Resolves to the hierarchy, null when it couldn't be loaded, or undefined
+	// when a later load was started since: only the latest answer is current,
+	// as an earlier one may be from before a later save.
+	const load = useCallback( () => {
+		const ticket = loads.current.next();
+		return fetchHierarchy( postId )
+			.then( ( result ) => {
+				if ( ! loads.current.isLatest( ticket ) ) {
+					return undefined;
+				}
+				setData( result );
+				setError( '' );
+				if ( undefined === baseline.current ) {
+					baseline.current = result.latest_change || null;
+				}
+				return result;
+			} )
+			.catch( ( failure ) => {
+				if ( ! loads.current.isLatest( ticket ) ) {
+					return undefined;
+				}
+				setError(
+					failure.message ||
+						__(
+							'The hierarchy couldn’t be loaded.',
+							'hierarchy-guard'
+						)
+				);
+				return null;
+			} );
+	}, [ postId ] );
 
 	// Load once something shows the data: the panel, or the warning before a save.
 	const needed =
@@ -221,7 +237,7 @@ export default function HierarchyPlugin() {
 			requested.current = true;
 			load().then( ( result ) => {
 				// A failed first load is asked again at the next trigger.
-				if ( ! result ) {
+				if ( null === result ) {
 					requested.current = false;
 				}
 			} );
@@ -242,22 +258,39 @@ export default function HierarchyPlugin() {
 		if ( ! saved ) {
 			return;
 		}
-		removeNotice( NOTICE );
 		// Without a baseline, any latest change on the page is new to this session.
 		const before = baseline.current;
 		load().then( ( result ) => {
-			const change = result
-				? newChange( before, result.latest_change )
-				: null;
-			if ( ! change ) {
+			const next = afterSave( before, result );
+			if ( 'failed' === next.action ) {
+				// Which change the save made is not known, so there is nothing to view.
+				createNotice(
+					'warning',
+					__(
+						'This save changed URLs, but their redirects couldn’t be loaded.',
+						'hierarchy-guard'
+					),
+					{ id: NOTICE, isDismissible: true }
+				);
 				return;
 			}
+			// A later load answers instead, or the notice on screen still holds.
+			if ( 'announce' !== next.action ) {
+				return;
+			}
+			const change = next.change;
 			baseline.current = change;
+			// The earlier notice's change is gone now.
+			removeNotice( NOTICE );
+			const current = () => change === baseline.current;
 			const source = { change };
 			const view = () =>
 				setModal( { source, redirects: result.redirects } );
 			fetchPairs( source, 1, 1 )
 				.then( ( pairs ) => {
+					if ( ! current() ) {
+						return;
+					}
 					const notice = changeNotice( pairs, result.redirects );
 					if ( ! notice ) {
 						return;
@@ -279,6 +312,9 @@ export default function HierarchyPlugin() {
 					} );
 				} )
 				.catch( () => {
+					if ( ! current() ) {
+						return;
+					}
 					createNotice(
 						'warning',
 						__(

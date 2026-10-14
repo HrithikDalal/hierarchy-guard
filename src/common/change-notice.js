@@ -22,6 +22,41 @@ export function newChange( before, after ) {
 }
 
 /**
+ * What a save that edited the page's URL says once the page's hierarchy is
+ * reloaded after it.
+ *
+ * @param {string|null|undefined} before The page's latest change before the save, undefined when it was not loaded.
+ * @param {Object|null|undefined} result The reloaded hierarchy; null when the request failed, undefined when a later request answers instead.
+ * @return {{action: string, change: string|null}} `announce` the change; `keep` the notice on screen, as the save recorded no new change; raise the `failed` warning; or `ignore` the answer.
+ */
+export function afterSave( before, result ) {
+	if ( undefined === result ) {
+		return { action: 'ignore', change: null };
+	}
+	if ( null === result ) {
+		return { action: 'failed', change: null };
+	}
+	const change = newChange( before, result.latest_change );
+	return change
+		? { action: 'announce', change }
+		: { action: 'keep', change: null };
+}
+
+/**
+ * Numbers the requests of one kind, so an answer can tell whether a later
+ * request was made since: only the latest one's answer is current.
+ *
+ * @return {{next: function(): number, isLatest: function(number): boolean}} The counter.
+ */
+export function requestCounter() {
+	let last = 0;
+	return {
+		next: () => ++last,
+		isLatest: ( ticket ) => ticket === last,
+	};
+}
+
+/**
  * The notice for a change's redirects, from the first page of its pairs.
  *
  * @param {{total: number, capped: boolean}|null} pairs     The first page of the change's pairs.
