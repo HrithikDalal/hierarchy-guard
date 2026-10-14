@@ -1,7 +1,8 @@
 <?php
 /**
  * Seeded random histories against the resolver: every pair a change lists is
- * one the site serves, and a save lists the URLs it changed.
+ * one the site serves, a save or a trash lists the URLs it changed, and a
+ * list is gone once a page it lists redirects for is deleted for good.
  *
  * @package HierarchyGuard
  */
@@ -38,8 +39,7 @@ use WP_UnitTestCase;
  * attachments named as the last segment of an old two-segment path. The
  * renames and moves are saves through wp_update_post() as the admin, so each
  * records a change, as a trash does. Every change is collected right after
- * the step that made it, and the admin's latest change again at the end,
- * where a root deleted for good since lists nothing.
+ * the step that made it, and the admin's latest change again at the end.
  *
  * - Correct: every listed pair's old URL is a 404 the resolver sends to that
  *   pair's page, and a logged-out request for it is redirected there by the
@@ -47,6 +47,12 @@ use WP_UnitTestCase;
  * - A save lists what it changed: the saved page and every published subpage
  *   under it, each at the URL it had right before the save, unless the
  *   server would not redirect that URL to it.
+ * - A trash lists what it changed, while its pages are in the Trash: every
+ *   published page under them, at the URL it had right before the trash,
+ *   unless the server would not redirect that URL to it.
+ * - Gone: at the end, the latest change's list is gone exactly when a page
+ *   it lists redirects for was deleted for good: a save's page, or a trashed
+ *   parent that moved subpages up.
  *
  * The resolver runs only on a 404, so a URL a published page, a blog post or
  * an attachment uses now is served by it and is no redirect at all, on
@@ -110,6 +116,15 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 * @var array{id:int,before:array<string,int>}|null
 	 */
 	private ?array $saved = null;
+
+	/**
+	 * The trash this step made: the published pages under the pages it
+	 * trashed, by the paths they had right before it; null when the step
+	 * trashed nothing.
+	 *
+	 * @var array<string,int>|null
+	 */
+	private ?array $trashed = null;
 
 	/**
 	 * The changes checked so far, by ID.
@@ -379,6 +394,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		}
 		$id   = $this->pick( $live );
 		$from = $this->path( $id );
+		$this->trashing( [ $id ] );
 		wp_trash_post( $id );
 		return sprintf( 'trash %s %s', $this->made[ $id ], $from );
 	}
@@ -399,6 +415,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		$ids    = mt_rand( 0, 1 ) ? [ $child, $parent ] : [ $parent, $child ];
 		$line   = sprintf( 'bulk trash %s %s', $this->made[ $ids[0] ], $this->made[ $ids[1] ] );
 
+		$this->trashing( $ids );
 		$this->start_core_bulk( 'trash', $ids );
 		foreach ( $ids as $id ) {
 			wp_trash_post( $id );
@@ -605,16 +622,31 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Notes the trash this step makes, right before it.
+	 *
+	 * @param int[] $roots Pages it trashes.
+	 */
+	private function trashing( array $roots ): void {
+		$before = [];
+		foreach ( $roots as $root ) {
+			$before += $this->subtree( $root );
+		}
+		$this->trashed = array_filter( $before, static fn( int $id ): bool => ! in_array( $id, $roots, true ) );
+	}
+
+	/**
 	 * Checks the admin's latest change right after the step that made it,
-	 * while it is fresh: every pair it lists, and, for a save, that it lists
-	 * what the save changed.
+	 * while it is fresh: every pair it lists, and, for a save or a trash,
+	 * that it lists what the step changed.
 	 *
 	 * @return string[] One line per failure.
 	 */
 	private function check_change(): array {
-		$saved       = $this->saved;
-		$this->saved = null;
-		$change      = $this->changes->latest( $this->admin );
+		$saved         = $this->saved;
+		$trashed       = $this->trashed;
+		$this->saved   = null;
+		$this->trashed = null;
+		$change        = $this->changes->latest( $this->admin );
 		if ( null !== $saved && ( null === $change || 'save' !== $change['action'] || ! isset( $change['roots'][ $saved['id'] ] ) ) ) {
 			return [ sprintf( 'B: step %d saved %s and recorded no change', $this->step, $this->made[ $saved['id'] ] ) ];
 		}
@@ -629,22 +661,28 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		$this->tally( $change['action'] . ' pairs', count( $collected['pairs'] ) );
 		$out = $this->check_pairs( [ $name => $collected ] );
 		if ( null !== $saved ) {
-			$out = array_merge( $out, $this->check_save( $name, $collected, $saved['before'] ) );
+			$out = array_merge( $out, $this->check_complete( 'save', $name, $collected, $saved['before'] ) );
+		}
+		if ( null !== $trashed && 'trash' === $change['action'] ) {
+			$out = array_merge( $out, $this->check_complete( 'trash', $name, $collected, $trashed ) );
 		}
 		return $out;
 	}
 
 	/**
-	 * Whether a save's pairs have the saved page and every published subpage
-	 * at the URL it had right before the save, wherever the site redirects
-	 * that URL to it.
+	 * Whether a save's or a trash's pairs have every page it changed at the
+	 * URL it had right before the step, wherever the site redirects that URL
+	 * to it: for a save, the saved page and every published subpage; for a
+	 * trash, every published page under the pages it trashed.
 	 *
+	 * @param string              $kind      save or trash.
 	 * @param string              $name      The list's name.
-	 * @param array<string,mixed> $collected The save's pairs.
-	 * @param array<string,int>   $before    The subtree by the paths it had right before the save.
+	 * @param array<string,mixed> $collected The change's pairs.
+	 * @param array<string,int>   $before    The pages by the paths they had right before the step.
 	 * @return string[] One line per URL the site redirects and the list lacks.
 	 */
-	private function check_save( string $name, array $collected, array $before ): array {
+	private function check_complete( string $kind, string $name, array $collected, array $before ): array {
+		$code   = 'save' === $kind ? 'B' : 'T';
 		$listed = [];
 		foreach ( $collected['pairs'] as $pair ) {
 			$listed[ $pair['old'] ][ $pair['id'] ] = true;
@@ -655,13 +693,13 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		$doubts   = [];
 		foreach ( $before as $old => $id ) {
 			$old = (string) $old;
-			$this->tally( 'save URLs' );
+			$this->tally( $kind . ' URLs' );
 			if ( isset( $listed[ $old ][ $id ] ) ) {
 				continue;
 			}
-			$this->tally( 'save URLs not listed' );
+			$this->tally( $kind . ' URLs not listed' );
 			if ( $this->served( $resolver, $old ) === $id ) {
-				$out[] = sprintf( 'B: %s lacks /%s/ -> %s, which the site serves [%s]', $name, $old, $this->name( $id ), $this->describe( $old ) );
+				$out[] = sprintf( '%s: %s lacks /%s/ -> %s, which the site serves [%s]', $code, $name, $old, $this->name( $id ), $this->describe( $old ) );
 				continue;
 			}
 			// A blog post or an attachment the 404 test says is shown there: a real request says whether it is.
@@ -680,7 +718,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		foreach ( $doubts as $old => $id ) {
 			++self::$requests;
 			if ( Paths::relative( (string) get_permalink( $id ) ) === $this->request( $server, (string) $old ) ) {
-				$out[] = sprintf( 'B: %s lacks /%s/ -> %s, and a request for it is redirected there [%s]', $name, $old, $this->name( $id ), $this->describe( (string) $old ) );
+				$out[] = sprintf( '%s: %s lacks /%s/ -> %s, and a request for it is redirected there [%s]', $code, $name, $old, $this->name( $id ), $this->describe( (string) $old ) );
 			}
 		}
 		wp_set_current_user( $user );
@@ -699,12 +737,43 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 
 	/**
 	 * Every pair the admin's latest change lists, as the redirects modal
-	 * would show it at the end of the history, that the site does not serve.
+	 * would show it at the end of the history, that the site does not serve,
+	 * and whether the list is gone when it should be.
 	 *
 	 * @return string[]
 	 */
 	private function violations(): array {
-		return $this->check_pairs( $this->lists() );
+		$lists = $this->lists();
+		$out   = $this->check_pairs( $lists );
+		if ( [] === $lists ) {
+			return $out;
+		}
+		$change   = $this->changes->latest( $this->admin );
+		$expected = $this->deleted_for_good( $change );
+		if ( $expected ) {
+			$this->tally( 'gone ' . $change['action'] . ' changes at the end' );
+		}
+		if ( $expected !== $lists['the latest change']['gone'] ) {
+			$out[] = sprintf( 'G: the latest change, a %s, is %s', $change['action'], $expected ? 'not gone, though a page it lists redirects for was deleted for good' : 'gone, though no page it lists redirects for was deleted for good' );
+		}
+		return $out;
+	}
+
+	/**
+	 * Whether a page a change lists redirects for no longer exists: a save's
+	 * page, or a trashed parent whose subpages moved up.
+	 *
+	 * @param array<string,mixed> $change A change from Change_Log.
+	 * @return bool
+	 */
+	private function deleted_for_good( array $change ): bool {
+		foreach ( $change['roots'] as $root ) {
+			$lists = 'save' === $change['action'] || ( 'trash' === $change['action'] && Settings::POLICY_REPARENT === $root['policy'] && '' !== $root['path'] && $root['counts']['moved'] > 0 );
+			if ( $lists && false === get_post_status( (int) $root['root'] ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
