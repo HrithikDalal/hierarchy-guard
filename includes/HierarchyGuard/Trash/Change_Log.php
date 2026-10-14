@@ -171,8 +171,8 @@ final class Change_Log {
 	 * run or request that replaces the job, under the same lock. So no other
 	 * process writes the record in between, and it is written whole. The lock
 	 * and the job are the site's own, so the record is written on the job's
-	 * site. It outlives the change by five minutes, as a change can be
-	 * written up to the end of its request, after its jobs' records.
+	 * site. It is kept for thirty-five minutes from its last write, five more
+	 * than the change's TTL.
 	 *
 	 * @param int               $user_id   User whose change it is.
 	 * @param string            $change_id Change ID the job was started with.
