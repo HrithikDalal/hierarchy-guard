@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
 
 /**
@@ -144,6 +145,161 @@ trait Trash_Fixtures {
 	 */
 	protected function end_core_bulk(): void {
 		$GLOBALS['pagenow'] = 'index.php';
-		unset( $_REQUEST['action'], $_REQUEST['ids'], $_REQUEST['post'], $_REQUEST['filter_action'] );
+		unset( $_REQUEST['action'], $_REQUEST['ids'], $_REQUEST['post'], $_REQUEST['filter_action'], $_REQUEST['bulk_edit'] );
+	}
+
+	/**
+	 * Runs a save as the classic editor's form sends it: to post.php, as editpost.
+	 *
+	 * @param callable $save The save.
+	 * @return mixed What the save returns.
+	 */
+	protected function as_classic_save( callable $save ) {
+		$GLOBALS['pagenow'] = 'post.php';
+		$_REQUEST['action'] = 'editpost';
+		try {
+			return $save();
+		} finally {
+			$GLOBALS['pagenow'] = 'index.php';
+			unset( $_REQUEST['action'] );
+		}
+	}
+
+	/**
+	 * Runs a save as the Pages list's Quick Edit sends it: admin-ajax.php's inline-save.
+	 *
+	 * @param callable $save The save.
+	 * @return mixed What the save returns.
+	 */
+	protected function as_quick_edit( callable $save ) {
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		$_REQUEST['action'] = 'inline-save';
+		try {
+			return $save();
+		} finally {
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			unset( $_REQUEST['action'] );
+		}
+	}
+
+	/**
+	 * Saves a page's slug as the block editor does, over the REST API.
+	 *
+	 * @param int    $post_id Page.
+	 * @param string $slug    New slug.
+	 * @return int The response status.
+	 */
+	protected function rest_save( int $post_id, string $slug ): int {
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/pages/' . $post_id );
+		$request->set_body_params( [ 'slug' => $slug ] );
+		return rest_do_request( $request )->get_status();
+	}
+
+	/**
+	 * Runs code as another process, such as a cron run, would while this
+	 * request is still going: with an object cache and a change log of its
+	 * own, so it sees only what is stored.
+	 *
+	 * @param callable $run The code.
+	 * @return mixed What it returns.
+	 */
+	protected function in_another_process( callable $run ) {
+		return ( $this->another_process() )( $run );
+	}
+
+	/**
+	 * A process other than this request, such as one cron process that runs
+	 * several jobs. It shares only the database: it has its own object cache
+	 * and its own change log in memory, and keeps both across its calls.
+	 * Each call restores this request's cache and change log afterwards.
+	 *
+	 * @return \Closure Takes the code to run in that process and returns what it returns.
+	 */
+	protected function another_process(): \Closure {
+		$cache   = null;
+		$statics = [];
+		return static function ( callable $run ) use ( &$cache, &$statics ) {
+			global $wp_object_cache;
+			$request_cache   = $wp_object_cache;
+			$wp_object_cache = $cache ?? self::fresh_object_cache( $request_cache );
+			$request_statics = self::swap_change_log_statics( $statics );
+			try {
+				return $run();
+			} finally {
+				$statics         = self::swap_change_log_statics( $request_statics );
+				$cache           = $wp_object_cache;
+				$wp_object_cache = $request_cache;
+			}
+		};
+	}
+
+	/**
+	 * The user's change as a process that starts now reads it: from storage,
+	 * through a fresh object cache, with each job's record laid over it.
+	 *
+	 * @param int $user_id User ID.
+	 * @return array<string,mixed>|null
+	 */
+	protected function stored_change( int $user_id ): ?array {
+		return $this->in_another_process( static fn() => ( new Change_Log() )->latest( $user_id ) );
+	}
+
+	/**
+	 * An empty object cache set up as WordPress sets up a process's own.
+	 *
+	 * @param object $like The cache whose global groups it takes.
+	 * @return \WP_Object_Cache
+	 */
+	private static function fresh_object_cache( $like ): \WP_Object_Cache {
+		$cache = new \WP_Object_Cache();
+		if ( $like instanceof \WP_Object_Cache ) {
+			$groups = new \ReflectionProperty( \WP_Object_Cache::class, 'global_groups' );
+			$groups->setAccessible( true );
+			$cache->add_global_groups( array_keys( (array) $groups->getValue( $like ) ) );
+		}
+		return $cache;
+	}
+
+	/**
+	 * Puts values in Change_Log's static properties.
+	 *
+	 * @param array<string,array<mixed>> $values Values by property name; a property not given is emptied.
+	 * @return array<string,array<mixed>> The values they had.
+	 */
+	private static function swap_change_log_statics( array $values ): array {
+		$old = [];
+		foreach ( ( new \ReflectionClass( Change_Log::class ) )->getProperties( \ReflectionProperty::IS_STATIC ) as $property ) {
+			$property->setAccessible( true );
+			$old[ $property->getName() ] = $property->getValue();
+			$property->setValue( null, $values[ $property->getName() ] ?? [] );
+		}
+		return $old;
+	}
+
+	/**
+	 * Saves pages the way the Pages list's Bulk Edit does: core's
+	 * bulk_edit_posts() in edit.php, on the selection in the list's order,
+	 * giving them a new parent.
+	 *
+	 * @param int[] $ids       Selected pages, in the list's order.
+	 * @param int   $parent_id New parent, 0 for the top level.
+	 * @return array<string,int[]> What core reports, by updated, skipped and locked.
+	 */
+	protected function bulk_edit( array $ids, int $parent_id ): array {
+		require_once ABSPATH . 'wp-admin/includes/post.php';
+		$this->start_core_bulk( 'edit', $ids );
+		$_REQUEST['bulk_edit'] = 'Update';
+		try {
+			return bulk_edit_posts(
+				[
+					'post_type'   => 'page',
+					'_status'     => '-1',
+					'post'        => array_map( 'strval', $ids ),
+					'post_parent' => (string) $parent_id,
+				]
+			);
+		} finally {
+			$this->end_core_bulk();
+		}
 	}
 }

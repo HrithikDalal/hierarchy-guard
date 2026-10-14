@@ -442,7 +442,9 @@ final class Trash_Handler {
 	/**
 	 * Runs the first batch of a job inline, within what is left of this
 	 * request's budget, and queues the rest. A job for a page whose batch is
-	 * running in another process is handed to that process instead.
+	 * running in another process is handed to that process instead. A run may
+	 * update the job before this request ends: it writes the job's own record,
+	 * not the change this request writes once at its end (Change_Log).
 	 *
 	 * @param string              $action trash, restore or cleanup.
 	 * @param array<string,mixed> $job    Job.
@@ -492,14 +494,16 @@ final class Trash_Handler {
 	}
 
 	/**
-	 * Closes the summaries of the job and offer this one replaces.
+	 * Closes the records of the job and offer this one replaces. It runs
+	 * under the root's lock, before the new job is saved, so nothing else
+	 * writes those records in between.
 	 *
 	 * @param int $root_id Root page.
 	 */
 	private function supersede( int $root_id ): void {
 		foreach ( [ $this->queue->load( $root_id ), $this->queue->take_offer( $root_id ) ] as $old ) {
 			if ( null !== $old ) {
-				$this->log->update( (int) $old['user'], (string) $old['change'], $root_id, (array) $old['counts'], (array) $old['kept_ids'], (array) $old['ids'], false );
+				$this->log->update( (int) $old['user'], (string) $old['change'], $root_id, (array) $old['counts'], (array) $old['kept_ids'], false );
 			}
 		}
 	}
@@ -525,12 +529,13 @@ final class Trash_Handler {
 				'to'       => (int) $job['to'],
 				'policy'   => (string) $job['policy'],
 				'fallback' => (bool) $job['fallback'],
+				// The root's own old path: the redirects modal rebuilds the pairs from it.
+				'path'     => (string) ( $job['paths'][0] ?? '' ),
 				'counts'   => (array) $job['counts'],
 				'kept_ids' => (array) $job['kept_ids'],
 				'urls'     => (array) $job['urls'],
 				'job'      => $running,
-			],
-			(array) $job['ids']
+			]
 		);
 	}
 

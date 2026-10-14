@@ -219,4 +219,22 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertSame( $this->about, $this->ledger->find( 'page', 'about-old' ), 'No ledger write happened, so the cached answer must still be right.' );
 	}
+
+	public function test_held_in_trash_stops_at_the_first_page_in_the_trash(): void {
+		global $wpdb;
+		for ( $i = 1; $i <= 3; $i++ ) {
+			$held = self::factory()->post->create(
+				[
+					'post_type' => 'page',
+					'post_name' => 'held-' . $i,
+				]
+			);
+			$this->ledger->record( $held, 'zz' );
+			wp_trash_post( $held );
+		}
+
+		$this->assertTrue( Ledger::held_in_trash( 'page', 'zz' ) );
+		$this->assertSame( 1, $wpdb->num_rows, 'One row answers the question.' );
+		$this->assertFalse( Ledger::held_in_trash( 'page', 'yy' ) );
+	}
 }

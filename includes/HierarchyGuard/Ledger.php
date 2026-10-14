@@ -222,6 +222,27 @@ final class Ledger {
 	}
 
 	/**
+	 * Drops every cached lookup, as a ledger write does: for a change to a
+	 * post that holds entries, which find() would otherwise keep answering for.
+	 */
+	public function invalidate(): void {
+		$this->bump();
+	}
+
+	/**
+	 * Whether a post holds any ledger entry.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return bool
+	 */
+	public static function has_entries( int $post_id ): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the post_id index that stops at the first entry; once per post trashed, restored or deleted.
+		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s LIMIT 1", $post_id, $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
+	}
+
+	/**
 	 * Old paths recorded on a post, for display.
 	 *
 	 * @param int $post_id Post ID.
@@ -309,7 +330,7 @@ final class Ledger {
 	 * @param string $path      Path, any form; normalized here.
 	 * @return bool
 	 */
-	public function held_in_trash( string $post_type, string $path ): bool {
+	public static function held_in_trash( string $post_type, string $path ): bool {
 		global $wpdb;
 
 		$path = Paths::normalize( $path );
@@ -317,16 +338,14 @@ final class Ledger {
 			return false;
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; only for a 404 on an exact old parent path.
-		$id = $wpdb->get_var(
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Seek on the meta_key index that stops at the first page in the trash; only for a 404.
+		return null !== $wpdb->get_var(
 			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
+				"SELECT 1 FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
 				self::key( $post_type, $path ),
 				$post_type
 			)
 		);
-
-		return null !== $id;
 	}
 
 	/**

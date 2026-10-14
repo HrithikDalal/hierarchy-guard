@@ -179,8 +179,8 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <h1>Hierarchy Guard</h1>
   <p class="lede">Shows the parent and child structure of pages inside wp-admin, warns before a slug change, re-parenting, or trash breaks a subtree, and makes sure every old URL has somewhere to go.</p>
   <div class="meta">
-    <span>Status <b>Design agreed, ready to plan</b></span>
-    <span>Date <b>10 October 2026</b></span>
+    <span>Status <b>Plans 1 and 2 built; plan 3 (admin UI) in review</b></span>
+    <span>Date <b>11 October 2026</b></span>
     <span>Slug <b>hierarchy-guard</b></span>
     <span>Requires <b>WordPress 6.6 · PHP 8.0</b></span>
     <span>Target <b>WordPress.org directory</b></span>
@@ -259,38 +259,39 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <div class="prose"><p>Mockups below use the default "Modern" admin colour scheme. The real plugin sets no colours: React surfaces come from <code>@wordpress/components</code> and PHP surfaces use core admin classes, so they follow whatever scheme and tokens the site has.</p></div>
 
   <h3>Editor sidebar panel</h3>
-  <div class="prose"><p>A "Hierarchy" document settings panel. It answers the two questions an editor has before changing anything: what is above this page, and what is underneath it. A warning appears the moment the slug or parent field differs from the saved value and the page has subpages. Status is shown only when it isn't Published. The classic editor gets the same data as a read-only meta box plus a plain confirmation when the form is submitted with a changed slug or parent.</p></div>
+  <div class="prose"><p>A "Hierarchy" document settings panel answers the two questions an editor has before changing anything: what is above this page, and what is underneath it. A plugin panel starts closed and renders nothing inside it, so nothing an editor must see lives only there. The warning appears under the page's Summary, right below the Parent row, the moment the slug or parent differs from the saved value on a published page with subpages. After a save that changed URLs, an editor notice says how many old URLs changed and offers View redirects for that change. The panel loads its data only when it is open or such an edit is made. Parent pages are listed when the page sits two or more levels deep, since the Summary already names the parent. Status is shown only when it isn't Published. The classic editor gets the same data as a read-only meta box, a plain confirmation when the form is submitted with a changed slug or parent, and, right after such a save made there, a notice at the top of the edit screen with a CSV download of the redirects that save needs. The panel and the box show where a page is now, not its past URLs: the redirects a change needs are offered when it happens.</p></div>
   <div class="mock" style="max-width:380px">
     <div class="mock-bar">Block editor · Settings sidebar · Page tab</div>
     <div class="wp w-side">
+      <div class="w-pb w-stack">
+        <div class="w-row"><span class="w-muted">Parent</span><a>Company</a></div>
+        <div class="w-cnotice">Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving.</div>
+      </div>
       <div class="w-ph"><span>Hierarchy</span><span class="w-muted">︿</span></div>
       <div class="w-pb w-stack">
-        <div><div class="w-lbl">Parent pages</div><div class="w-crumb"><a>Company</a><span>/</span><strong>About</strong></div></div>
         <div>
-          <div class="w-lbl">Child pages<span class="w-norm w-muted">4 direct · 12 in total</span></div>
+          <div class="w-lbl">Subpages<span class="w-norm w-muted">4 direct · 12 in total</span></div>
           <div class="w-rows">
-            <div class="w-row"><a>Team</a><span class="w-muted">3 subpages</span></div>
-            <div class="w-row"><a>History</a><span class="w-muted">No subpages</span></div>
-            <div class="w-row"><a>Careers</a><span class="w-muted">5 subpages</span></div>
-            <div class="w-row"><span><a>Press</a> <span class="w-muted">· Draft</span></span><span class="w-muted">No subpages</span></div>
+            <div class="w-row"><span><a>Team</a> <span class="w-muted">· 3 subpages</span></span></div>
+            <div class="w-row"><a>History</a></div>
+            <div class="w-row"><span><a>Careers</a> <span class="w-muted">· 5 subpages</span></span></div>
+            <div class="w-row"><span><a>Press</a> <span class="w-muted">— Draft</span></span></div>
           </div>
-          <a class="w-link" style="display:inline-block;margin-top:8px">View all 12 in Pages</a>
+          <a class="w-link" style="display:inline-block;margin-top:8px">View all 12 in the list</a>
         </div>
-        <div class="w-cnotice">Saving changes this page's URL and the URLs of 12 subpages. You'll get the redirects to add after saving.</div>
-        <div><div class="w-lbl">Previous URLs</div><div class="w-row"><code>/about-us/</code><span class="w-muted">Not redirected</span></div></div>
-        <div class="w-muted w-small">Trashing this page moves its 4 subpages under "Company". <a>Settings</a></div>
+        <div class="w-muted w-small">Trashing this page moves its 4 subpages under “Company”. <a>Change this in Settings</a></div>
       </div>
     </div>
   </div>
 
   <h3>Hierarchy column, subtree filter and Tree view</h3>
-  <div class="prose"><p>On every supported post type the list gains a one-line Hierarchy column: the parent as a link, then the subpage count as a link that filters the list to that subtree. The filter is also reachable from a parent dropdown and a "View subpages" row action, and its active state shows as a subtitle beside the heading, the way core shows search results. Filtering carries a sort order so core renders normal paginated rows rather than its unsorted tree mode. "Tree" joins the views row next to All and Published; it shows the same table in hierarchical order with disclosure toggles, loads children on demand, and searches on the server.</p></div>
+  <div class="prose"><p>On every supported post type the list gains a one-line Hierarchy column: the parent as a link, then the subpage count as a link that filters the list to that subtree. The filter is also reachable from a "View subpages" row action. Its active state shows beside the heading the way core shows search results, as a breadcrumb, "Subpages of Company › About · Show all pages", where each ancestor links to its own subtree. There is no parent dropdown: a list of every parent page can't be bounded on a site with a million pages. The column costs one query per screen plus one to load the rows' parents, whatever the view; in core's indented tree mode the rows on screen are worked out from core's own query, and subpages the view hides, such as drafts under a published page, still count. Filtering carries a sort order so core renders normal paginated rows rather than its unsorted tree mode. "Tree" joins the views row next to All and Published; it shows the same table in hierarchical order with disclosure toggles, loads children on demand, and searches on the server.</p></div>
   <div class="mock">
     <div class="mock-bar">Pages › All Pages · filtered to one subtree</div>
     <div class="wp">
-      <div class="w-top"><span class="w-h1">Pages</span><a class="w-btn-sec">Add Page</a><span class="w-subtitle">Under: About<a>Clear</a></span></div>
+      <div class="w-top"><span class="w-h1">Pages</span><a class="w-btn-sec">Add Page</a><span class="w-subtitle">Subpages of <a>Company</a> › <strong>About</strong> · <a>Show all pages</a></span></div>
       <ul class="w-views"><li><a>All (347)</a> |</li><li><a>Published (301)</a> |</li><li><a>Drafts (40)</a> |</li><li><a>Trash (6)</a> |</li><li><a>Tree</a></li></ul>
-      <div class="w-filters"><span class="w-select">Under: About ▾</span><span class="w-select">All dates ▾</span><a class="w-btn-sec">Filter</a></div>
+      <div class="w-filters"><span class="w-select">All dates ▾</span><a class="w-btn-sec">Filter</a></div>
       <div class="w-tablewrap">
       <table class="w-table">
         <thead><tr><th style="width:28px"><span class="w-box"></span></th><th>Title</th><th>Hierarchy</th><th>Author</th><th>Date</th></tr></thead>
@@ -337,36 +338,37 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <div class="prose"><p>The Tree view renders as a tree grid for assistive technology: row levels, position in set, expanded state, and arrow-key navigation, using the components package's tree grid primitives. Without JavaScript the toggles are links that reload the view opened at that node.</p></div>
 
   <h3>Trash dialog</h3>
-  <div class="prose"><p>Clicking Trash on a page with subpages, from a row action or a bulk action, opens a small modal instead of trashing immediately. One sentence states what will happen under the default policy. "Other options" reveals the two alternatives. URLs quoted here are expected ones; the outcome notice shows the actual URLs after slug conflicts are resolved. The chosen policy travels with the trash request. The block editor's own trash button already shows core's confirmation and cannot be extended, so there the default policy applies and the landing notice with Undo is the safety net.</p></div>
+  <div class="prose"><p>Clicking Trash on a page with subpages, from a row action or a bulk action, opens a small modal instead of trashing immediately. Its title is known at the click. One sentence states what will happen under the page's policy, naming what each number counts; until the subpages are checked it is built from the row. "Other options" reveals the two alternatives, with example URLs. URLs quoted here are expected ones; the redirects modal shows the actual URLs after slug conflicts are resolved. The chosen policy travels with the trash request only when the editor picks another option, and the server honours it only after core's own nonce checks again. The block editor's own trash button already shows core's confirmation and cannot be extended, so there the default policy applies and the landing notice with Undo is the safety net.</p></div>
   <div class="mock" style="max-width:520px">
     <div class="mock-bar">Pages list · after clicking Trash on "About"</div>
     <div class="wp w-dim">
       <div class="w-modal small">
-        <p class="w-dialog-title">Move "About" to the trash?</p>
-        <p>"About" has 4 subpages (12 pages in total). They'll move up under "Company" and get new URLs.</p>
-        <a class="w-link">Other options</a>
+        <p class="w-dialog-title">Move this page to the Trash?</p>
+        <p>“About” has 4 subpages directly under it, 12 in all. They’ll move up under “Company” and get new URLs.</p>
+        <a class="w-link">Other options ⌃</a>
         <div class="w-radios">
-          <label><span class="w-radio on"></span><span>Move the subpages up under "Company"<span class="w-muted">Their URLs change, for example /about/team/ becomes /company/team/.</span></span></label>
-          <label><span class="w-radio"></span><span>Trash the 12 subpages too<span class="w-muted">They come back with their previous status if you restore "About".</span></span></label>
-          <label><span class="w-radio"></span><span>Leave the subpages where they are<span class="w-muted">Their URLs will contain about__trashed until you move them.</span></span></label>
+          <label><span class="w-radio on"></span><span>Move the subpages up under “Company”<span class="w-muted">Their URLs change, for example <code>/about/team/</code> becomes <code>/company/team/</code>.</span></span></label>
+          <label><span class="w-radio"></span><span>Trash all 12 subpages too<span class="w-muted">They come back with their statuses if you restore “About”.</span></span></label>
+          <label><span class="w-radio"></span><span>Leave subpages where they are<span class="w-muted">Their URLs change until you move them, for example <code>/about/team/</code> becomes <code>/about__trashed/team/</code>.</span></span></label>
         </div>
-        <div class="w-btns"><a class="w-btn-ter">Cancel</a><a class="w-btn danger">Trash</a></div>
+        <div class="w-btns"><a class="w-btn-ter">Cancel</a><a class="w-btn danger">Move to Trash</a></div>
       </div>
     </div>
   </div>
-  <div class="prose"><p>Bulk variant of the sentence: "3 of the selected pages have subpages (19 pages in total). The subpages move up one level and get new URLs." When the current user lacks permission to edit some of the subpages, the dialog says so and those subpages stay where they are. In Quick Edit, a changed slug or parent shows a one-line inline warning instead of a modal: "Changing this moves 12 subpages to new URLs."</p></div>
+  <div class="prose"><p>Bulk variant, titled "Move 5 pages to the Trash?": "3 of the selected pages have subpages, 19 in all. The subpages move up one level and get new URLs." When the current user can't edit (or, for the trash policy, delete) some of the subpages, the dialog says so and those subpages stay where they are. One preview covers at most 50 pages and one batch of capability checks, whatever the selection. In Quick Edit, a changed slug or parent shows the editor's warning in core's save bar instead of a modal: "Saving changes this page’s URL and the URLs of 12 subpages."</p></div>
 
   <h3>Outcome notice and redirects needed</h3>
-  <div class="prose"><p>After any action that changed URLs, the Pages list shows a one-paragraph notice with Undo and a "View redirects" link. Trashing from the post editor lands on this Pages list, so the same notice covers it; in the Site Editor's DataViews, which stay on screen, the message is a snackbar. The pairs live in a modal, computed on demand and paged, where the provider-specific actions also live. The notice is scoped to the post type's list screen and the summary expires after thirty minutes or the next URL-changing action.</p></div>
+  <div class="prose"><p>After a trash, core's own notice on the Pages list says what happened to the subpages and keeps its Undo link. The URLs the trash changed get a notice of their own below it, styled by what handles them: a warning when nothing does. Trashing from the post editor lands on this Pages list, so the same notices cover it. A save that changed URLs gets the same sentence once, where it was made. A Quick Edit or block editor save gets it in place. A Bulk Edit gets it on the Pages list core redirects back to, below core's "pages updated" notice. A classic editor save gets it on the edit screen it lands on, and only there: a save made anywhere else never shows on a later classic visit. In the Site Editor's DataViews, which stay on screen, the message is a snackbar. The pairs live in a modal, computed on demand, cached for a few minutes and paged, where the provider-specific actions also live. The modal exists on the Pages list and in the block editor; on the classic editor's screen, and without JavaScript, the link is "Download redirects (CSV)" and downloads the CSV. The list notices are scoped to the post type's list screen, and the summary expires after thirty minutes or the next URL-changing action. A later change replaces the list an earlier notice offers, so a new notice on the Pages list takes the earlier ones' links, and an older list asked for says a later change replaced it. A trash's list is complete while its pages are in the Trash. Once a page a list has redirects for is deleted for good, the list is gone, and asking for it says a page they belong to was deleted for good: for a save, a page it moved or renamed; for a trash, a parent whose subpages moved up. A parent that moved nothing had nothing to list, so deleting it changes nothing.</p></div>
   <div class="mock">
     <div class="mock-bar">Pages list · right after the trash</div>
     <div class="wp">
-      <div class="w-note ok"><p>"About" moved to the trash. 4 subpages moved under "Company" and 12 URLs changed. <a>Undo</a> · <a>View redirects (12)</a></p></div>
+      <div class="w-note ok"><p>“About” moved to the Trash. 4 subpages moved up under “Company”. <a>Undo</a></p></div>
+      <div class="w-note"><p>12 URLs changed. Add their redirects in Redirection. <a>View redirects (12)</a></p></div>
       <div class="w-variants">
-        <div class="w-note ok"><p><strong>If built-in redirects are on:</strong> "About" moved to the trash. 4 subpages moved under "Company". The 12 old URLs redirect to the new ones. <a>Undo</a></p></div>
-        <div class="w-note warn"><p><strong>If nothing handles redirects:</strong> "About" moved to the trash. 4 subpages moved under "Company". 12 old URLs now show "Page not found". <a>Turn on redirects</a> · <a>View redirects</a></p></div>
+        <div class="w-note ok"><p><strong>If built-in redirects are on:</strong> 12 old URLs now redirect to their new pages.</p></div>
+        <div class="w-note warn"><p><strong>If nothing handles redirects:</strong> 12 old URLs now show “Page not found”. <a>Set up redirects</a> · <a>View redirects (12)</a></p></div>
       </div>
-      <div style="margin-top:14px"><span class="w-snack">"About" moved to the trash. 4 subpages moved under "Company". <a>Undo</a></span> <span class="w-muted w-small" style="margin-left:10px">editor snackbar</span></div>
+      <div style="margin-top:14px"><span class="w-snack">“About” moved to the trash. 4 subpages moved up under “Company”. <a>Undo</a></span> <span class="w-muted w-small" style="margin-left:10px">DataViews snackbar</span></div>
     </div>
   </div>
   <div class="mock" style="max-width:700px">
@@ -378,7 +380,6 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
         <table class="w-table" style="min-width:0">
           <thead><tr><th>Old URL</th><th>New URL</th></tr></thead>
           <tbody>
-            <tr><td><code>/about/</code></td><td><span class="w-muted">In the trash, no target</span></td></tr>
             <tr><td><code>/about/team/</code></td><td><code>/company/team/</code></td></tr>
             <tr><td><code>/about/team/leadership/</code></td><td><code>/company/team/leadership/</code></td></tr>
             <tr><td><code>/about/careers/</code></td><td><code>/company/careers/</code></td></tr>
@@ -386,13 +387,14 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
           </tbody>
         </table>
         </div>
-        <p class="w-muted w-small">Showing 5 of 12 · <a>Next</a></p>
+        <p class="w-muted w-small">/about/ is in the Trash, so it has no new URL.</p>
+        <p class="w-muted w-small">Showing 1–4 of 12 · <a>Previous</a> <a>Next</a></p>
         <p>Add these in Redirection.</p>
-        <div class="w-btns left"><a class="w-btn-sec">Open Redirection</a><a class="w-btn-sec">Download CSV for Redirection</a><a class="w-btn-ter">Copy as text</a></div>
+        <div class="w-btns"><a class="w-link">Open Redirection ↗</a><a class="w-btn-ter">Copy as text</a><a class="w-btn-sec">Download CSV for Redirection</a></div>
       </div>
     </div>
   </div>
-  <div class="prose"><p>The CSV is generated server-side in the detected provider's import layout, for example <code>source,target,regex,code</code> for Redirection and Safe Redirect Manager, so it imports without editing. Download links are the one place the plugin streams a file.</p></div>
+  <div class="prose"><p>The CSV is generated server-side in the detected provider's import layout, for example <code>source,target,regex,code</code> for Redirection and Safe Redirect Manager, so it imports without editing. Each row's code is the code the server's own rule chooses (before filters) for that old URL, in every layout: 302 while restoring a page from the trash could still undo the move its redirect follows, because a page in the trash holds a prefix of the old path or the target or a page above it sits where the trash moved it, and 301 otherwise. "Copy as text" carries no code. Download links are the one place the plugin sends a file. An old URL a live page uses now gets no redirect, because a redirect plugin would hide that page, and nothing is listed without pretty permalinks.</p></div>
 
   <h3>Settings</h3>
   <div class="prose"><p>Three fields don't earn a top-level page. They register as a "Page hierarchy" section on Settings › Writing through the Settings API, the same precedent the Classic Editor plugin uses.</p></div>
@@ -585,16 +587,16 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <h3>What the editor sees, by situation</h3>
   <div class="scroll">
   <table class="t">
-    <thead><tr><th>Redirect plugin detected</th><th>Built-in serving</th><th>Message after a URL change</th></tr></thead>
+    <thead><tr><th>Redirect plugin detected</th><th>Built-in serving</th><th>Message after a trash or a save that changed URLs, where it was made</th></tr></thead>
     <tbody>
-      <tr><td>Yes</td><td>Off (default)</td><td>Notice with "View redirects (12)". The modal says "Add these in Redirection" with Open Redirection and Download CSV for Redirection.</td></tr>
-      <tr><td>Yes</td><td>On</td><td>"The 12 old URLs redirect to the new ones." Pairs still available for reference.</td></tr>
-      <tr><td>No</td><td>Off (default)</td><td>Warning notice: "12 old URLs now show 'Page not found'" with Turn on redirects. A one-time dismissible nudge also appears on the Pages screen.</td></tr>
-      <tr><td>No</td><td>On</td><td>"The 12 old URLs redirect to the new ones."</td></tr>
+      <tr><td>Yes</td><td>Off (default)</td><td>Info notice: "12 URLs changed. Add their redirects in Redirection." with View redirects (12). The modal offers Open Redirection and Download CSV for Redirection; on the classic editor's screen the link downloads that CSV. Its rows say 302 or 301, the code the server's own rule chooses (before filters).</td></tr>
+      <tr><td>Yes</td><td>On</td><td>Success notice: "12 old URLs now redirect to their new pages."</td></tr>
+      <tr><td>No</td><td>Off (default)</td><td>Warning notice: "12 old URLs now show “Page not found”." with Set up redirects (for administrators) and View redirects (12); on the classic editor's screen the link is "Download redirects (CSV)". Once the site has an old URL, a one-time dismissible nudge appears on the Pages screen, never beside this notice.</td></tr>
+      <tr><td>No</td><td>On</td><td>Success notice: "12 old URLs now redirect to their new pages."</td></tr>
     </tbody>
   </table>
   </div>
-  <div class="prose"><p style="margin-top:14px">Detected providers in 1.0: Redirection, Safe Redirect Manager, Yoast SEO Premium, Rank Math with its redirections module, All in One SEO Pro, SEOPress Pro, and Simple 301 Redirects. Each is a presence check, the URL of its redirects screen, and a CSV layout. The list is filterable.</p></div>
+  <div class="prose"><p style="margin-top:14px">The message appears in five places: the Pages list after a trash, the Pages list after a Bulk Edit, Quick Edit, the block editor, and the classic editor's screen right after a save there. Detected providers in 1.0: Redirection, Safe Redirect Manager, Yoast SEO Premium, Rank Math with its redirections module, All in One SEO Pro, SEOPress Pro, and Simple 301 Redirects. Each is a presence check, the URL of its redirects screen, and a CSV layout. The list is filterable.</p></div>
 </section>
 
 <section id="data">
@@ -611,16 +613,17 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
       <tr><td>Post meta</td><td><code>_hierarchy_guard_aliases</code></td><td>Aliases the trash recorded for this root</td><td>Lets a restore remove the aliases once the root is back at its old path.</td></tr>
       <tr><td>Option</td><td><code>hierarchy_guard_settings</code></td><td><code>post_types</code>, <code>trash_policy</code>, <code>serve_redirects</code></td><td>The three settings. Autoloaded. Absent keys fall back to defaults.</td></tr>
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_root_paths</code></td><td>Old parent paths whose children became top level, per post type, capped at 200</td><td>Consulted by the resolver after post entries. Pruned when the children move back.</td></tr>
-      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}</code></td><td>Type, root, target parent, post type, triggering user, cursor or depth-first stack, counts, total, up to 200 affected IDs, created and touched times</td><td>One background job per root, for work above the inline budget. Replaced by a newer job for the same root and deleted on completion.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}</code></td><td>Type, root, target parent, post type, triggering user, cursor or depth-first stack, counts, up to 20 kept IDs, total, created and touched times</td><td>One background job per root, for work above the inline budget. Replaced by a newer job for the same root and deleted on completion.</td></tr>
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}_next</code></td><td>A job, in the same shape</td><td>Left by a trash or restore that finds a batch for the same root running in another process. That process adopts it after its current step, so the newer action wins.</td></tr>
       <tr><td>Option row, not autoloaded</td><td><code>hierarchy_guard_lock_{root_id}</code></td><td>Expiry time</td><td>An atomic lock written with an insert that fails when the row exists, so two runs never step the same root's job.</td></tr>
-      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Change ID, action, post type, one entry per root (new parent, policy, fallback, counts, up to 20 kept IDs, URL count, whether a job is still running), summed counts, up to 200 affected IDs, created and updated times, whether it was shown</td><td>One change per request, so a bulk trash of three parents is one notice. Background batches keep it current. Feeds the outcome notice and Undo for thirty minutes. Titles, URLs and pairs are never stored; they are computed when shown.</td></tr>
+      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}</code></td><td>Change ID, action (trash, restore, or a save that changed the page's URL), post type, one entry per root (new parent, policy, fallback, the root's old path, counts, up to 20 kept IDs, URL count, whether a job is still running), summed counts, created and updated times, where a save was made (the classic editor, the Pages list, or the block editor over REST), whether it was shown (Quick Edit and the block editor show theirs in place)</td><td>One change per request, so a bulk trash of three parents is one notice. Its request writes it once: kept in memory and written at the end of the request, or at once for a root recorded while the request is ending. It is written again only when a notice marks it shown, with the job records folded in. A root whose subpages a background job works on also has the job's record (next row), and every read lays that record over the root's entry before the counts are summed. Feeds the outcome notices and the redirects modal for thirty minutes; a trash's redirects are listed from its roots' moved markers, while those roots are in the Trash. Titles, URLs and pairs are never stored; they are computed when shown.</td></tr>
+      <tr><td>Transient</td><td><code>hierarchy_guard_change_{user_id}_{root_id}</code></td><td>The ID of the change the job was started with, the job's counts so far, up to 20 kept IDs, whether the job is still running, updated time</td><td>One record per background job. Only a process holding the root's lock writes it: the job's own runs, and the run or request whose job replaces it, which closes it. No run ever writes the change, and the record wins over the change's own copy of that root, so no write of the change takes back what a run stored: neither its request's nor the one when a notice marks it shown. No two processes write one record at once. A read uses a record only for the change it names. All of a change's records are fetched at once, in one query or one <code>wp_cache_get_multiple()</code> with an external object cache, and laid over the change one at a time. Kept for thirty-five minutes from its last write, five more than the change, on the job's own site.</td></tr>
     </tbody>
   </table>
   </div>
 
   <h3>REST endpoint</h3>
-  <div class="prose"><p>One read-only route backs the editor panel, the classic meta box, the Tree view's lazy loading, and the redirects modal. It requires <code>edit_post</code> on the requested ID. Children are paged, counts are direct, and totals are capped. The same data is also exposed as a <code>hierarchy_guard</code> field on the REST page object so a DataViews column needs no extra request.</p></div>
+  <div class="prose"><p>One read-only route backs the editor panel, the classic meta box, the Tree view's lazy loading, and the redirects modal. It requires <code>edit_post</code> on the requested ID. Children are paged, counts are direct, totals are capped, and the title of a post the user may not read stays private. The same data will also be exposed as a <code>hierarchy_guard</code> field on the REST page object, so a DataViews column needs no extra request.</p></div>
 <pre><code>GET /wp-json/hierarchy-guard/v1/posts/42/hierarchy?children_page=1
 
 {
@@ -629,12 +632,15 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   "children_total": 4,
   "has_more":    false,
   "descendants": { "count": 12, "capped": false },
-  "old_paths":   [ "about-us" ],
+  "latest_change": "{change_id}",
   "redirects":   { "serving": false, "provider": { "name": "Redirection", "url": "…", "csv": "redirection" } },
-  "trash_policy": "reparent"
+  "trash_policy": "reparent",
+  "trash_to":    { "id": 7, "title": "Company", "edit_link": "…" },
+  "list_url":    "…/edit.php?post_type=page&amp;hierarchy_guard_under=42"
 }
 
-GET /wp-json/hierarchy-guard/v1/changes/{change_id}/pairs?page=1      → paged old/new pairs for the modal
+GET /wp-json/hierarchy-guard/v1/trash-preview?ids[]=42&amp;ids[]=51   → what the trash dialog says, for at most 50 pages
+GET /wp-json/hierarchy-guard/v1/changes/{change_id}/pairs?page=1      → paged old/new pairs of the user's latest change (a trash, a restore or a URL-changing save)
 GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → streamed download</code></pre>
 </section>
 
@@ -661,18 +667,22 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
 │   ├── Redirects/Resolver.php       longest-prefix resolution, chained rounds, seen-set
 │   ├── Redirects/Server.php         template_redirect priority 9, GET/HEAD, validate, 301
 │   ├── Redirects/Providers.php      detect redirect plugins, deep links, CSV layouts
-│   ├── Export/Csv.php               streamed CSV per provider layout
-│   ├── REST/Hierarchy_Controller.php · REST/Changes_Controller.php · REST/Page_Field.php
+│   ├── Redirects/Pairs.php          old and new URL pairs of a change, each with the 301 or 302 the server's own rule chooses (before filters), capped, cached, never stored
+│   ├── Overview.php                 one page's ancestors, paged children, counts, trash outcome, the user's latest change on it
+│   ├── Export/Csv.php               CSV per provider layout
+│   ├── REST/Hierarchy_Controller.php · REST/Changes_Controller.php · REST/Csv_Download.php · REST/Page_Field.php
 │   └── Admin/
-│       ├── List_Table.php           Hierarchy column (one grouped query), subtree filter, parent dropdown, row action
+│       ├── List_Table.php           Hierarchy column (one grouped query), subtree filter and breadcrumb, row action
+│       ├── Trash_Choice.php         the dialog's policy from core's verified trash request
 │       ├── Tree_View.php            "Tree" view in the views row, hierarchical order, lazy children
 │       ├── Meta_Box.php             classic editor box and submit confirmation
-│       ├── Notices.php              outcome notice, batch progress, one-time nudge
-│       ├── Trash_Notice.php         a sentence on core's trash notice until the outcome notice ships
-│       └── Assets.php               editor panel data, list-table scripts, DataViews registration
+│       ├── Notices.php              subpage sentences on core's notice, the URLs notice, batch progress, one-time nudge
+│       └── Assets.php               bundles only where they act, their settings, DataViews registration
 ├── src/
-│   ├── editor/                      Hierarchy panel (PluginDocumentSettingPanel from @wordpress/editor)
-│   ├── list-table/                  trash Modal, Quick Edit inline warning, redirects Modal
+│   ├── common/                      every sentence, REST calls, the redirects Modal
+│   ├── editor/                      save warning (PluginPostStatusInfo), editor notice, Hierarchy panel (PluginDocumentSettingPanel)
+│   ├── list-table/                  trash Modal, Quick Edit inline warning, breadcrumb, nudge
+│   ├── classic/                     submit confirmation
 │   ├── tree/                        TreeGrid behaviour, lazy load, server search
 │   └── dataviews/                   hierarchy field, replacement move-to-trash action with RenderModal
 ├── build/                           compiled, shipped in release zips only
@@ -683,7 +693,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
   <table class="t">
     <thead><tr><th>Hook</th><th>Handler</th><th>Job</th></tr></thead>
     <tbody>
-      <tr><td><code>post_updated</code></td><td>Change_Listener</td><td>Return immediately unless the type is supported, the post is not a revision or autosave, the listener is not suspended, and slug or parent changed with neither status in trash. Then record one entry.</td></tr>
+      <tr><td><code>post_updated</code></td><td>Change_Listener</td><td>Return immediately unless the type is supported, the post is not a revision or autosave, the listener is not suspended, and slug or parent changed with neither status in trash. Then record one entry. In a Bulk Edit the entry is the page's path from before the request, read for every selected page at the first save. With a user, the save also becomes the user's latest change, with where it was made, once the ledger holds its old path.</td></tr>
       <tr><td><code>wp_trash_post</code> (before)</td><td>Trash_Handler</td><td>Resolve the policy from the request or the setting, check capabilities per child, snapshot current paths. No writes.</td></tr>
       <tr><td><code>trashed_post</code></td><td>Trash_Handler</td><td>Apply the policy from the snapshot: raw re-parent plus cache clear, or subtree trash. Inline up to the threshold, else enqueue a batch job. Store the change summary.</td></tr>
       <tr><td><code>transition_post_status</code> (trash → other)</td><td>Trash_Handler</td><td>Note that the page left the trash. A subpage restored on its own drops its trashed-with row.</td></tr>
@@ -694,13 +704,15 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <tr><td><code>template_redirect</code>, priority 9</td><td>Redirects\Server</td><td>Serve a 301 from the resolver when built-in redirects are on. GET and HEAD only.</td></tr>
       <tr><td><code>hierarchy_guard_process_batch</code> (cron)</td><td>Batch\Processor</td><td>Step a root's job under its lock for up to 20 seconds, then reschedule until done. Mirrored by a WP-CLI command for hosts without cron.</td></tr>
       <tr><td><code>hierarchy_guard_watchdog</code> (hourly)</td><td>Batch\Processor</td><td>Restart a job whose run died; drop one older than seven days or whose page is gone.</td></tr>
-      <tr><td><code>pre_get_posts</code> (admin), <code>request</code></td><td>Admin\List_Table</td><td>Translate the subtree filter into <code>post_parent__in</code> from a capped walk, and force a sort order so core paginates normally.</td></tr>
-      <tr><td><code>manage_{type}_posts_columns</code>, <code>…_custom_column</code>, <code>restrict_manage_posts</code>, <code>row_actions</code>, <code>views_edit-{type}</code></td><td>Admin\List_Table, Admin\Tree_View</td><td>Hierarchy column from one grouped query per screen, parent dropdown, "View subpages" action, "Tree" view.</td></tr>
-      <tr><td><code>enqueue_block_editor_assets</code></td><td>Admin\Assets</td><td>Panel script with post ID, policy, and provider info. DataViews field and action registration where the API exists.</td></tr>
+      <tr><td><code>request</code> (edit.php)</td><td>Admin\List_Table</td><td>Translate the subtree filter into <code>post__in</code> from a capped walk, and sort by menu order then title as an array so core paginates normally.</td></tr>
+      <tr><td><code>manage_{type}_posts_columns</code>, <code>…_custom_column</code> (on <code>admin_init</code>, so the Quick Edit Ajax row has it), <code>restrict_manage_posts</code>, <code>page_row_actions</code>, <code>views_edit-{type}</code></td><td>Admin\List_Table, Admin\Tree_View</td><td>Hierarchy column from one grouped query per screen, the breadcrumb, "View subpages" action, "Tree" view.</td></tr>
+      <tr><td><code>hierarchy_guard_trash_policy</code>, priority 99</td><td>Admin\Trash_Choice</td><td>The dialog's choice, for the pages core's verified trash request names.</td></tr>
+      <tr><td><code>enqueue_block_editor_assets</code>, <code>admin_enqueue_scripts</code>, <code>admin_footer</code></td><td>Admin\Assets</td><td>The editor and classic scripts on their screens; the list-table script only when the list screen asked for it (internal action <code>hierarchy_guard_list_script</code>). DataViews field and action registration where the API exists.</td></tr>
+      <tr><td><code>rest_pre_serve_request</code>, priority 11</td><td>REST\Csv_Download</td><td>Print a flagged CSV body as is, after core's CORS headers.</td></tr>
       <tr><td><code>rest_api_init</code></td><td>REST controllers, Page_Field</td><td>Register the hierarchy and changes routes and the <code>hierarchy_guard</code> field on page objects.</td></tr>
       <tr><td><code>wxr_export_skip_postmeta</code></td><td>Markers</td><td>Keep the marker keys out of exports so they can't point at wrong posts on another site.</td></tr>
-      <tr><td><code>bulk_post_updated_messages</code></td><td>Admin\Trash_Notice</td><td>Add a sentence about the subpages to core's trash and restore notices until the outcome notice replaces it.</td></tr>
-      <tr><td><code>add_meta_boxes</code>, <code>admin_init</code>, <code>admin_notices</code></td><td>Admin\Meta_Box, Settings, Admin\Notices</td><td>Classic editor box, settings section, outcome and progress notices.</td></tr>
+      <tr><td><code>bulk_post_updated_messages</code></td><td>Admin\Notices</td><td>Add what happened to the subpages to core's trash and restore notices, once per change.</td></tr>
+      <tr><td><code>add_meta_boxes</code>, <code>admin_init</code>, <code>admin_notices</code></td><td>Admin\Meta_Box, Settings, Admin\Notices</td><td>Classic editor box, settings section, the URLs notice, progress notices and the nudge (dismissed into core's <code>dismissed_wp_pointers</code>).</td></tr>
     </tbody>
   </table>
   </div>
@@ -751,7 +763,9 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <li>Draft ancestor with an empty slug, front page as parent, private page: paths computed from the slug chain match what core resolves.</li>
       <li>Hierarchical custom post type with a rewrite slug: entries include the prefix and resolve correctly.</li>
       <li>Plain permalinks: nothing is recorded and the server is inert.</li>
-      <li>List table: the Hierarchy column adds at most two queries per screen regardless of row count; the subtree filter returns exactly the descendants and caps at 1,000.</li>
+      <li>List table: the Hierarchy column adds at most two queries per screen regardless of row count, in core's tree mode too, and counts subpages the current view hides; the subtree filter returns exactly the descendants and caps at 1,000; no child query sorts every child of a parent.</li>
+      <li>Redirect pairs of a change: computed from the pages that change moved or renamed, at their URLs from just before it; published pages only, depth first in menu order, capped; none without pretty permalinks; every pair listed is one the built-in server serves (an old URL a live page uses now is never listed), and its CSV row says the 301 or 302 a request for it gets; a trash's list is complete while its pages are in the Trash; a list is gone once a page it has redirects for is deleted for good (a save's page, or a trashed parent whose subpages moved up), and a deleted parent that moved nothing leaves it as it was; the blocks of a bulk trash cost the same few queries whatever its size.</li>
+      <li>Where a change shows: a classic save's notice prints once on the edit screen it lands on, and a Quick Edit, block editor or Bulk Edit save never prints on a later classic visit; a Bulk Edit's notice prints once on the Pages list core returns to; a Bulk Edit of a parent and its subpage, in either order, lists each page at its URL from before the request; a request of many roots writes its change once.</li>
       <li>REST routes require <code>edit_post</code>; response shapes are stable; children page correctly.</li>
       <li>Markers are absent from a WXR export; old-path entries are present.</li>
     </ol>
@@ -770,7 +784,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <li>Trash_Handler with capabilities, snapshot and apply, all three policies, reversal, and the Batch job and processor, with tests.</li>
       <li>Redirects: Providers detection, Server, CSV export, and the Settings › Writing section.</li>
       <li>REST routes, the page REST field, the editor panel, and the classic meta box.</li>
-      <li>List table: Hierarchy column, subtree filter, parent dropdown, row action, trash Modal, Quick Edit inline warning, outcome notice and redirects Modal.</li>
+      <li>List table: Hierarchy column, subtree filter with its breadcrumb, row action, trash Modal, Quick Edit inline warning, outcome notices and redirects Modal.</li>
       <li>Tree view with tree grid semantics, lazy loading, and server search.</li>
       <li>DataViews track: the hierarchy field and the replacement trash action, registered wherever the API is available.</li>
       <li>Notices, readme.txt, uninstall, translation pass, release zip.</li>
@@ -785,6 +799,8 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
   <h2>Out of scope for 1.0</h2>
   <div class="prose">
     <ul>
+      <li>Lists of a page's past URLs, or redirect lists for an old URL long after it changed. Declined: the redirects a change needs are offered when it happens, and the built-in server keeps every recorded old URL working.</li>
+      <li>Listing redirects for pages deleted for good. The built-in redirects still serve their old URLs.</li>
       <li>One-click "Add to Redirection" and "Add to Safe Redirect Manager" adapters. Natural 1.1 candidates since both have stable PHP APIs; the CSV export in their layouts covers 1.0.</li>
       <li>Incrementally maintained descendant counts stored on ancestors. Every such write would bump the posts cache key; the capped walk is enough.</li>
       <li>A zero-query first-segment gate for the 404 handler. Cached misses with a TTL cover bot traffic; revisit if real sites show otherwise.</li>

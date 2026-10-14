@@ -1,0 +1,38 @@
+// Layout only: colours, radii and type come from the admin theme.
+.hierarchy-guard-modal {
+
+	.hierarchy-guard-pairs {
+		margin: 12px 0;
+	}
+
+	&__pager,
+	&__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		align-items: center;
+		margin-top: 12px;
+	}
+
+	&__actions {
+		justify-content: flex-end;
+	}
+}
+
+// A path breaks only after a slash; a slug longer than the line breaks inside.
+// The code is an inline-block so the parts' 100% fits inside its padding.
+.hierarchy-guard-url {
+	display: inline-block;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
+.hierarchy-guard-url__part {
+	display: inline-block;
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+
+.hierarchy-guard-url__end {
+	white-space: nowrap;
+}

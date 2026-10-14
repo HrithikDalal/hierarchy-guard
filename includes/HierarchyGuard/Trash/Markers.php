@@ -260,6 +260,27 @@ final class Markers {
 	}
 
 	/**
+	 * Which of these posts sit where the trash flow moved them: has_moved_row()
+	 * for many posts in one query.
+	 *
+	 * @param int[] $post_ids Post IDs.
+	 * @return array<int,true> By post ID.
+	 */
+	public static function moved_among( array $post_ids ): array {
+		global $wpdb;
+
+		$ids = array_values( array_unique( array_filter( array_map( 'intval', $post_ids ) ) ) );
+		if ( [] === $ids ) {
+			return [];
+		}
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per post, at most a few per pair listed; seeks on the post_id index.
+		$found = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT post_id FROM {$wpdb->postmeta} WHERE post_id IN ( {$placeholders} ) AND meta_key LIKE %s", ...array_merge( $ids, [ $wpdb->esc_like( self::MOVED_PREFIX ) . '%' ] ) ) );
+
+		return array_fill_keys( array_map( 'intval', (array) $found ), true );
+	}
+
+	/**
 	 * Deletes a post's own trashed-with rows, for when it leaves the trash on its own.
 	 *
 	 * @param int $post_id Post ID.

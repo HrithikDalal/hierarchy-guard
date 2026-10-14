@@ -9,11 +9,16 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+use HierarchyGuard\Redirects\Batch_Resolver;
+use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
+use HierarchyGuard\Trash\Request;
 use WP_Post;
 
 /**
- * Records URL changes. Every handler returns as early and as cheaply as it can.
+ * Records URL changes. Every handler returns as early and as cheaply as it
+ * can. A save that records an old path is also the current user's latest
+ * change, so the redirects it needs can be offered right after it.
  */
 final class Change_Listener {
 
@@ -32,12 +37,52 @@ final class Change_Listener {
 	private Ledger $ledger;
 
 	/**
+	 * The change log the redirects a save needs are offered from.
+	 *
+	 * @var Change_Log
+	 */
+	private Change_Log $log;
+
+	/**
+	 * Posts being deleted that hold ledger entries, by ID: core deletes their meta before deleted_post.
+	 *
+	 * @var array<int,true>
+	 */
+	private array $deleting = [];
+
+	/**
+	 * Posts a status change took into or out of the trash in this request, by
+	 * ID: core's trash hooks that follow it have nothing left to drop.
+	 *
+	 * @var array<int,true>
+	 */
+	private array $crossed = [];
+
+	/**
+	 * The path every page of this request's Bulk Edit had before its first
+	 * save, by ID, with the selection it was read for.
+	 *
+	 * @var array{ids:string,paths:array<int,string>}|null
+	 */
+	private ?array $bulk = null;
+
+	/**
+	 * REST route callbacks running now: a save inside one is the block
+	 * editor's, or another REST client's.
+	 *
+	 * @var int
+	 */
+	private int $rest = 0;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Ledger $ledger Ledger.
+	 * @param Ledger     $ledger Ledger.
+	 * @param Change_Log $log    Change log.
 	 */
-	public function __construct( Ledger $ledger ) {
+	public function __construct( Ledger $ledger, Change_Log $log ) {
 		$this->ledger = $ledger;
+		$this->log    = $log;
 	}
 
 	/**
@@ -46,6 +91,34 @@ final class Change_Listener {
 	public function register(): void {
 		add_action( 'post_updated', [ $this, 'on_post_updated' ], 10, 3 );
 		add_action( 'before_delete_post', [ $this, 'on_before_delete' ], 10, 2 );
+		add_action( 'transition_post_status', [ $this, 'on_status_changed' ], 10, 3 );
+		add_action( 'trashed_post', [ $this, 'on_holder_changed' ] );
+		add_action( 'untrashed_post', [ $this, 'on_holder_changed' ] );
+		add_action( 'deleted_post', [ $this, 'on_deleted' ] );
+		add_filter( 'rest_request_before_callbacks', [ $this, 'enter_rest' ] );
+		add_filter( 'rest_request_after_callbacks', [ $this, 'leave_rest' ] );
+	}
+
+	/**
+	 * A REST route callback is about to run.
+	 *
+	 * @param mixed $response The response so far, unchanged.
+	 * @return mixed
+	 */
+	public function enter_rest( $response ) {
+		++$this->rest;
+		return $response;
+	}
+
+	/**
+	 * A REST route callback has run.
+	 *
+	 * @param mixed $response The response, unchanged.
+	 * @return mixed
+	 */
+	public function leave_rest( $response ) {
+		$this->rest = max( 0, $this->rest - 1 );
+		return $response;
 	}
 
 	/**
@@ -67,7 +140,14 @@ final class Change_Listener {
 	}
 
 	/**
-	 * Records the old path of a post whose slug or parent changed.
+	 * Records the old path of a post whose slug or parent changed, and, once
+	 * the ledger holds that path on the post, the save as the current user's
+	 * latest change: the post at its old path under its new parent. With no
+	 * user, as in cron, nothing is shown. In a Bulk Edit the old path is the
+	 * one the page had before the request, as a parent saved before its
+	 * subpage would otherwise give the subpage a path it had only inside it.
+	 * The change says where the save was made; a screen that shows it in
+	 * place, the block editor's or Quick Edit's, records it as shown.
 	 *
 	 * @param int     $post_id Post ID.
 	 * @param WP_Post $after   Post after the update.
@@ -83,6 +163,8 @@ final class Change_Listener {
 		if ( $after->post_name === $before->post_name && (int) $after->post_parent === (int) $before->post_parent ) {
 			return;
 		}
+		// Read at the request's first save that moved anything, before any check that may skip it.
+		$bulk_path = $this->bulk_path( $post_id, $before );
 		if ( 'trash' === $before->post_status || 'trash' === $after->post_status ) {
 			return;
 		}
@@ -90,8 +172,85 @@ final class Change_Listener {
 			return;
 		}
 
-		$this->ledger->record( $post_id, Paths::uri( $before ) );
+		$path = $bulk_path ?? Paths::uri( $before );
+		$this->ledger->record( $post_id, $path );
 		$this->ledger->prune( $post_id );
+
+		// Only an old path the ledger now holds on the post is redirected to it; anything else is no change to offer.
+		$user = get_current_user_id();
+		if ( $user > 0 && metadata_exists( 'post', $post_id, Ledger::key( (string) $after->post_type, Paths::normalize( $path ) ) ) ) {
+			$origin = $this->origin();
+			$this->log->record(
+				$user,
+				'save',
+				(string) $after->post_type,
+				[
+					'root'   => $post_id,
+					'to'     => (int) $after->post_parent,
+					'path'   => $path,
+					'policy' => '',
+					'counts' => Change_Log::empty_counts(),
+				],
+				$origin,
+				'editor' === $origin || ( 'list' === $origin && wp_doing_ajax() )
+			);
+		}
+	}
+
+	/**
+	 * Where a save is being made: `editor` inside a REST route, as the block
+	 * editor saves; `list` for the Pages list's Quick Edit or Bulk Edit;
+	 * `classic` for the classic editor's form; '' for anything else.
+	 *
+	 * @return string
+	 */
+	private function origin(): string {
+		if ( $this->rest > 0 ) {
+			return 'editor';
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read only; core checked the save's own nonce before saving.
+		$action = isset( $_REQUEST['action'] ) ? sanitize_key( wp_unslash( $_REQUEST['action'] ) ) : '';
+		if ( wp_doing_ajax() ) {
+			return 'inline-save' === $action ? 'list' : '';
+		}
+		if ( '' !== Request::bulk_edit_key() ) {
+			return 'list';
+		}
+		return 'post.php' === ( $GLOBALS['pagenow'] ?? '' ) && 'editpost' === $action ? 'classic' : '';
+	}
+
+	/**
+	 * In a Bulk Edit, the path a page had before the request. At its first
+	 * save that changed a slug or parent nothing else has moved yet, so every
+	 * selected page's path is read then, the saved page's from before its
+	 * save, in one query per level. Outside a Bulk Edit, null at no cost.
+	 *
+	 * @param int     $post_id Post ID.
+	 * @param WP_Post $before  Post before the update.
+	 * @return string|null
+	 */
+	private function bulk_path( int $post_id, WP_Post $before ): ?string {
+		$key = Request::bulk_edit_key();
+		if ( '' === $key ) {
+			return null;
+		}
+		if ( null === $this->bulk || $key !== $this->bulk['ids'] ) {
+			$ids = Request::bulk_edit_ids();
+			Batch_Resolver::prime_with_ancestors( $ids );
+			$as_before = [ $post_id => $before ];
+			$paths     = [];
+			foreach ( $ids as $id ) {
+				$post = $as_before[ $id ] ?? get_post( $id );
+				if ( $post instanceof WP_Post ) {
+					$paths[ $id ] = Paths::uri( $post, $as_before );
+				}
+			}
+			$this->bulk = [
+				'ids'   => $key,
+				'paths' => $paths,
+			];
+		}
+		return $this->bulk['paths'][ $post_id ] ?? null;
 	}
 
 	/**
@@ -102,10 +261,13 @@ final class Change_Listener {
 	 * @param WP_Post $post    Post being deleted.
 	 */
 	public function on_before_delete( int $post_id, WP_Post $post ): void {
-		if ( self::$suspended ) {
+		if ( ! Post_Types::is_supported( (string) $post->post_type ) ) {
 			return;
 		}
-		if ( ! Post_Types::is_supported( (string) $post->post_type ) ) {
+		if ( Ledger::has_entries( $post_id ) ) {
+			$this->deleting[ $post_id ] = true;
+		}
+		if ( self::$suspended ) {
 			return;
 		}
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
@@ -131,6 +293,67 @@ final class Change_Listener {
 
 		foreach ( $paths as $path ) {
 			$this->ledger->record_alias( (string) $post->post_type, (int) $post->post_parent, $path );
+		}
+	}
+
+	/**
+	 * A post went into or out of the trash by a status change, as
+	 * wp_update_post(), WP-CLI's `post update` and the REST API make it with
+	 * no wp_trash_post() or wp_untrash_post(): see on_holder_changed(). Core's
+	 * own trash and restore make the same change first.
+	 *
+	 * @param string  $new_status New status.
+	 * @param string  $old_status Old status.
+	 * @param WP_Post $post       Post.
+	 */
+	public function on_status_changed( string $new_status, string $old_status, WP_Post $post ): void {
+		if ( $new_status === $old_status || ( 'trash' !== $new_status && 'trash' !== $old_status ) ) {
+			return;
+		}
+		$this->crossed[ (int) $post->ID ] = true;
+		$this->drop_lookups( (int) $post->ID, (string) $post->post_type );
+	}
+
+	/**
+	 * A post that holds ledger entries went to the trash or came back: the
+	 * ledger's cached lookups may name it, or a holder it hid, so they are
+	 * dropped. Trashing a page with no subpages writes nothing to the ledger.
+	 * When the status change before this hook dropped them, nothing is left to do.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	public function on_holder_changed( int $post_id ): void {
+		if ( isset( $this->crossed[ $post_id ] ) ) {
+			unset( $this->crossed[ $post_id ] );
+			return;
+		}
+		$type = get_post_type( $post_id );
+		if ( false !== $type ) {
+			$this->drop_lookups( $post_id, $type );
+		}
+	}
+
+	/**
+	 * A post that held ledger entries is gone: the cached lookups that name it are dropped.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	public function on_deleted( int $post_id ): void {
+		if ( isset( $this->deleting[ $post_id ] ) ) {
+			unset( $this->deleting[ $post_id ] );
+			$this->ledger->invalidate();
+		}
+	}
+
+	/**
+	 * Drops the ledger's cached lookups when a supported post holds any entry.
+	 *
+	 * @param int    $post_id   Post ID.
+	 * @param string $post_type Post type name.
+	 */
+	private function drop_lookups( int $post_id, string $post_type ): void {
+		if ( Post_Types::is_supported( $post_type ) && Ledger::has_entries( $post_id ) ) {
+			$this->ledger->invalidate();
 		}
 	}
 
