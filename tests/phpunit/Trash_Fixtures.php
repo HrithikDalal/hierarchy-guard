@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Markers;
 
 /**
@@ -192,6 +193,30 @@ trait Trash_Fixtures {
 		$request = new \WP_REST_Request( 'POST', '/wp/v2/pages/' . $post_id );
 		$request->set_body_params( [ 'slug' => $slug ] );
 		return rest_do_request( $request )->get_status();
+	}
+
+	/**
+	 * Runs code as another process, such as a cron run, would while this
+	 * request is still going: with none of this request's change log in
+	 * memory, so it sees only what is stored.
+	 *
+	 * @param callable $run The code.
+	 * @return mixed What it returns.
+	 */
+	protected function in_another_process( callable $run ) {
+		$saved = [];
+		foreach ( ( new \ReflectionClass( Change_Log::class ) )->getProperties( \ReflectionProperty::IS_STATIC ) as $property ) {
+			$property->setAccessible( true );
+			$saved[] = [ $property, $property->getValue() ];
+			$property->setValue( null, [] );
+		}
+		try {
+			return $run();
+		} finally {
+			foreach ( $saved as [ $property, $value ] ) {
+				$property->setValue( null, $value );
+			}
+		}
 	}
 
 	/**

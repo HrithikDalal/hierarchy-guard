@@ -404,6 +404,92 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['about'], (int) get_post( $this->ids['history'] )->post_parent );
 	}
 
+	public function test_a_background_run_before_the_trash_request_ends_keeps_what_it_did(): void {
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$this->more_subpages( [ 'a', 'b', 'c' ] );
+		// The user's change from an earlier request.
+		wp_update_post(
+			[
+				'ID'        => $this->page( 'older' ),
+				'post_name' => 'older-2',
+			]
+		);
+		Change_Log::reset_request();
+
+		wp_trash_post( $this->ids['about'] );
+		// Cron runs the job in another process while the trash request is still finishing.
+		$seen = $this->in_another_process(
+			function (): string {
+				$change = (array) $this->log->latest( $this->admin );
+				$this->processor()->run( $this->ids['about'] );
+				return (string) ( $change['action'] ?? '' );
+			}
+		);
+		Change_Log::reset_request();
+
+		$this->assertSame( 'trash', $seen, 'The run finds the trash’s change stored, not the one before it.' );
+		$this->assertNull( $this->queue->load( $this->ids['about'] ), 'Precondition: the run finished the job.' );
+		$root = $this->change()['roots'][ $this->ids['about'] ];
+		$this->assertFalse( $root['job'], 'Nothing is still moving.' );
+		$this->assertSame( 5, $root['counts']['moved'] );
+		$this->assertSame( 5, $this->change()['counts']['moved'] );
+		$this->assertEqualsCanonicalizing( [ $this->ids['team'], $this->ids['history'], $this->ids['a'], $this->ids['b'], $this->ids['c'] ], $root['ids'], 'Every page the run moved stays listable after a delete for good.' );
+	}
+
+	public function test_the_end_of_the_trash_request_keeps_what_a_background_run_did_since(): void {
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
+		$this->more_subpages( [ 'a', 'b', 'c' ] );
+		$services = $this->page( 'services' );
+		$this->page( 'design', $services );
+		add_filter(
+			'hierarchy_guard_trash_policy',
+			static fn( string $policy, \WP_Post $post ): string => $services === $post->ID ? Settings::POLICY_KEEP : $policy,
+			10,
+			2
+		);
+
+		// A bulk trash: about's job is queued, then services is recorded...
+		$this->core_bulk( 'trash', [ $this->ids['about'], $services ] );
+		// ...and about's run finishes in another process before the request ends.
+		$this->in_another_process( fn() => $this->processor()->run( $this->ids['about'] ) );
+		Change_Log::reset_request();
+
+		$change = $this->change();
+		$root   = $change['roots'][ $this->ids['about'] ];
+		$this->assertFalse( $root['job'], 'The request’s own write does not take back what the run stored.' );
+		$this->assertSame( 5, $root['counts']['moved'] );
+		$this->assertCount( 5, $root['ids'] );
+		$this->assertSame( 1, $change['roots'][ $services ]['counts']['kept'], 'What the request recorded after the job was queued is written too.' );
+		$this->assertSame( 5, $change['counts']['moved'] );
+		$this->assertSame( 1, $change['counts']['kept'] );
+	}
+
+	public function test_a_restore_handed_to_a_running_batch_keeps_what_that_batch_did(): void {
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 1 );
+		wp_trash_post( $this->ids['about'] );
+		// The Undo is a new request, while a run holds the lock.
+		Change_Log::reset_request();
+		$this->handler()->reset_request_budget();
+		$token = $this->queue->lock( $this->ids['about'] );
+
+		$this->handler()->undo( $this->ids['about'] );
+		$this->assertSame( Operations::TYPE_RESTORE, $this->queue->offered( $this->ids['about'] )['type'], 'Precondition: the restore is offered to the run.' );
+		// The run adopts the offer and finishes it before the Undo request ends.
+		$this->in_another_process(
+			function () use ( $token ): void {
+				$this->queue->unlock( $this->ids['about'], $token );
+				$this->processor()->run( $this->ids['about'] );
+			}
+		);
+		Change_Log::reset_request();
+
+		$change = $this->change();
+		$this->assertSame( 'restore', $change['action'] );
+		$root = $change['roots'][ $this->ids['about'] ];
+		$this->assertFalse( $root['job'], 'The run found the restore’s change and closed it.' );
+		$this->assertSame( 1, $root['counts']['moved'], 'The one subpage the trash moved came back.' );
+	}
+
 	public function test_bulk_trash_and_undo_of_a_parent_and_its_subpage_round_trip(): void {
 		$contact = $this->page( 'contact' );
 

@@ -22,7 +22,11 @@ use HierarchyGuard\Subtree;
  *
  * The change a request records is kept in memory and written once, at
  * shutdown, so a request of many roots writes it once, not once per root.
- * Until then latest() answers from memory.
+ * Until then latest() answers from memory. A job a background run updates
+ * is queued only once the change is written, as a run in another process
+ * reads only what is stored; a later write of the same change then replaces
+ * only the roots the request recorded since, so it never takes back what
+ * such a run stored in between.
  */
 final class Change_Log {
 
@@ -45,6 +49,21 @@ final class Change_Log {
 	 * @var array<int,array<string,mixed>>
 	 */
 	private static array $pending = [];
+
+	/**
+	 * The roots of each pending change recorded or updated since it was last
+	 * written, by user ID.
+	 *
+	 * @var array<int,array<int,true>>
+	 */
+	private static array $dirty = [];
+
+	/**
+	 * The change of each user this request has written already, by user ID.
+	 *
+	 * @var array<int,string>
+	 */
+	private static array $written = [];
 
 	/**
 	 * Transient key for a user.
@@ -73,17 +92,26 @@ final class Change_Log {
 	public static function reset_request(): void {
 		self::flush();
 		self::$current = [];
+		self::$written = [];
 	}
 
 	/**
 	 * Writes the changes this request recorded. Runs first at shutdown.
 	 */
 	public static function flush(): void {
-		$pending       = self::$pending;
-		self::$pending = [];
-		foreach ( $pending as $user_id => $change ) {
-			set_transient( self::key( (int) $user_id ), self::summed( $change ), self::TTL );
+		foreach ( array_keys( self::$pending ) as $user_id ) {
+			self::write( (int) $user_id );
 		}
+	}
+
+	/**
+	 * Writes the user's change now, if this request has one waiting: before a
+	 * job is queued that a run in another process updates.
+	 *
+	 * @param int $user_id User ID.
+	 */
+	public function write_now( int $user_id ): void {
+		self::write( $user_id );
 	}
 
 	/**
@@ -129,7 +157,7 @@ final class Change_Log {
 		$root                     = (int) ( $entry['root'] ?? 0 );
 		$change['roots'][ $root ] = self::entry( $entry );
 
-		$this->store( $user_id, $change, $ids );
+		$this->store( $user_id, $change, $ids, $root );
 
 		return $change['id'];
 	}
@@ -168,7 +196,7 @@ final class Change_Log {
 			)
 		);
 
-		$this->store( $user_id, $change, $ids );
+		$this->store( $user_id, $change, $ids, $root_id );
 	}
 
 	/**
@@ -206,7 +234,7 @@ final class Change_Log {
 	 * @param int $user_id User ID.
 	 */
 	public function forget( int $user_id ): void {
-		unset( self::$pending[ $user_id ] );
+		unset( self::$pending[ $user_id ], self::$dirty[ $user_id ], self::$written[ $user_id ] );
 		delete_transient( self::key( $user_id ) );
 	}
 
@@ -216,18 +244,20 @@ final class Change_Log {
 	 * @param int                 $user_id User ID.
 	 * @param array<string,mixed> $change  Change.
 	 * @param int[]               $ids     IDs to add.
+	 * @param int                 $root_id The root recorded or updated.
 	 */
-	private function store( int $user_id, array $change, array $ids ): void {
-		$change['ids']     = array_slice( array_values( array_unique( array_merge( array_map( 'intval', (array) $change['ids'] ), array_map( 'intval', $ids ) ) ) ), 0, self::MAX_IDS );
+	private function store( int $user_id, array $change, array $ids, int $root_id ): void {
+		$change['ids']     = self::merged_ids( (array) $change['ids'], $ids );
 		$change['updated'] = time();
-		self::save( $user_id, $change );
+		self::save( $user_id, $change, $root_id );
 	}
 
 	/**
 	 * Saves a change: the one this request recorded waits in memory until the
-	 * request ends, and one from an earlier request, which a background batch
-	 * or a notice updates, is written now. Once shutdown has begun nothing
-	 * would write it later, so it is written now too.
+	 * request ends, or until a job is queued (write_now()), and one from an
+	 * earlier request, which a background batch or a notice updates, is
+	 * written now. Once shutdown has begun nothing would write it later, so
+	 * it is written now too.
 	 *
 	 * set_transient() returns false both when the save fails and when nothing
 	 * changed, so its result says nothing reliable here. Nothing depends on it:
@@ -235,19 +265,83 @@ final class Change_Log {
 	 *
 	 * @param int                 $user_id User ID.
 	 * @param array<string,mixed> $change  Change.
+	 * @param int|null            $root_id The root recorded or updated, if any.
 	 */
-	private static function save( int $user_id, array $change ): void {
+	private static function save( int $user_id, array $change, ?int $root_id = null ): void {
 		if ( ( self::$current[ $user_id ] ?? '' ) !== $change['id'] ) {
-			unset( self::$pending[ $user_id ] );
+			unset( self::$pending[ $user_id ], self::$dirty[ $user_id ] );
 			set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
 			return;
 		}
 		self::$pending[ $user_id ] = $change;
+		if ( null !== $root_id ) {
+			self::$dirty[ $user_id ][ $root_id ] = true;
+		}
 		if ( did_action( 'shutdown' ) ) {
-			self::flush();
+			self::write( $user_id );
 		} elseif ( false === has_action( 'shutdown', [ self::class, 'flush' ] ) ) {
 			add_action( 'shutdown', [ self::class, 'flush' ], 0 );
 		}
+	}
+
+	/**
+	 * Writes the change this request has waiting for a user. When the request
+	 * wrote it before, the stored copy is read back first and only the roots
+	 * recorded or updated since replace its own: a background run may have
+	 * updated another root in between.
+	 *
+	 * @param int $user_id User ID.
+	 */
+	private static function write( int $user_id ): void {
+		if ( ! isset( self::$pending[ $user_id ] ) ) {
+			return;
+		}
+		$change = self::$pending[ $user_id ];
+		$roots  = array_keys( self::$dirty[ $user_id ] ?? [] );
+		unset( self::$pending[ $user_id ], self::$dirty[ $user_id ] );
+
+		if ( ( self::$written[ $user_id ] ?? '' ) === $change['id'] ) {
+			$change = self::merged( $change, $roots, get_transient( self::key( $user_id ) ) );
+		}
+		set_transient( self::key( $user_id ), self::summed( $change ), self::TTL );
+		self::$written[ $user_id ] = (string) $change['id'];
+	}
+
+	/**
+	 * The stored copy of a change with this request's newer roots laid over
+	 * it. When the stored change is gone or another one replaced it, this
+	 * request's copy is written whole, as before.
+	 *
+	 * @param array<string,mixed> $change The request's copy.
+	 * @param int[]               $roots  Roots it recorded or updated since it last wrote the change.
+	 * @param mixed               $stored What the transient holds now.
+	 * @return array<string,mixed>
+	 */
+	private static function merged( array $change, array $roots, $stored ): array {
+		if ( ! is_array( $stored ) || ( $stored['id'] ?? '' ) !== $change['id'] ) {
+			return $change;
+		}
+		foreach ( $roots as $root_id ) {
+			if ( isset( $change['roots'][ $root_id ] ) ) {
+				$stored['roots'][ $root_id ] = $change['roots'][ $root_id ];
+			}
+		}
+		$stored['ids']     = self::merged_ids( (array) ( $stored['ids'] ?? [] ), (array) $change['ids'] );
+		$stored['updated'] = max( (int) ( $stored['updated'] ?? 0 ), (int) $change['updated'] );
+		$stored['shown']   = ! empty( $stored['shown'] ) || ! empty( $change['shown'] );
+
+		return $stored;
+	}
+
+	/**
+	 * Two lists of IDs as one, each once, at most MAX_IDS.
+	 *
+	 * @param array<int|string,mixed> $ids  IDs.
+	 * @param array<int|string,mixed> $more IDs to add.
+	 * @return int[]
+	 */
+	private static function merged_ids( array $ids, array $more ): array {
+		return array_slice( array_values( array_unique( array_merge( array_map( 'intval', $ids ), array_map( 'intval', $more ) ) ) ), 0, self::MAX_IDS );
 	}
 
 	/**

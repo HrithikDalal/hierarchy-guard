@@ -17,6 +17,8 @@ use WP_UnitTestCase;
  */
 final class ChangeLogTest extends WP_UnitTestCase {
 
+	use Trash_Fixtures;
+
 	private Change_Log $log;
 
 	private int $admin;
@@ -262,6 +264,45 @@ final class ChangeLogTest extends WP_UnitTestCase {
 
 		$this->log->mark_shown( $this->admin, $id );
 		$this->assertTrue( get_transient( Change_Log::key( $this->admin ) )['shown'] );
+	}
+
+	public function test_the_request_s_change_can_be_written_before_the_request_ends(): void {
+		$writes = 0;
+		add_filter(
+			'pre_set_transient_' . Change_Log::key( $this->admin ),
+			static function ( $value ) use ( &$writes ) {
+				++$writes;
+				return $value;
+			}
+		);
+		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 2 ], true ), [ 3, 4 ] );
+
+		$this->log->write_now( $this->admin );
+
+		$this->assertSame( 1, $writes );
+		$this->assertSame( $id, $this->in_another_process( fn() => $this->log->latest( $this->admin )['id'] ), 'Another process reads it now.' );
+		Change_Log::reset_request();
+		$this->assertSame( 1, $writes, 'Nothing is left to write when the request ends.' );
+	}
+
+	public function test_the_request_s_last_write_keeps_what_another_process_stored_since(): void {
+		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [ 'moved' => 2 ], true ), [ 3, 4 ] );
+		$this->log->write_now( $this->admin );
+		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 20, [ 'kept' => 1 ] ), [ 9 ] );
+
+		// A background run finishes root 12's job before the request ends.
+		$this->in_another_process( fn() => $this->log->update( $this->admin, $id, 12, [ 'moved' => 5 ], [], [ 3, 4, 5, 6, 7 ], [], false ) );
+		Change_Log::reset_request();
+
+		$stored = get_transient( Change_Log::key( $this->admin ) );
+		$this->assertSame( $id, $stored['id'] );
+		$this->assertFalse( $stored['roots'][12]['job'], 'The run’s update survives the request’s last write.' );
+		$this->assertSame( 5, $stored['roots'][12]['counts']['moved'] );
+		$this->assertSame( [ 3, 4, 5, 6, 7 ], $stored['roots'][12]['ids'] );
+		$this->assertSame( 1, $stored['roots'][20]['counts']['kept'], 'The root recorded after the first write is written.' );
+		$this->assertSame( 5, $stored['counts']['moved'] );
+		$this->assertSame( 1, $stored['counts']['kept'] );
+		$this->assertEqualsCanonicalizing( [ 3, 4, 5, 6, 7, 9 ], $stored['ids'] );
 	}
 
 	public function test_forgetting_drops_the_change_waiting_to_be_written(): void {

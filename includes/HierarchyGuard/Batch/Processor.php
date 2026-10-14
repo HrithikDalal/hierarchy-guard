@@ -155,6 +155,8 @@ final class Processor {
 
 		// Scheduled after the unlock, so the next run cannot find this one still holding it.
 		if ( null !== $job || null !== $this->queue->offered( $root_id ) ) {
+			// The next run reads the change from storage; this process may have it waiting, as a CLI process can.
+			$this->log->write_now( (int) ( $last['user'] ?? 0 ) );
 			$this->queue->schedule( $root_id );
 		}
 
@@ -198,6 +200,7 @@ final class Processor {
 
 			$touched = max( (int) ( $job['touched'] ?? 0 ), (int) ( $offer['touched'] ?? 0 ) );
 			if ( $touched < $now - self::STALE_AFTER && ! $this->queue->is_scheduled( $root_id ) ) {
+				$this->log->write_now( (int) ( $any['user'] ?? 0 ) );
 				$this->queue->schedule( $root_id );
 			}
 		}
