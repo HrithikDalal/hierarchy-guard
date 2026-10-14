@@ -183,4 +183,15 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'These redirects are no longer available. A later change replaced them. They are kept for 30 minutes.', $response->get_data()['message'] );
 	}
+
+	public function test_the_gone_message_of_an_expired_change_says_only_how_long_they_are_kept(): void {
+		// A later request, after the change's thirty minutes, with no change since.
+		Change_Log::reset_request();
+		delete_transient( Change_Log::key( $this->admin ) );
+
+		$response = $this->get( '/changes/' . $this->change_id . '/pairs' );
+
+		$this->assertSame( 404, $response->get_status() );
+		$this->assertSame( 'These redirects are no longer available. They are kept for 30 minutes.', $response->get_data()['message'], 'Nothing replaced them.' );
+	}
 }

@@ -139,7 +139,9 @@ final class Changes_Controller {
 	}
 
 	/**
-	 * The current user's change with this ID.
+	 * The current user's change with this ID. When it is gone, the message
+	 * says a later change replaced it only when the user has one; a change
+	 * that expired, or that the cache dropped, has nothing newer.
 	 *
 	 * @param string $change_id Change ID.
 	 * @return array<string,mixed>|WP_Error
@@ -148,7 +150,11 @@ final class Changes_Controller {
 		$change = $this->log->latest( get_current_user_id() );
 		if ( null === $change || $change_id !== $change['id'] ) {
 			$minutes = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
-			$message = __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ' . __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ' . sprintf(
+			$message = __( 'These redirects are no longer available.', 'hierarchy-guard' ) . ' ';
+			if ( null !== $change ) {
+				$message .= __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ';
+			}
+			$message .= sprintf(
 				/* translators: %s: number of minutes. */
 				_n( 'They are kept for %s minute.', 'They are kept for %s minutes.', $minutes, 'hierarchy-guard' ),
 				number_format_i18n( $minutes )
