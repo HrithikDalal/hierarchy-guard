@@ -76,7 +76,7 @@ final class Request {
 	 * Edit asks for it, and it can hold 999 IDs. It is parsed again only
 	 * when the request's selection is a different one, as in tests.
 	 *
-	 * @return array{ids:int[],key:string}
+	 * @return array{ids:int[],key:string,raw?:array<int|string,mixed>} The IDs and their key; inside a Bulk Edit also raw, the selection as the request sent it, kept only to tell whether it changed.
 	 */
 	private static function bulk_edit(): array {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read only; core verified the bulk-posts nonce before bulk_edit_posts() saves anything.
