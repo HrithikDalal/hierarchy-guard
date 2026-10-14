@@ -128,6 +128,21 @@ final class OperationsTrashTest extends WP_UnitTestCase {
 		$this->assertGreaterThanOrEqual( 4, $steps );
 	}
 
+	public function test_a_budget_that_ends_on_the_last_subpage_finishes_the_job(): void {
+		$job = $this->operations->step( $this->job(), 200, 4 );
+
+		$this->assertTrue( $job['finished'] );
+		$this->assertSame( 4, $job['counts']['trashed'] );
+		$this->assertSame( [], $job['stack'] );
+	}
+
+	public function test_a_budget_one_short_of_the_subtree_leaves_the_job_unfinished(): void {
+		$job = $this->operations->step( $this->job(), 200, 3 );
+
+		$this->assertFalse( $job['finished'] );
+		$this->assertSame( 3, $job['counts']['trashed'] );
+	}
+
 	public function test_stops_once_the_parent_leaves_the_trash(): void {
 		$this->untrash_raw( $this->ids['about'] );
 

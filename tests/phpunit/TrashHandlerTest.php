@@ -394,6 +394,76 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertFalse( $root['job'] );
 	}
 
+	/**
+	 * Adds numbered subpages under about until it has this many descendants.
+	 *
+	 * @param int $descendants Descendants about ends up with.
+	 */
+	private function fill_about( int $descendants ): void {
+		for ( $i = 3; $i < $descendants; $i++ ) {
+			$this->page( "kid-{$i}", $this->ids['about'] );
+		}
+	}
+
+	/**
+	 * Asserts the trash or restore of about finished inline: no queued job and no work said to be left.
+	 *
+	 * @param string $message What was done.
+	 */
+	private function assert_finished_inline( string $message ): void {
+		$this->assertNull( $this->queue->load( $this->ids['about'] ), $message );
+		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ), $message );
+		$this->assertFalse( $this->change()['roots'][ $this->ids['about'] ]['job'], $message );
+	}
+
+	public function test_a_subtree_of_exactly_the_core_budget_is_trashed_and_restored_inline(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$this->fill_about( Operations::DEFAULT_CORE_THRESHOLD );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 0, Subtree::count_live_descendants( $this->ids['about'], 'page', 100 ) );
+		$this->assert_finished_inline( 'Trash.' );
+
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_untrash_post( $this->ids['about'] );
+
+		$this->assertSame( Operations::DEFAULT_CORE_THRESHOLD, Subtree::count_live_descendants( $this->ids['about'], 'page', 100 ) );
+		$this->assert_finished_inline( 'Restore.' );
+	}
+
+	public function test_a_subtree_one_past_the_core_budget_queues_the_rest(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$this->fill_about( Operations::DEFAULT_CORE_THRESHOLD + 1 );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'The last subpage is left for the queue.' );
+		$this->assertSame( Operations::DEFAULT_CORE_THRESHOLD, $this->queue->load( $this->ids['about'] )['counts']['trashed'] );
+		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
+	}
+
+	public function test_exactly_the_move_budget_of_subpages_moves_up_inline(): void {
+		$this->fill_about( Operations::DEFAULT_THRESHOLD + 1 );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 0, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assert_finished_inline( 'Trash.' );
+	}
+
+	public function test_one_past_the_move_budget_of_subpages_queues_the_rest(): void {
+		$this->fill_about( Operations::DEFAULT_THRESHOLD + 2 );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 1, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
+	}
+
 	public function test_a_bulk_trash_shares_one_budget_and_one_summary(): void {
 		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 3 );
 		$services = $this->page( 'services' );

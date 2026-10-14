@@ -253,6 +253,36 @@ final class OperationsRestoreTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['team'] )->post_parent );
 	}
 
+	public function test_a_budget_that_ends_on_the_last_moved_subpage_finishes_the_job(): void {
+		$this->move_out();
+		$this->untrash_raw( $this->ids['about'] );
+
+		$job = $this->operations->step( Operations::new_job( Operations::TYPE_RESTORE, $this->ids['about'], 'page', 0 ), 2, 25 );
+
+		$this->assertTrue( $job['finished'] );
+		$this->assertSame( 2, $job['counts']['moved'] );
+	}
+
+	public function test_a_budget_that_ends_on_the_last_trashed_subpage_finishes_the_job(): void {
+		$this->trash_out();
+		$this->untrash_raw( $this->ids['about'] );
+
+		$job = $this->operations->step( Operations::new_job( Operations::TYPE_RESTORE, $this->ids['about'], 'page', 0 ), 200, 3 );
+
+		$this->assertTrue( $job['finished'] );
+		$this->assertSame( 3, $job['counts']['restored'] );
+	}
+
+	public function test_a_budget_one_short_of_the_trashed_subpages_leaves_the_job_unfinished(): void {
+		$this->trash_out();
+		$this->untrash_raw( $this->ids['about'] );
+
+		$job = $this->operations->step( Operations::new_job( Operations::TYPE_RESTORE, $this->ids['about'], 'page', 0 ), 200, 2 );
+
+		$this->assertFalse( $job['finished'] );
+		$this->assertSame( 2, $job['counts']['restored'] );
+	}
+
 	public function test_cleanup_deletes_the_moved_rows_of_a_deleted_root(): void {
 		$this->move_out();
 		Markers::add( $this->ids['leadership'], Markers::trashed_key( $this->ids['about'] ), '1' );
