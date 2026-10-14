@@ -57,6 +57,32 @@ export function requestCounter() {
 }
 
 /**
+ * Numbers the loads of a page's hierarchy. Only the latest load started
+ * shows its answer, as an earlier one may be from before a later save. A
+ * load after a save is also numbered among the loads after saves: its
+ * answer stays the one that save waits for until a later save's load
+ * starts, whatever plain loads start in between, so opening the panel
+ * cannot take away a save's notice.
+ *
+ * @return {{start: function(boolean=): {shows: function(): boolean, answers: function(): boolean}}} The sequence. start() numbers a load, after a save when passed true; its shows() says whether its answer may replace what is on screen, and answers() whether its caller still waits for it.
+ */
+export function loadSequence() {
+	const loads = requestCounter();
+	const saves = requestCounter();
+	return {
+		start: ( afterSaving = false ) => {
+			const ticket = loads.next();
+			const save = afterSaving ? saves.next() : 0;
+			const shows = () => loads.isLatest( ticket );
+			return {
+				shows,
+				answers: afterSaving ? () => saves.isLatest( save ) : shows,
+			};
+		},
+	};
+}
+
+/**
  * The notice for a change's redirects, from the first page of its pairs.
  *
  * @param {{total: number, capped: boolean}|null} pairs     The first page of the change's pairs.

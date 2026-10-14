@@ -14,11 +14,7 @@ import { useCallback, useEffect, useRef, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { store as noticesStore } from '@wordpress/notices';
 import { fetchHierarchy, fetchPairs } from '../common/api';
-import {
-	afterSave,
-	changeNotice,
-	requestCounter,
-} from '../common/change-notice';
+import { afterSave, changeNotice, loadSequence } from '../common/change-notice';
 import config from '../common/config';
 import {
 	countsLine,
@@ -194,40 +190,42 @@ export default function HierarchyPlugin() {
 	const savingUrl = useRef( false );
 	const loads = useRef( null );
 	if ( null === loads.current ) {
-		loads.current = requestCounter();
+		loads.current = loadSequence();
 	}
 
 	// Resolves to the hierarchy, null when it couldn't be loaded, or undefined
-	// when a later load was started since: only the latest answer is current,
-	// as an earlier one may be from before a later save.
-	const load = useCallback( () => {
-		const ticket = loads.current.next();
-		return fetchHierarchy( postId )
-			.then( ( result ) => {
-				if ( ! loads.current.isLatest( ticket ) ) {
-					return undefined;
-				}
-				setData( result );
-				setError( '' );
-				if ( undefined === baseline.current ) {
-					baseline.current = result.latest_change || null;
-				}
-				return result;
-			} )
-			.catch( ( failure ) => {
-				if ( ! loads.current.isLatest( ticket ) ) {
-					return undefined;
-				}
-				setError(
-					failure.message ||
-						__(
-							'The hierarchy couldn’t be loaded.',
-							'hierarchy-guard'
-						)
-				);
-				return null;
-			} );
-	}, [ postId ] );
+	// when the caller no longer waits for it. Only the latest load's answer
+	// is shown, as an earlier one may be from before a later save; a load
+	// after a save answers that save until a later save's load starts.
+	const load = useCallback(
+		( afterSaving = false ) => {
+			const ticket = loads.current.start( afterSaving );
+			return fetchHierarchy( postId )
+				.then( ( result ) => {
+					if ( ticket.shows() ) {
+						setData( result );
+						setError( '' );
+						if ( undefined === baseline.current ) {
+							baseline.current = result.latest_change || null;
+						}
+					}
+					return ticket.answers() ? result : undefined;
+				} )
+				.catch( ( failure ) => {
+					if ( ticket.shows() ) {
+						setError(
+							failure.message ||
+								__(
+									'The hierarchy couldn’t be loaded.',
+									'hierarchy-guard'
+								)
+						);
+					}
+					return ticket.answers() ? null : undefined;
+				} );
+		},
+		[ postId ]
+	);
 
 	// Load once something shows the data: the panel, or the warning before a save.
 	const needed =
@@ -260,7 +258,7 @@ export default function HierarchyPlugin() {
 		}
 		// Without a baseline, any latest change on the page is new to this session.
 		const before = baseline.current;
-		load().then( ( result ) => {
+		load( true ).then( ( result ) => {
 			const next = afterSave( before, result );
 			if ( 'failed' === next.action ) {
 				// Which change the save made is not known, so there is nothing to view.

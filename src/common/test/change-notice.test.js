@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
 	afterSave,
 	changeNotice,
+	loadSequence,
 	newChange,
 	requestCounter,
 } from '../change-notice';
@@ -86,6 +87,45 @@ describe( 'a request counter', () => {
 		const ticket = loads.next();
 		other.next();
 		expect( loads.isLatest( ticket ) ).toBe( true );
+	} );
+} );
+
+describe( 'the loads of a page’s hierarchy', () => {
+	it( 'shows only the latest load’s answer', () => {
+		const loads = loadSequence();
+		const first = loads.start();
+		const second = loads.start();
+		expect( first.shows() ).toBe( false );
+		expect( first.answers() ).toBe( false );
+		expect( second.shows() ).toBe( true );
+		expect( second.answers() ).toBe( true );
+	} );
+
+	it( 'keeps a load after a save current for that save when a plain load starts later', () => {
+		const loads = loadSequence();
+		const save = loads.start( true );
+		const plain = loads.start();
+		expect( save.answers() ).toBe( true );
+		expect( save.shows() ).toBe( false );
+		expect( plain.shows() ).toBe( true );
+	} );
+
+	it( 'lets a later save’s load supersede an earlier save’s', () => {
+		const loads = loadSequence();
+		const first = loads.start( true );
+		loads.start();
+		const second = loads.start( true );
+		expect( first.answers() ).toBe( false );
+		expect( second.answers() ).toBe( true );
+		expect( second.shows() ).toBe( true );
+	} );
+
+	it( 'lets a load after a save supersede an earlier plain load', () => {
+		const loads = loadSequence();
+		const plain = loads.start();
+		loads.start( true );
+		expect( plain.shows() ).toBe( false );
+		expect( plain.answers() ).toBe( false );
 	} );
 } );
 
