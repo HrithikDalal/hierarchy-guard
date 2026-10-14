@@ -798,8 +798,15 @@ final class PairsTest extends WP_UnitTestCase {
 
 		$collected = $this->pairs->collect_change( $this->rename( $promo, 'sale' ) );
 
-		$this->assertSame( [ '/promo/kid/ -> /sale/kid/' => [ 302, 302 ] ], $this->statuses( $collected ) );
-		$this->assertSame( [ '/promo/' ], array_column( $this->pairs->page( $collected, 1, 20 )['unresolved'], 'old' ), 'A restore of the earlier page would take /promo/ back.' );
+		$this->assertSame(
+			[
+				'/promo/ -> /sale/'         => [ 302, 302 ],
+				'/promo/kid/ -> /sale/kid/' => [ 302, 302 ],
+			],
+			$this->statuses( $collected ),
+			'The newer page held /promo/ since, but a restore of the earlier page would take it back.'
+		);
+		$this->assertSame( [], $this->pairs->page( $collected, 1, 20 )['unresolved'] );
 	}
 
 	public function test_a_save_lists_no_draft_subpage_but_its_published_subpages(): void {
@@ -902,12 +909,9 @@ final class PairsTest extends WP_UnitTestCase {
 		$collected = $this->pairs->collect_change( $change );
 
 		$this->assertSame(
-			[
-				'/company/about/history/ -> /company/about-us/history/',
-				'/company/about/team/leadership/ -> /company/about-us/team/leadership/',
-			],
+			[],
 			$this->lines( $collected ),
-			'The new page and its team are reached before any redirect; the old URLs no page uses still lead on.'
+			'The new page took /company/about/: the URL is its now, so the old page\'s subpages are not reached through it.'
 		);
 		$this->assertSame(
 			[

@@ -168,6 +168,10 @@ final class Change_Listener {
 		if ( 'trash' === $before->post_status || 'trash' === $after->post_status ) {
 			return;
 		}
+		if ( 'publish' === $before->post_status ) {
+			// A published page moved or renamed onto a path takes it; a page being published takes it in on_status_changed().
+			$this->ledger->claim( $after );
+		}
 		if ( ! Paths::is_recordable( $before ) ) {
 			return;
 		}
@@ -329,17 +333,26 @@ final class Change_Listener {
 	}
 
 	/**
-	 * A post went into or out of the trash by a status change, as
-	 * wp_update_post(), WP-CLI's `post update` and the REST API make it with
-	 * no wp_trash_post() or wp_untrash_post(): see on_holder_changed(). Core's
-	 * own trash and restore make the same change first.
+	 * A page that was not published is published: it takes its path from
+	 * whatever page recorded it (Ledger::claim()). Or a post went into or out
+	 * of the trash by a status change, as wp_update_post(), WP-CLI's `post
+	 * update` and the REST API make it with no wp_trash_post() or
+	 * wp_untrash_post(): see on_holder_changed(). Core's own trash and restore
+	 * make the same change first.
 	 *
 	 * @param string  $new_status New status.
 	 * @param string  $old_status Old status.
 	 * @param WP_Post $post       Post.
 	 */
 	public function on_status_changed( string $new_status, string $old_status, WP_Post $post ): void {
-		if ( $new_status === $old_status || ( 'trash' !== $new_status && 'trash' !== $old_status ) ) {
+		if ( $new_status === $old_status ) {
+			return;
+		}
+		if ( 'publish' === $new_status && ! self::$suspended ) {
+			// A page published, or published again, takes its path.
+			$this->ledger->claim( $post );
+		}
+		if ( 'trash' !== $new_status && 'trash' !== $old_status ) {
 			return;
 		}
 		$this->crossed[ (int) $post->ID ] = true;

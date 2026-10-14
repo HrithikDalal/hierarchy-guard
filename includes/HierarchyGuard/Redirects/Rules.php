@@ -70,7 +70,8 @@ final class Rules {
 	 * Ledger hits on trashed posts, or on posts under a trashed ancestor, are
 	 * skipped so a shorter prefix can match. An exact old parent path whose page
 	 * is only in the trash resolves to nothing: a 301 to the grandparent would
-	 * stay in browsers after the page is restored.
+	 * stay in browsers after the page is restored. A live page that recorded
+	 * the path after that page did held it since, and is redirected to.
 	 *
 	 * @param Ledger_View                                 $view      Facts.
 	 * @param string                                      $post_type Post type name.
@@ -99,7 +100,7 @@ final class Rules {
 				if ( Paths::has_trashed_segment( $base ) ) {
 					continue;
 				}
-				if ( count( $segments ) === $length && $view->held_in_trash( $post_type, $prefix ) ) {
+				if ( count( $segments ) === $length && $view->newest_in_trash( $post_type, $prefix ) ) {
 					return null;
 				}
 			}

@@ -237,4 +237,91 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( 1, $wpdb->num_rows, 'One row answers the question.' );
 		$this->assertFalse( Ledger::held_in_trash( 'page', 'yy' ) );
 	}
+
+	public function test_claim_drops_other_pages_entries_for_the_path_a_page_takes(): void {
+		$moved   = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'moved',
+			]
+		);
+		$trashed = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'trashed',
+			]
+		);
+		$this->ledger->record( $moved, 'taken' );
+		$this->ledger->record( $moved, 'kept' );
+		$this->ledger->record( $trashed, 'taken' );
+		$this->ledger->record_root( 'page', 'taken' );
+		wp_trash_post( $trashed );
+
+		$taker = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'taken',
+			]
+		);
+
+		$this->assertSame( [ 'kept' ], $this->ledger->paths_for( $moved ), 'A live page gives the path up.' );
+		$this->assertSame( [ 'taken' ], $this->ledger->paths_for( $trashed ), 'A page in the trash keeps it, so a redirect stays temporary.' );
+		$this->assertSame( [ 'page' => [] ], get_option( Ledger::ROOT_OPTION ) );
+		$this->assertNull( $this->ledger->find( 'page', 'taken' ) );
+		$this->assertNotSame( $taker, $moved );
+	}
+
+	public function test_a_page_moved_onto_a_recorded_path_claims_it(): void {
+		$old = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'old',
+			]
+		);
+		$this->ledger->record( $old, 'about-us' );
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-us',
+			]
+		);
+
+		$this->assertSame( [], $this->ledger->paths_for( $old ) );
+		$this->assertSame( [ 'about' ], $this->ledger->paths_for( $this->about ) );
+	}
+
+	public function test_only_a_published_page_claims_a_path(): void {
+		$old = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'old',
+			]
+		);
+		$this->ledger->record( $old, 'draft-path' );
+
+		$draft = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'draft-path',
+				'post_status' => 'draft',
+			]
+		);
+		$this->assertSame( [ 'draft-path' ], $this->ledger->paths_for( $old ), 'A draft shows nothing at the path.' );
+
+		wp_publish_post( $draft );
+
+		$this->assertSame( [], $this->ledger->paths_for( $old ), 'Publishing takes it.' );
+	}
+
+	public function test_claim_is_one_seek_on_the_key(): void {
+		global $wpdb;
+
+		$post = get_post( $this->about );
+		get_option( Ledger::ROOT_OPTION );
+		$queries = $wpdb->num_queries;
+		$this->ledger->claim( $post );
+
+		$this->assertSame( 1, $wpdb->num_queries - $queries, 'Nothing to drop costs one query.' );
+	}
 }

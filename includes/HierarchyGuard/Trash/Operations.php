@@ -609,6 +609,9 @@ final class Operations {
 				];
 			}
 			// Held by the page in the trash, the path tells the resolver not to redirect it.
+			// Written after the alias even when the page held it already, so a live
+			// entry newer than this one can only be a page's that took the path since.
+			$this->ledger->forget( $root, (string) $path );
 			$this->ledger->record( $root, (string) $path );
 		}
 

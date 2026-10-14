@@ -57,6 +57,16 @@ final class Live_View implements Ledger_View {
 	/**
 	 * {@inheritDoc}
 	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
+	 */
+	public function newest_in_trash( string $post_type, string $prefix ): bool {
+		return Ledger::newest_in_trash( $post_type, $prefix );
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
 	 * @param int $id Post ID.
 	 */
 	public function post( int $id ): ?WP_Post {
