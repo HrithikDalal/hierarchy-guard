@@ -6,7 +6,14 @@ Shows the parent and child structure of pages in wp-admin, warns before a slug, 
 
 - **Pages list.** A Hierarchy column shows each page's parent and its number of subpages. The number, and the "View subpages" row action, narrow the list to that page's subtree; the heading then says which subtree is shown, with each ancestor one click away. Large subtrees list their first 1,000 pages.
 - **Trashing from the list.** Trashing a page with subpages, from its row or in bulk, opens a dialog that says what happens to the subpages and offers the other two choices. Quick Edit warns when a changed slug or parent would move subpages to new URLs.
-- **After a change.** After a trash, core's notice on the Pages list says what happened to the subpages, with Undo, and a second notice says how many old URLs changed and what handles them: a warning when nothing redirects them. A save that changes a page's URL gets the same notice where it was made: in the block editor, on the Pages list after a Quick Edit of a page with subpages, and at the top of the classic editor's screen. "View redirects" lists each old URL of that change and its new one, links to the detected redirect plugin, downloads a CSV in its import layout, or copies the list as text. Without JavaScript the link downloads the CSV. The list stays available for 30 minutes, until the user's next change replaces it. Old URLs from earlier changes are not listed again, and with Redirects on they keep redirecting.
+- **After a change.** A notice says how many old URLs a change left and what handles them: a warning when nothing redirects them. It appears once, where the change was made:
+  - on the Pages list after a trash, below core's notice, which says what happened to the subpages and keeps Undo;
+  - on the Pages list after a Bulk Edit;
+  - in Quick Edit, for a page with subpages;
+  - in the block editor;
+  - on the classic editor's screen right after a save made there, with a CSV download.
+
+  On the Pages list and in the block editor, "View redirects" opens a list of each old URL of that change and its new one, which links to the detected redirect plugin, downloads a CSV in its import layout, or copies the list as text. Without JavaScript the link downloads the CSV. A CSV row says 302 while restoring a page from the trash could still undo the move its redirect follows, as the built-in redirects answer it then, and 301 otherwise. The list stays available for 30 minutes, until the user's next change replaces it. Old URLs from earlier changes are not listed again, and with Redirects on they keep redirecting.
 - **Editor.** The block editor warns under the page's Summary before a save changes subpage URLs. Its Hierarchy panel shows the parent pages and the subpages, where the page is now. The classic editor shows the same in a box, and asks before saving such a change.
 
 ## Trashing a page with subpages
