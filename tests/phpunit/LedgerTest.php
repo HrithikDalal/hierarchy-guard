@@ -323,5 +323,12 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->claim( $post );
 
 		$this->assertSame( 1, $wpdb->num_queries - $queries, 'Nothing to drop costs one query.' );
+
+		wp_cache_delete( Ledger::ROOT_OPTION, 'options' );
+		wp_cache_delete( 'notoptions', 'options' );
+		$queries = $wpdb->num_queries;
+		$this->ledger->claim( $post );
+
+		$this->assertSame( 2, $wpdb->num_queries - $queries, 'The root list not read yet costs its option read too.' );
 	}
 }

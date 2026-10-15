@@ -145,7 +145,8 @@ final class Ledger {
 	 * entries for that exact path, and the root list's, are dropped; if the
 	 * page moves on later, it records the path itself. A post in the trash
 	 * keeps its entry, so a redirect stays temporary while a restore could
-	 * take the path back. One seek on the meta_key index.
+	 * take the path back. One seek on the meta_key index, plus the root list's
+	 * option read: a query the first time a request reads it, as it is not autoloaded.
 	 *
 	 * @param WP_Post $post The page at its new path.
 	 * @return bool True when an entry was dropped.
@@ -392,9 +393,9 @@ final class Ledger {
 
 	/**
 	 * Whether the newest entry for a path is held by a post in the trash. A
-	 * newer entry on a live post is another page's that held the path since:
-	 * the trash flow writes the trashed page's own entry after the alias it
-	 * records on the parent.
+	 * newer entry on a live post that is not above the path is another
+	 * page's that held the path since; an alias on a page above can be newer
+	 * too, and Rules tells it apart by where that page is.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Path, any form; normalized here.

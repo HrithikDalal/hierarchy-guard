@@ -289,7 +289,7 @@ final class Pairs {
 	 * @param array<string,mixed>                        $listing    From listing().
 	 * @param array<string,array<int,true>>              $gone       From dropped().
 	 * @param string                                     $post_type  Post type name.
-	 * @param array<string,array{live:int,held:bool}>    $facts      Ledger facts read so far, by path.
+	 * @param array<string,array{live:int,held:bool,newest:bool}> $facts      Ledger facts read so far, by path.
 	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; one is added per old path with no new URL.
 	 * @return array<int,array{old:string,id:int,temporary:bool}>
 	 */
