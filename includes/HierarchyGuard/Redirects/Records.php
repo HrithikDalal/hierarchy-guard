@@ -73,7 +73,30 @@ final class Records {
 	 */
 	public static function old_url( string $post_type, string $path ): string {
 		$url = Paths::url( $post_type, $path );
-		return rawurldecode( '' !== $url ? Paths::relative( $url ) : '/' . $path . '/' );
+		if ( '' !== $url ) {
+			return rawurldecode( Paths::relative( $url ) );
+		}
+		$prefix = self::prefix( $post_type );
+		return rawurldecode( '/' . ( '' !== $prefix ? $prefix . '/' : '' ) . $path . '/' );
+	}
+
+	/**
+	 * The rewrite prefix a type's old URLs are read with: the server's, or
+	 * under plain permalinks, where the type has no permastruct, its
+	 * rewrite slug, so a row reads and is found as it would with pretty
+	 * permalinks.
+	 *
+	 * @param string $post_type Post type name.
+	 * @return string
+	 */
+	private static function prefix( string $post_type ): string {
+		$prefix = Server::prefix( $post_type );
+		if ( '' !== $prefix || 'page' === $post_type || '' !== (string) get_option( 'permalink_structure' ) ) {
+			return $prefix;
+		}
+		$object  = get_post_type_object( $post_type );
+		$rewrite = null !== $object && is_array( $object->rewrite ) ? $object->rewrite : [];
+		return Paths::normalize( (string) ( $rewrite['slug'] ?? '' ) );
 	}
 
 	/**
@@ -107,7 +130,7 @@ final class Records {
 		if ( '' !== $search ) {
 			// A full URL is matched as the path the Old URL column shows.
 			$needle = '' !== (string) wp_parse_url( $search, PHP_URL_HOST ) ? rawurldecode( Paths::relative( $search ) ) : $search;
-			$rows   = array_filter( $rows, static fn( array $row ): bool => false !== stripos( $row['old'], $needle ) );
+			$rows   = array_filter( $rows, static fn( array $row ): bool => false !== ( function_exists( 'mb_stripos' ) ? mb_stripos( $row['old'], $needle, 0, 'UTF-8' ) : stripos( $row['old'], $needle ) ) );
 			// Any entry is found by its exact old URL, whether the newest list holds it or not.
 			$rows += $this->exact( $types, $search );
 		}
@@ -133,7 +156,8 @@ final class Records {
 	public function find( string $id ): ?array {
 		global $wpdb;
 
-		if ( 1 !== preg_match( '/^(\d{1,20})\.([0-9a-f]{32})$/', $id, $parts ) ) {
+		// One written form only: no leading zero, nothing after the hash.
+		if ( 1 !== preg_match( '/^(0|[1-9]\d{0,19})\.([0-9a-f]{32})\z/', $id, $parts ) ) {
 			return null;
 		}
 		$holder = (int) $parts[1];
@@ -426,7 +450,7 @@ final class Records {
 		$path = Paths::normalize( (string) wp_parse_url( Paths::relative( $search ), PHP_URL_PATH ) );
 		$keys = [];
 		foreach ( $types as $type ) {
-			$prefix = Server::prefix( $type );
+			$prefix = self::prefix( $type );
 			if ( '' === $prefix ) {
 				$keys[] = Ledger::key( $type, $path );
 			} elseif ( str_starts_with( $path, $prefix . '/' ) ) {

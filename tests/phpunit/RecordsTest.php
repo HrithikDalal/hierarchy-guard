@@ -325,6 +325,64 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertNull( $this->records->find( $this->ids['about'] . '.' . md5( 'page:old-about' ) . ' ' ) );
 	}
 
+	public function test_find_takes_only_an_id_in_its_one_written_form(): void {
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$this->ledger->record_root( 'page', 'archive' );
+		$id   = Records::id( $this->ids['about'], 'page', 'old-about' );
+		$root = Records::id( 0, 'page', 'archive' );
+		$this->assertNotNull( $this->records->find( $id ), 'Precondition.' );
+		$this->assertNotNull( $this->records->find( $root ), 'Precondition: the root list is holder 0.' );
+
+		foreach ( [ $id . "\n", '0' . $id, '00.' . md5( 'page:archive' ), ' ' . $id ] as $other ) {
+			$this->assertNull( $this->records->find( $other ), wp_json_encode( $other ) . ' names no record.' );
+		}
+	}
+
+	public function test_search_ignores_case_in_any_script(): void {
+		$this->ledger->record( $this->ids['about'], 'café/équipe' );
+		$this->ledger->record( $this->ids['team'], 'Über' );
+
+		$this->assertSame( [ '/café/équipe/' ], array_values( self::olds( $this->records->page( '', 'CAFÉ/ÉQUIPE', 1 ) ) ) );
+		$this->assertSame( [ '/Über/' ], array_values( self::olds( $this->records->page( '', 'über', 1 ) ) ) );
+	}
+
+	public function test_under_plain_permalinks_a_type_s_old_url_keeps_its_rewrite_prefix_and_is_found_by_it(): void {
+		$this->register_docs();
+		$this->set_permalink_structure( '/%postname%/' );
+		$guide = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$this->ledger->record( $guide, 'old-guide' );
+		$this->assertSame( [ '/docs/old-guide/' ], array_values( self::olds( $this->records->page( 'hg_docs', '', 1 ) ) ), 'Precondition: as under pretty permalinks.' );
+
+		$this->set_permalink_structure( '' );
+
+		$this->assertSame( [ '/docs/old-guide/' ], array_values( self::olds( $this->records->page( 'hg_docs', '', 1 ) ) ) );
+		$cap = static fn(): int => 0;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		$this->assertSame( [ '/docs/old-guide/' ], array_values( self::olds( $this->records->page( 'hg_docs', '/docs/old-guide/', 1 ) ) ), 'Past the cap, the exact search reads it the same way.' );
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+	}
+
+	public function test_a_page_target_the_ledger_does_not_record_is_refused_and_the_record_stays(): void {
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+		$never  = static fn(): bool => false;
+		add_filter( 'hierarchy_guard_should_record', $never );
+
+		$result = $this->records->save( $record, get_permalink( $this->ids['team'] ), 302 );
+		remove_filter( 'hierarchy_guard_should_record', $never );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'hierarchy_guard_not_saved', $result->get_error_code() );
+		$this->assertSame( 'The redirect could not be saved.', $result->get_error_message() );
+		$this->assertSame( [ 'old-about' ], $this->ledger->paths_for( $this->ids['about'] ), 'The record stays on its holder.' );
+		$this->assertSame( [], $this->ledger->paths_for( $this->ids['team'] ) );
+	}
+
 	public function test_saving_a_page_of_the_same_type_moves_the_record_onto_it(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
 		$this->ledger->set_target( 'page', 'old-about', $this->ids['about'], '', 302 );
