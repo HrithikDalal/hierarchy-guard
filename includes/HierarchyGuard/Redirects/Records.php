@@ -33,6 +33,7 @@ final class Records {
 	public const STATUS_ACTIVE      = 'active';
 	public const STATUS_IN_USE      = 'in_use';
 	public const STATUS_UNPUBLISHED = 'unpublished';
+	public const STATUS_REFUSED     = 'refused';
 	public const STATUS_OFF         = 'off';
 
 	/**
@@ -197,17 +198,20 @@ final class Records {
 	 *   record the server tries first;
 	 * - unpublished: the page the record points to is not published, or its
 	 *   holder is in the Trash, which the resolver passes over;
-	 * - off: built-in redirects are off, the site has plain permalinks, or
-	 *   the server refuses the request before it looks: a path deeper than
-	 *   its segment cap, or a URL target at the old URL itself, a loop;
+	 * - refused: the server can't send it, whether built-in redirects are on
+	 *   or off: a path deeper than its segment cap, which it refuses before
+	 *   it looks; a URL target at the old URL itself, a loop; or a record
+	 *   the rules reach that leads nowhere the server sends, as when the
+	 *   rewritten path is one several posts share and core finds one nobody
+	 *   can view, or the model cannot tell;
+	 * - off: built-in redirects are off, or the site has plain permalinks;
 	 * - active: the server serves the row's own record at its old URL. A
 	 *   top-level root-list entry leads nowhere at its own old URL, only for
 	 *   the URLs under it, so it is active when its record is the one the
 	 *   rules use there.
 	 *
-	 * A row the model cannot vouch for is in use: the model leaves a path
-	 * several posts share unanswered. Under plain permalinks the model does
-	 * not run. One served() call per post type, for these rows only.
+	 * Under plain permalinks the model does not run. One served() call per
+	 * post type, for these rows only.
 	 *
 	 * @param array<int,array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}> $rows Rows, one page at most.
 	 * @return array<string,string> One of the STATUS_ constants by row ID.
@@ -222,10 +226,11 @@ final class Records {
 		$served = [];
 		$used   = [];
 		$chosen = [];
+		$facts  = [];
 		foreach ( $pretty ? $paths : [] as $type => $list ) {
-			$facts           = [];
+			$facts[ $type ]  = [];
 			$temporary       = [];
-			$served[ $type ] = Batch_Resolver::served( array_map( 'strval', array_keys( $list ) ), (string) $type, $facts, $temporary, $chosen[ $type ], $used[ $type ] );
+			$served[ $type ] = Batch_Resolver::served( array_map( 'strval', array_keys( $list ) ), (string) $type, $facts[ $type ], $temporary, $chosen[ $type ], $used[ $type ] );
 		}
 		Batch_Resolver::prime_with_ancestors( array_values( array_filter( array_column( $rows, 'holder' ) ) ) );
 
@@ -244,16 +249,38 @@ final class Records {
 				$status = self::STATUS_IN_USE;
 			} elseif ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
 				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( ! $serving || substr_count( $path, '/' ) + 1 > Batch_Resolver::room( $type ) || ( Batch_Resolver::URL === $answer && self::loops( $type, $path, (string) ( $chosen[ $type ][ $path ]['url'] ?? '' ) ) ) ) {
-				$status = self::STATUS_OFF;
-			} elseif ( ! $own || ( 0 === $answer && ! self::is_top_level( $row ) ) ) {
+			} elseif ( substr_count( $path, '/' ) + 1 > Batch_Resolver::room( $type ) || ( Batch_Resolver::URL === $answer && self::loops( $type, $path, (string) ( $chosen[ $type ][ $path ]['url'] ?? '' ) ) ) ) {
+				$status = self::STATUS_REFUSED;
+			} elseif ( ! $own && self::held_by_another( $facts[ $type ][ $path ] ?? null, $first, $row['holder'] ) ) {
 				$status = self::STATUS_IN_USE;
+			} elseif ( ! $own || ( 0 === $answer && ! self::is_top_level( $row ) ) ) {
+				$status = self::STATUS_REFUSED;
+			} elseif ( ! $serving ) {
+				$status = self::STATUS_OFF;
 			} else {
 				$status = self::STATUS_ACTIVE;
 			}
 			$out[ $row['id'] ] = $status;
 		}
 		return $out;
+	}
+
+	/**
+	 * Whether another record holds an old path the server answers nothing
+	 * at: the rules used another record first, a newer live post holds it,
+	 * or a post in the Trash holds it, which the rules leave the path to.
+	 *
+	 * @param array{live:int,trashed:int[]}|null $fact   Ledger facts for the path, from served().
+	 * @param array{0:string,1:int}|null         $first  The first record the rules used, if any.
+	 * @param int                                $holder The row's holder, 0 for the root list.
+	 * @return bool
+	 */
+	private static function held_by_another( ?array $fact, ?array $first, int $holder ): bool {
+		if ( null !== $first ) {
+			return true;
+		}
+		$live = (int) ( $fact['live'] ?? 0 );
+		return ( $live > 0 && $live !== $holder ) || [] !== array_diff( array_map( 'intval', (array) ( $fact['trashed'] ?? [] ) ), [ $holder ] );
 	}
 
 	/**

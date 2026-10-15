@@ -718,10 +718,13 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame(
 			[
 				'/a/b/'   => Records::STATUS_ACTIVE,
-				'/a/b/c/' => Records::STATUS_OFF,
+				'/a/b/c/' => Records::STATUS_REFUSED,
 			],
 			$this->statuses_by_old()
 		);
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => false ] );
+		$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/a/b/c/'], 'Before built-in redirects are off: it can’t be sent even with them on.' );
 	}
 
 	public function test_a_url_target_at_its_own_old_url_never_reads_active(): void {
@@ -731,7 +734,29 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->ledger->set_target( 'page', 'old-crew', $this->ids['team'], home_url( '/old-crew/' ), 0 );
 
 		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server refuses the loop.' );
-		$this->assertNotSame( Records::STATUS_ACTIVE, $this->statuses_by_old()['/old-crew/'] );
+		$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/old-crew/'] );
+	}
+
+	public function test_a_record_the_server_uses_but_can_t_send_through_is_refused_not_in_use(): void {
+		global $wpdb;
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$crew  = $this->page( 'crew' );
+		$draft = $this->page( 'crew-draft', 0, 'draft' );
+		// Two pages at /crew/: core's lookup of the rewritten path finds the newer one, a draft.
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'crew' ], [ 'ID' => $draft ] );
+		clean_post_cache( $draft );
+		$this->ledger->record( $crew, 'old-crew' );
+		wp_cache_flush();
+
+		$this->go_to( home_url( '/old-crew/' ) );
+		$this->assertTrue( is_404(), 'Precondition: nothing is shown at the old URL.' );
+		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server sends nothing.' );
+		$this->assertSame( [ '/old-crew/' => Records::STATUS_REFUSED ], $this->statuses_by_old() );
+	}
+
+	public function test_the_status_words_for_each_status(): void {
+		$this->assertSame( 'Not active: the server can’t send this redirect', \HierarchyGuard\Admin\Redirects_Table::status_label( Records::STATUS_REFUSED ) );
 	}
 
 	public function test_a_row_another_type_answers_first_is_in_use(): void {

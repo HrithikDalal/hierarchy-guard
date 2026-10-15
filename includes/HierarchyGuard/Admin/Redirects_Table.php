@@ -370,6 +370,8 @@ final class Redirects_Table extends WP_List_Table {
 				return __( 'Not active: a page uses this URL', 'hierarchy-guard' );
 			case Records::STATUS_UNPUBLISHED:
 				return __( 'Not active: the page it points to isn’t published', 'hierarchy-guard' );
+			case Records::STATUS_REFUSED:
+				return __( 'Not active: the server can’t send this redirect', 'hierarchy-guard' );
 			case Records::STATUS_OFF:
 				return __( 'Not active: built-in redirects are off', 'hierarchy-guard' );
 			case Records::STATUS_ACTIVE:
