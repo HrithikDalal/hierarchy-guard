@@ -11,6 +11,7 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
+use HierarchyGuard\Redirects\Batch_Resolver;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Markers;
@@ -18,6 +19,7 @@ use WP_UnitTestCase;
 
 /**
  * @covers \HierarchyGuard\Redirects\Resolver
+ * @covers \HierarchyGuard\Redirects\Rules
  */
 final class ResolverTest extends WP_UnitTestCase {
 
@@ -35,6 +37,7 @@ final class ResolverTest extends WP_UnitTestCase {
 		parent::set_up();
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
+		delete_option( Ledger::ROOT_TARGETS );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
 		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
@@ -561,5 +564,109 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->ledger->record( $this->about, 'company/about' );
 
 		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'The page in the trash holds the newest entry.' );
+	}
+
+	public function test_a_url_target_answers_its_exact_old_path_with_its_url(): void {
+		$this->ledger->record( $this->about, 'old/about' );
+		$this->ledger->set_target( 'page', 'old/about', $this->about, 'https://example.org/about/', 0 );
+
+		$code = null;
+		$this->assertSame( 'https://example.org/about/', $this->resolver->resolve( 'page', '/Old/About/', $temporary, $code ) );
+		$this->assertFalse( $temporary );
+		$this->assertSame( 0, $code, 'No code was chosen: the automatic one applies.' );
+	}
+
+	public function test_past_a_url_target_a_longer_path_resolves_as_if_the_record_were_not_there(): void {
+		$this->ledger->record( $this->company, 'old' );
+		$this->ledger->record( $this->about, 'old/about' );
+		$this->assertSame( $this->about, $this->resolver->resolve( 'page', 'old/about' )->ID, 'Precondition: the record answers.' );
+
+		$this->ledger->set_target( 'page', 'old/about', $this->about, 'https://example.org/about/', 0 );
+
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'old/about/team' )->ID, 'The shorter prefix answers: old/about/team → company/about/team.' );
+		$this->ledger->forget( $this->company, 'old' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'old/about/team' ), 'With no shorter prefix, nothing answers.' );
+	}
+
+	public function test_a_chosen_code_replaces_the_automatic_one_and_the_first_along_a_chain_wins(): void {
+		$this->ledger->record( $this->company, 'legacy' );
+		$this->ledger->record( $this->about, 'company/old-about' );
+		$this->ledger->set_target( 'page', 'company/old-about', $this->about, '', 301 );
+
+		// Round 1: legacy → company, so company/old-about/team; round 2: company/old-about → company/about.
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'legacy/old-about/team', $temporary, $code )->ID );
+		$this->assertSame( 301, $code );
+
+		$this->ledger->set_target( 'page', 'legacy', $this->company, '', 302 );
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'legacy/old-about/team', $temporary, $code )->ID );
+		$this->assertSame( 302, $code, 'The first record used that has a chosen code decides.' );
+		$this->assertFalse( $temporary, 'A chosen code leaves the automatic flag as it was.' );
+	}
+
+	public function test_a_root_entry_s_override_is_read_from_its_option(): void {
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->assertSame( $this->company, $this->resolver->resolve( 'page', 'archive/company' )->ID, 'Precondition: the root entry maps archive/company to company.' );
+
+		$this->ledger->set_target( 'page', 'archive', 0, 'https://example.org/archive/', 302 );
+
+		$this->assertSame( 'https://example.org/archive/', $this->resolver->resolve( 'page', 'archive', $temporary, $code ) );
+		$this->assertSame( 302, $code );
+		$this->assertNull( $this->resolver->resolve( 'page', 'archive/company' ), 'A URL target covers its exact path only.' );
+	}
+
+	public function test_a_url_target_on_a_page_in_the_trash_is_not_served(): void {
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 0 );
+		wp_trash_post( $this->about );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'old-about' ), 'A record lives with its page: in the trash, nothing answers.' );
+	}
+
+	public function test_the_batch_resolver_reads_overrides_as_the_live_one_does(): void {
+		$this->ledger->record( $this->company, 'old' );
+		$this->ledger->record( $this->about, 'old/about' );
+		$this->ledger->set_target( 'page', 'old/about', $this->about, 'https://example.org/about/', 0 );
+		$this->ledger->set_target( 'page', 'old', $this->company, '', 302 );
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->ledger->set_target( 'page', 'archive', 0, 'https://example.org/archive/', 301 );
+
+		$facts     = [];
+		$temporary = [];
+		$chosen    = [];
+		$served    = Batch_Resolver::served( [ 'old/about', 'old/about/team', 'archive', 'archive/company' ], 'page', $facts, $temporary, $chosen );
+
+		ksort( $served );
+		ksort( $chosen );
+		$this->assertSame(
+			[
+				'archive'         => Batch_Resolver::URL,
+				'archive/company' => 0,
+				'old/about'       => Batch_Resolver::URL,
+				'old/about/team'  => $this->team,
+			],
+			$served
+		);
+		$this->assertSame(
+			[
+				'archive'        => [
+					'url'  => 'https://example.org/archive/',
+					'code' => 301,
+				],
+				'old/about'      => [
+					'url'  => 'https://example.org/about/',
+					'code' => 0,
+				],
+				'old/about/team' => [
+					'url'  => '',
+					'code' => 302,
+				],
+			],
+			$chosen
+		);
+		foreach ( [ 'old/about', 'old/about/team', 'archive', 'archive/company' ] as $path ) {
+			$live = $this->resolver->resolve( 'page', $path, $live_temporary, $live_code );
+			$this->assertSame( is_string( $live ) ? $live : ( null === $live ? 0 : $live->ID ), is_string( $live ) ? $chosen[ $path ]['url'] : $served[ $path ], $path );
+			$this->assertSame( $live_code, $chosen[ $path ]['code'] ?? 0, $path );
+		}
 	}
 }

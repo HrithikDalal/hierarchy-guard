@@ -31,17 +31,22 @@ final class Rules {
 	public const ROOT = 0;
 
 	/**
-	 * The publicly viewable post an old path now leads to, or null.
+	 * The publicly viewable post an old path now leads to, the URL a record's
+	 * URL target sends it to, or null. A record with a URL target answers
+	 * its exact old path and ends the rounds. The code chosen on the first
+	 * record the rounds use that has one replaces the automatic code.
 	 *
 	 * @param Ledger_View                                 $view      Facts.
 	 * @param string                                      $post_type Post type name.
 	 * @param string                                      $path      Normalized path.
 	 * @param bool                                        $temporary Set to true when a prefix used is held by a page in the trash.
 	 * @param array<int,array{0:string,1:int,2:string}>|null $trace  Each round's prefix, holder and rewritten path is added.
-	 * @return WP_Post|null
+	 * @param int|null                                    $code      Set to the chosen 301 or 302, or 0 when the automatic code applies.
+	 * @return WP_Post|string|null A post, an http(s) URL from a URL target, or null.
 	 */
-	public static function resolve( Ledger_View $view, string $post_type, string $path, bool &$temporary, ?array &$trace = null ): ?WP_Post {
+	public static function resolve( Ledger_View $view, string $post_type, string $path, bool &$temporary, ?array &$trace = null, ?int &$code = null ): WP_Post|string|null {
 		$seen = [];
+		$code = 0;
 
 		for ( $round = 0; $round < self::MAX_ROUNDS; $round++ ) {
 			if ( '' === $path || isset( $seen[ $path ] ) ) {
@@ -49,9 +54,16 @@ final class Rules {
 			}
 			$seen[ $path ] = true;
 
-			$candidate = self::rewrite_once( $view, $post_type, $path, $temporary, $trace );
+			$override  = null;
+			$candidate = self::rewrite_once( $view, $post_type, $path, $temporary, $trace, $override );
 			if ( null === $candidate ) {
 				return null;
+			}
+			if ( 0 === $code && null !== $override ) {
+				$code = $override['code'];
+			}
+			if ( null !== $override && '' !== $override['url'] ) {
+				return $override['url'];
 			}
 
 			$target = $view->page_by_path( $candidate, $post_type );
@@ -72,22 +84,33 @@ final class Rules {
 	 * is only in the trash resolves to nothing: a 301 to the grandparent would
 	 * stay in browsers after the page is restored. A live page that is not
 	 * an ancestor of that page and recorded the path after it did held it
-	 * since, and is redirected to.
+	 * since, and is redirected to. A record with a URL target answers only
+	 * its exact old path: for a longer path it is passed over, so a shorter
+	 * prefix can match.
 	 *
 	 * @param Ledger_View                                 $view      Facts.
 	 * @param string                                      $post_type Post type name.
 	 * @param string                                      $path      Normalized path.
 	 * @param bool                                        $temporary Set to true when the prefix used is held by a page in the trash.
 	 * @param array<int,array{0:string,1:int,2:string}>|null $trace  The prefix, its holder and the rewritten path are added.
-	 * @return string|null The rewritten path, or null when no prefix matched.
+	 * @param array{url:string,code:int}|null             $override  Set to the override on the record used, null for none.
+	 * @return string|null The rewritten path, '' for a URL target, or null when no prefix matched.
 	 */
-	public static function rewrite_once( Ledger_View $view, string $post_type, string $path, bool &$temporary, ?array &$trace = null ): ?string {
+	public static function rewrite_once( Ledger_View $view, string $post_type, string $path, bool &$temporary, ?array &$trace = null, ?array &$override = null ): ?string {
 		$segments = explode( '/', $path );
+		$override = null;
 
 		for ( $length = count( $segments ); $length >= 1; $length-- ) {
 			$prefix = implode( '/', array_slice( $segments, 0, $length ) );
 			$hit    = $view->find( $post_type, $prefix );
 			if ( null === $hit ) {
+				continue;
+			}
+
+			$exact  = count( $segments ) === $length;
+			$target = $view->target( $post_type, $prefix, $hit );
+			$url    = null !== $target ? $target['url'] : '';
+			if ( '' !== $url && ! $exact ) {
 				continue;
 			}
 
@@ -97,11 +120,13 @@ final class Rules {
 				if ( ! $post instanceof WP_Post || 'trash' === $post->post_status ) {
 					continue;
 				}
-				$base = $view->uri( $post );
-				if ( Paths::has_trashed_segment( $base ) ) {
-					continue;
+				if ( '' === $url ) {
+					$base = $view->uri( $post );
+					if ( Paths::has_trashed_segment( $base ) ) {
+						continue;
+					}
 				}
-				if ( count( $segments ) === $length && self::held_for_trash( $view, $post_type, $prefix, $hit ) ) {
+				if ( $exact && self::held_for_trash( $view, $post_type, $prefix, $hit ) ) {
 					return null;
 				}
 			}
@@ -114,6 +139,7 @@ final class Rules {
 
 			$candidate = trim( $base . '/' . $remainder, '/' );
 			$trace[]   = [ $prefix, $hit, $candidate ];
+			$override  = $target;
 			return $candidate;
 		}
 

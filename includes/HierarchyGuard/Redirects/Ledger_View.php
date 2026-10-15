@@ -29,6 +29,16 @@ interface Ledger_View {
 	public function find( string $post_type, string $prefix ): ?int;
 
 	/**
+	 * The override on the record find() answered with, as Ledger::target() reads it.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
+	 * @param int    $hit       What find() answered: the holder, or Rules::ROOT.
+	 * @return array{url:string,code:int}|null
+	 */
+	public function target( string $post_type, string $prefix, int $hit ): ?array;
+
+	/**
 	 * Whether a post in the trash holds a path, as Ledger::held_in_trash() answers it.
 	 *
 	 * @param string $post_type Post type name.
