@@ -646,7 +646,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertSame( 'warning', $notice['type'] );
 		$this->assertStringStartsWith( '3 old URLs now show “Page not found”. <a href="', $notice['message'] );
 		$this->assertStringContainsString( 'class="hierarchy-guard-view-redirects"', $notice['message'] );
-		$this->assertStringEndsWith( 'download>Download redirects (CSV)</a><span aria-hidden="true"> ·</span> <a href="' . esc_url( admin_url( 'options-writing.php#hierarchy-guard-redirects' ) ) . '">Set up redirects</a>', $notice['message'], 'View comes first, as in the other two notices.' );
+		$this->assertStringEndsWith( 'download>Download redirects (CSV)</a><span aria-hidden="true"> ·</span> <a href="' . esc_url( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ) ) . '">Set up redirects</a>', $notice['message'], 'View comes first, as in the other two notices.' );
 		$this->assertStringContainsString( 'format=generic', $notice['message'] );
 	}
 
@@ -802,7 +802,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$html = $this->rendered();
 		$this->assertStringContainsString( 'hierarchy-guard-nudge', $html );
 		$this->assertStringContainsString( 'is-dismissible', $html );
-		$this->assertStringContainsString( 'Set up redirects', $html );
+		$this->assertStringContainsString( '<a href="' . esc_url( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ) ) . '">Set up redirects</a>', $html );
 
 		set_current_screen( 'dashboard' );
 		ob_start();

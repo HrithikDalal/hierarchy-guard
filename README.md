@@ -1,6 +1,6 @@
 # Hierarchy Guard
 
-Shows the parent and child structure of pages in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and records every old URL so it can reach the page it leads to now. A page published, moved or renamed onto a path another page used to have takes that URL over, and the old URLs of the earlier page's subpages under it stop redirecting. Built-in redirects are off by default: with a redirect plugin active, Hierarchy Guard lists the redirects to add there; with none, turn on Redirects in Settings › Writing › Page hierarchy.
+Shows the parent and child structure of pages in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and records every old URL so it can reach the page it leads to now. A page published, moved or renamed onto a path another page used to have takes that URL over, and the old URLs of the earlier page's subpages under it stop redirecting. Built-in redirects are off by default: with a redirect plugin active, Hierarchy Guard lists the redirects to add there; with none, turn on Redirects in Settings › Hierarchy Guard.
 
 ## In the admin
 
@@ -18,7 +18,7 @@ Shows the parent and child structure of pages in wp-admin, warns before a slug, 
 
 ## Trashing a page with subpages
 
-By default, trashing a page moves its subpages up one level, so they don't end up under a `__trashed` URL, and records their old URLs. With Redirects on, visitors on an old URL reach the new one. While the page is in the trash those redirects are temporary, so browsers don't keep them after a restore. The same section can trash the subpages too, or leave them where they are. A subpage the user who trashed the page can't move or trash stays under it. Restoring the page, whether by Undo, Restore, or a status change over the REST API or WP-CLI, moves the subpages back, and those trashed with it come back with the status they had.
+By default, trashing a page moves its subpages up one level, so they don't end up under a `__trashed` URL, and records their old URLs. With Redirects on, visitors on an old URL reach the new one. While the page is in the trash those redirects are temporary, so browsers don't keep them after a restore. The Settings tab of Settings › Hierarchy Guard can trash the subpages too, or leave them where they are. A subpage the user who trashed the page can't move or trash stays under it. Restoring the page, whether by Undo, Restore, or a status change over the REST API or WP-CLI, moves the subpages back, and those trashed with it come back with the status they had.
 
 ## Background jobs
 

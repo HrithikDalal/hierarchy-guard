@@ -16,6 +16,11 @@ final class Settings {
 
 	public const OPTION = 'hierarchy_guard_settings';
 
+	/**
+	 * The Settings API group the Settings tab saves.
+	 */
+	public const GROUP = 'hierarchy_guard';
+
 	public const POLICY_REPARENT       = 'reparent';
 	public const POLICY_TRASH_CHILDREN = 'trash_children';
 	public const POLICY_KEEP           = 'keep';
@@ -87,6 +92,22 @@ final class Settings {
 		$policy = (string) apply_filters( 'hierarchy_guard_default_trash_policy', $policy );
 
 		return in_array( $policy, self::POLICIES, true ) ? $policy : self::POLICY_REPARENT;
+	}
+
+	/**
+	 * Registers the option with its sanitize callback and defaults. Hooked on
+	 * init, so the callback also covers WP-CLI and REST writes.
+	 */
+	public static function register_option(): void {
+		register_setting(
+			self::GROUP,
+			self::OPTION,
+			[
+				'type'              => 'array',
+				'sanitize_callback' => [ self::class, 'sanitize' ],
+				'default'           => self::defaults(),
+			]
+		);
 	}
 
 	/**

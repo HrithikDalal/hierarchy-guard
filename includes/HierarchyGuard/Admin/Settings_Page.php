@@ -1,6 +1,6 @@
 <?php
 /**
- * Settings › Writing › Page hierarchy.
+ * Settings › Hierarchy Guard.
  *
  * @package HierarchyGuard
  */
@@ -13,12 +13,14 @@ use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
 
 /**
- * Registers the plugin's settings as a section on the Writing settings page.
+ * The plugin's one admin page, under Settings, for users with manage_options:
+ * core nav tabs, the Settings tab's three fields, saved through the Settings
+ * API, and a "Settings" link on the plugin's row of the Plugins screen.
  */
-final class Settings_Section {
+final class Settings_Page {
 
+	public const SLUG    = 'hierarchy-guard';
 	public const SECTION = 'hierarchy_guard';
-	public const PAGE    = 'writing';
 
 	/**
 	 * Providers.
@@ -37,56 +39,126 @@ final class Settings_Section {
 	}
 
 	/**
-	 * Hooks into core. The option is registered on init so its sanitize callback
-	 * also covers WP-CLI and REST writes; the section and fields are admin only.
+	 * Hooks into core.
 	 */
 	public function register(): void {
-		add_action( 'init', [ $this, 'register_option' ] );
-		add_action( 'admin_init', [ $this, 'add' ] );
+		add_action( 'admin_menu', [ $this, 'add_page' ] );
+		add_action( 'admin_init', [ $this, 'add_fields' ] );
+		add_filter( 'plugin_action_links_' . plugin_basename( HIERARCHY_GUARD_FILE ), [ $this, 'action_links' ] );
 	}
 
 	/**
-	 * The Redirects field on Settings › Writing, for "Set up redirects" links.
+	 * The page's URL, on a tab.
+	 *
+	 * @param string $tab Tab, '' for the Settings tab.
+	 * @return string
+	 */
+	public static function url( string $tab = '' ): string {
+		$args = [ 'page' => self::SLUG ];
+		if ( '' !== $tab ) {
+			$args['tab'] = $tab;
+		}
+		return add_query_arg( $args, admin_url( 'options-general.php' ) );
+	}
+
+	/**
+	 * The Redirects field, for "Set up redirects" links.
 	 *
 	 * @return string
 	 */
 	public static function redirects_url(): string {
-		return admin_url( 'options-writing.php#hierarchy-guard-redirects' );
+		return self::url() . '#hierarchy-guard-redirects';
 	}
 
 	/**
-	 * The trash-policy field on Settings › Writing, for "Settings" links.
+	 * The trash-policy field, for "Change this in Settings" links.
 	 *
 	 * @return string
 	 */
 	public static function policy_url(): string {
-		return admin_url( 'options-writing.php#hierarchy-guard-trash-policy' );
+		return self::url() . '#hierarchy-guard-trash-policy';
 	}
 
 	/**
-	 * Registers the option with its sanitize callback and defaults.
+	 * Adds the page under Settings.
 	 */
-	public function register_option(): void {
-		register_setting(
-			self::PAGE,
-			Settings::OPTION,
-			[
-				'type'              => 'array',
-				'sanitize_callback' => [ Settings::class, 'sanitize' ],
-				'default'           => Settings::defaults(),
-			]
-		);
+	public function add_page(): void {
+		add_options_page( __( 'Hierarchy Guard', 'hierarchy-guard' ), __( 'Hierarchy Guard', 'hierarchy-guard' ), 'manage_options', self::SLUG, [ $this, 'render' ] );
 	}
 
 	/**
-	 * Adds the section and fields to the Writing settings page.
+	 * Puts a "Settings" link first on the plugin's row of the Plugins screen.
+	 *
+	 * @param array<int|string,string> $links Action links.
+	 * @return array<int|string,string>
 	 */
-	public function add(): void {
-		add_settings_section( self::SECTION, __( 'Page hierarchy', 'hierarchy-guard' ), '__return_null', self::PAGE );
+	public function action_links( array $links ): array {
+		if ( current_user_can( 'manage_options' ) ) {
+			$links = array_merge( [ 'settings' => sprintf( '<a href="%1$s">%2$s</a>', esc_url( self::url() ), esc_html__( 'Settings', 'hierarchy-guard' ) ) ], $links );
+		}
+		return $links;
+	}
 
-		add_settings_field( 'hierarchy_guard_post_types', __( 'Post types', 'hierarchy-guard' ), [ $this, 'render_post_types' ], self::PAGE, self::SECTION );
-		add_settings_field( 'hierarchy_guard_trash_policy', __( 'Trashing a page with subpages', 'hierarchy-guard' ), [ $this, 'render_trash_policy' ], self::PAGE, self::SECTION );
-		add_settings_field( 'hierarchy_guard_serve_redirects', __( 'Redirects', 'hierarchy-guard' ), [ $this, 'render_serve_redirects' ], self::PAGE, self::SECTION );
+	/**
+	 * Adds the Settings tab's fields, in a section without a heading.
+	 */
+	public function add_fields(): void {
+		add_settings_section( self::SECTION, '', '__return_null', self::SLUG );
+
+		add_settings_field( 'hierarchy_guard_post_types', __( 'Post types', 'hierarchy-guard' ), [ $this, 'render_post_types' ], self::SLUG, self::SECTION );
+		add_settings_field( 'hierarchy_guard_trash_policy', __( 'Trashing a page with subpages', 'hierarchy-guard' ), [ $this, 'render_trash_policy' ], self::SLUG, self::SECTION );
+		add_settings_field( 'hierarchy_guard_serve_redirects', __( 'Redirects', 'hierarchy-guard' ), [ $this, 'render_serve_redirects' ], self::SLUG, self::SECTION );
+	}
+
+	/**
+	 * Prints the page: the heading, the tabs, and the current tab.
+	 */
+	public function render(): void {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		echo '<div class="wrap">';
+		echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';
+		$this->render_tabs( 'settings' );
+		// Core moves notices to just after this, below the tabs.
+		echo '<hr class="wp-header-end">';
+		echo '<form action="options.php" method="post">';
+		settings_fields( Settings::GROUP );
+		do_settings_sections( self::SLUG );
+		submit_button();
+		echo '</form>';
+		echo '</div>';
+	}
+
+	/**
+	 * The tabs, by key.
+	 *
+	 * @return array<string,string>
+	 */
+	private function tabs(): array {
+		return [
+			'settings' => __( 'Settings', 'hierarchy-guard' ),
+		];
+	}
+
+	/**
+	 * Prints core's nav tabs.
+	 *
+	 * @param string $current The tab shown.
+	 */
+	private function render_tabs( string $current ): void {
+		echo '<nav class="nav-tab-wrapper wp-clearfix" aria-label="' . esc_attr__( 'Secondary menu', 'hierarchy-guard' ) . '">';
+		foreach ( $this->tabs() as $tab => $label ) {
+			$active = $tab === $current;
+			printf(
+				'<a href="%1$s" class="nav-tab%2$s"%3$s>%4$s</a>',
+				esc_url( self::url( 'settings' === $tab ? '' : $tab ) ),
+				$active ? ' nav-tab-active' : '',
+				$active ? ' aria-current="page"' : '',
+				esc_html( $label )
+			);
+		}
+		echo '</nav>';
 	}
 
 	/**
@@ -144,7 +216,7 @@ final class Settings_Section {
 
 		$help = __( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'The Pages list asks each time.', 'hierarchy-guard' );
 		if ( ! EMPTY_TRASH_DAYS ) {
-			$help .= ' ' . __( 'The trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
+			$help .= ' ' . __( 'The Trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
 		}
 		echo '<p class="description">' . esc_html( $help ) . '</p>';
 		echo '</fieldset>';

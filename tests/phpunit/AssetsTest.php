@@ -82,8 +82,8 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertSame( 'hierarchy-guard/v1', $config['namespace'] );
 		$this->assertFalse( $config['serving'] );
 		$this->assertNull( $config['provider'] );
-		$this->assertStringEndsWith( 'options-writing.php#hierarchy-guard-redirects', $config['settingsUrl'] );
-		$this->assertStringEndsWith( 'options-writing.php#hierarchy-guard-trash-policy', $config['policyUrl'] );
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ), $config['settingsUrl'] );
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-trash-policy' ), $config['policyUrl'] );
 		$this->assertSame( Settings::POLICY_REPARENT, $config['policy'] );
 		$this->assertContains( 'page', $config['postTypes'] );
 		$this->assertSame( 1000, $config['cap'] );
