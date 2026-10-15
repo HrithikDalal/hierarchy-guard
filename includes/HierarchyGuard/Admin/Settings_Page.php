@@ -237,6 +237,12 @@ final class Settings_Page {
 			$on = sprintf( __( 'Turn them on in the <a href="%s">Settings tab</a>.', 'hierarchy-guard' ), esc_url( self::redirects_url() ) );
 			$this->inline_notice( $off . ' ' . $on, 'warning' );
 		}
+		if ( '' === (string) get_option( 'permalink_structure' ) ) {
+			$plain = esc_html__( 'Built-in redirects need a permalink structure other than Plain, so these redirects aren’t served.', 'hierarchy-guard' );
+			/* translators: %s: URL of Settings › Permalinks. */
+			$choose = sprintf( __( 'Choose one in <a href="%s">Permalink settings</a>.', 'hierarchy-guard' ), esc_url( admin_url( 'options-permalink.php' ) ) );
+			$this->inline_notice( $plain . ' ' . $choose, 'warning' );
+		}
 		$provider = $this->providers->detect();
 		if ( null !== $provider ) {
 			$name = trim( (string) ( $provider['name'] ?? '' ) );

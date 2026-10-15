@@ -279,6 +279,20 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<span class="displaying-num">1+ item</span>', $html, 'Past the cap, the count is a lower bound.' );
 	}
 
+	public function test_under_plain_permalinks_a_notice_says_why_nothing_is_served(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->recorded( $this->ids['about'], 'old-about' );
+		$notice = 'Built-in redirects need a permalink structure other than Plain, so these redirects aren’t served. Choose one in <a href="' . esc_url( admin_url( 'options-permalink.php' ) ) . '">Permalink settings</a>.';
+		$this->assertStringNotContainsString( 'other than Plain', $this->rendered(), 'Precondition: pretty permalinks.' );
+
+		$this->set_permalink_structure( '' );
+		$html = $this->rendered();
+
+		$this->assertStringContainsString( $notice, $html );
+		$this->assertStringContainsString( '>Not active: built-in redirects are off<', $html );
+		$this->assertStringNotContainsString( 'Built-in redirects are off, so', $html, 'The switch is on: only the permalinks notice.' );
+	}
+
 	public function test_delete_from_a_row_deletes_the_record_and_says_its_old_url_no_longer_redirects_through_it(): void {
 		$id = $this->recorded( $this->ids['about'], 'old-about' );
 		$this->ledger->set_target( 'page', 'old-about', $this->ids['about'], '', 302 );
