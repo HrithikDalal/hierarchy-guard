@@ -1,6 +1,6 @@
 # Hierarchy Guard
 
-Shows the parent and child structure of pages in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and records every old URL so it can reach the page it leads to now. Built-in redirects are off by default: with a redirect plugin active, Hierarchy Guard lists the redirects to add there; with none, turn on Redirects in Settings › Writing › Page hierarchy.
+Shows the parent and child structure of pages in wp-admin, warns before a slug, parent or trash change breaks subpage URLs, and records every old URL so it can reach the page it leads to now. A page published at a path another page used to have takes that URL over, and the old URLs of the earlier page's subpages under it stop redirecting. Built-in redirects are off by default: with a redirect plugin active, Hierarchy Guard lists the redirects to add there; with none, turn on Redirects in Settings › Writing › Page hierarchy.
 
 ## In the admin
 
