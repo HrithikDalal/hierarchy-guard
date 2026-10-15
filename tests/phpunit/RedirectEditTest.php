@@ -157,10 +157,64 @@ final class RedirectEditTest extends WP_UnitTestCase {
 			unset( $refused );
 		}
 
-		$this->follow( Redirect_Edit::edit_url( $this->id ) );
+		// An editor with a nonce of their own for this record: only the capability check can refuse it.
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'editor' ] ) );
-		$this->expectException( WPDieException::class );
+		$this->follow( Redirect_Edit::edit_url( $this->id ) );
+		$this->assertSame( 1, wp_verify_nonce( sanitize_key( wp_unslash( $_REQUEST['_wpnonce'] ?? '' ) ), Redirect_Edit::NONCE_EDIT . $this->id ), 'Precondition: the nonce is good.' );
+		try {
+			$this->edit->handle();
+			$this->fail( 'An editor cannot open the Edit view.' );
+		} catch ( WPDieException $refused ) {
+			$this->assertSame( 'Sorry, you are not allowed to change redirects.', $refused->getMessage() );
+		}
+	}
+
+	public function test_the_edit_link_of_a_record_deleted_since_says_it_no_longer_exists(): void {
+		$this->follow( Redirect_Edit::edit_url( $this->id ) );
+		$this->ledger->forget( $this->ids['about'], 'old-about' );
+
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&settings-updated=true' ), $this->edit->handle() );
+
+		$kept = get_transient( 'settings_errors' );
+		$this->assertSame( 'This redirect no longer exists.', end( $kept )['message'] );
+		$this->assertSame( 'error', end( $kept )['type'] );
+		$this->assertSame( '', $this->view(), 'No Edit view prints.' );
+	}
+
+	public function test_a_refused_save_through_the_page_prints_the_form_again_with_why(): void {
+		set_current_screen( 'settings_page_hierarchy-guard' );
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		$page = new Settings_Page( new Providers(), $this->records );
+		$this->submit( 'ftp://example.org/', '301' );
+
+		$page->load();
+		ob_start();
+		$page->render();
+		$html = (string) ob_get_clean();
+		set_current_screen( 'front' );
+
+		$this->assertSame( [ 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
+		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
+		$this->assertStringContainsString( 'value="ftp://example.org/"', $html );
+		$this->assertMatchesRegularExpression( '#value="301"\s+checked=\'checked\'#', $html );
+		$this->assertStringNotContainsString( 'wp-list-table', $html );
+		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ) );
+	}
+
+	public function test_a_code_sent_as_an_array_is_read_as_automatic(): void {
+		$this->submit( 'https://example.org/', '302' );
+		$_POST['code']    = [ '302' ];
+		$_REQUEST['code'] = [ '302' ];
+
 		$this->edit->handle();
+
+		$this->assertSame(
+			[
+				'url'  => 'https://example.org/',
+				'code' => 0,
+			],
+			$this->ledger->target( 'page', 'old-about', $this->ids['about'] )
+		);
 	}
 
 	public function test_saving_a_page_returns_to_the_tab_with_redirect_updated(): void {

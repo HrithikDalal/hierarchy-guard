@@ -242,7 +242,7 @@ final class Redirect_Edit {
 		// phpcs:disable WordPress.Security.NonceVerification.Missing -- handle() checked the save's nonce.
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A URL or a path; Records::save() passes it through esc_url_raw(), and sanitize_text_field() would strip its percent-encoding.
 		$url  = isset( $_POST['target'] ) && is_string( $_POST['target'] ) ? trim( wp_unslash( $_POST['target'] ) ) : '';
-		$code = isset( $_POST['code'] ) ? absint( wp_unslash( $_POST['code'] ) ) : 0;
+		$code = isset( $_POST['code'] ) && is_string( $_POST['code'] ) ? absint( wp_unslash( $_POST['code'] ) ) : 0;
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
 
 		$result = $this->records->save( $record, $url, $code );
