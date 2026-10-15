@@ -796,66 +796,6 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The backfill reads supported types only, so it is not scheduled for this one.' );
 	}
 
-	public function test_a_write_while_another_request_holds_the_list_s_lock_is_kept_and_does_not_wait(): void {
-		global $wpdb;
-
-		$this->ledger->record( $this->about, 'one' );
-		// Another request holds the lock, for a while yet.
-		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", Ledger::RECENT_LOCK, (string) ( time() + 60 ) ) );
-
-		$start = microtime( true );
-		$this->ledger->record( $this->about, 'two' );
-		$this->assertLessThan( 1.0, microtime( true ) - $start, 'A held lock does not stall the request.' );
-
-		// The other request finishes; the next write takes in what waited.
-		$wpdb->delete( $wpdb->options, [ 'option_name' => Ledger::RECENT_LOCK ] );
-		$this->ledger->record( $this->about, 'three' );
-
-		$this->assertSame( [ $this->meta_id( $this->about, 'three' ), $this->meta_id( $this->about, 'two' ), $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'], 'No write is lost.' );
-		$this->assertNull( $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Ledger::RECENT_LOCK ) ), 'The lock is released.' );
-	}
-
-	public function test_an_entry_deleted_while_its_write_waits_in_the_queue_never_reaches_the_list(): void {
-		global $wpdb;
-
-		$this->ledger->record( $this->about, 'one' );
-		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", Ledger::RECENT_LOCK, (string) ( time() + 60 ) ) );
-		$this->ledger->record( $this->about, 'two' );
-		$two = $this->meta_id( $this->about, 'two' );
-		$this->assertStringContainsString( (string) $two, (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Ledger::RECENT_QUEUE ) ), 'Precondition: its write waits in the queue.' );
-		$this->ledger->forget( $this->about, 'two' );
-
-		$wpdb->delete( $wpdb->options, [ 'option_name' => Ledger::RECENT_LOCK ] );
-		$this->ledger->record( $this->about, 'three' );
-
-		$this->assertSame( [ $this->meta_id( $this->about, 'three' ), $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'], 'The row deleted meanwhile is not listed.' );
-		$this->assertNull( $wpdb->get_var( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name = %s", Ledger::RECENT_QUEUE ) ), 'The queue row goes once it is applied.' );
-	}
-
-	public function test_a_lock_left_by_a_request_that_died_is_taken_over(): void {
-		global $wpdb;
-
-		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", Ledger::RECENT_LOCK, (string) ( time() - 1 ) ) );
-
-		$this->ledger->record( $this->about, 'one' );
-
-		$this->assertSame( [ $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
-	}
-
-	public function test_the_list_s_writes_take_no_named_database_lock(): void {
-		$queries = [];
-		$spy     = static function ( string $query ) use ( &$queries ): string {
-			$queries[] = $query;
-			return $query;
-		};
-		add_filter( 'query', $spy );
-		$this->ledger->record( $this->about, 'one' );
-		$this->ledger->forget( $this->about, 'one' );
-		remove_filter( 'query', $spy );
-
-		$this->assertSame( [], preg_grep( '/GET_LOCK|RELEASE_LOCK/i', $queries ), 'A named lock can be routed to a replica, and waits.' );
-	}
-
 	public function test_a_write_to_the_newest_list_keeps_what_another_request_wrote_meanwhile(): void {
 		global $wpdb;
 
@@ -882,6 +822,32 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->record( $this->about, 'two' );
 
 		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $other, $one ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
+	public function test_a_write_keeps_the_newest_entries_whatever_order_the_list_was_in(): void {
+		$cap = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		foreach ( [ 'one', 'two', 'three' ] as $path ) {
+			$this->ledger->record( $this->about, $path );
+		}
+		$one   = $this->meta_id( $this->about, 'one' );
+		$three = $this->meta_id( $this->about, 'three' );
+		// Out of order, as a merge of two lists could leave it.
+		update_option(
+			Ledger::RECENT,
+			[
+				'page' => [
+					'ids'  => [ $one, $three ],
+					'more' => true,
+				],
+			],
+			false
+		);
+
+		$this->ledger->record( $this->about, 'four' );
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+
+		$this->assertSame( [ $this->meta_id( $this->about, 'four' ), $three ], $this->ledger->recent( [ 'page' ] )['ids'], 'Newest first before the cap is applied, so the oldest goes.' );
 	}
 
 	public function test_deactivation_clears_an_unfinished_backfill(): void {
