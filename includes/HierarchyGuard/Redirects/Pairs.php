@@ -345,7 +345,7 @@ final class Pairs {
 	}
 
 	/**
-	 * One page of pairs as URLs relative to the home URL.
+	 * One page of pairs as URLs relative to the home URL, a URL target absolute.
 	 *
 	 * @param array<string,mixed> $collected From collect_change().
 	 * @param int                 $page      Page number, from 1.
@@ -376,7 +376,7 @@ final class Pairs {
 	}
 
 	/**
-	 * Every pair as URLs relative to the home URL, for a download.
+	 * Every pair as URLs relative to the home URL, a URL target absolute, for a download.
 	 *
 	 * @param array<string,mixed> $collected From collect_change().
 	 * @return array<int,array{old:string,new:string,temporary:bool}>
@@ -495,8 +495,9 @@ final class Pairs {
 
 	/**
 	 * Old and new URLs for pairs, priming the posts first, each saying
-	 * whether the server answers it with a 302. A URL target on this site is
-	 * relative to the home URL like a page's; one on another host stays absolute.
+	 * whether the server answers it with a 302. A page's new URL is relative
+	 * to the home URL; a URL target is listed as it was set, absolute, with
+	 * its query and #fragment, as the server sends it, on this site too.
 	 *
 	 * @param array<int,array{old:string,id:int,temporary?:bool,url?:string}> $pairs Pairs.
 	 * @param string                                                         $type  Post type name.
@@ -505,8 +506,7 @@ final class Pairs {
 	private function urls( array $pairs, string $type ): array {
 		_prime_post_caches( array_map( static fn( array $pair ): int => $pair['id'], $pairs ), false, false );
 
-		$home = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
-		$out  = [];
+		$out = [];
 		foreach ( $pairs as $pair ) {
 			$old = Paths::url( $type, $pair['old'] );
 			$url = (string) ( $pair['url'] ?? '' );
@@ -516,7 +516,7 @@ final class Pairs {
 			}
 			$out[] = [
 				'old'       => Paths::relative( $old ),
-				'new'       => '' === $url || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === $home ? Paths::relative( $new ) : $url,
+				'new'       => '' !== $url ? $url : Paths::relative( $new ),
 				'temporary' => ! empty( $pair['temporary'] ),
 			];
 		}

@@ -38,7 +38,7 @@ final class Csv {
 	 * The whole file: a header row, then one row per pair.
 	 *
 	 * @param string                                                  $layout Layout name.
-	 * @param array<int,array{old:string,new:string,temporary?:bool}> $pairs  Old and new URLs relative to the home URL, and whether each is temporary.
+	 * @param array<int,array{old:string,new:string,temporary?:bool}> $pairs  Old URLs relative to the home URL, new ones relative too or a URL target as set, and whether each is temporary.
 	 * @return string
 	 */
 	public static function build( string $layout, array $pairs ): string {
