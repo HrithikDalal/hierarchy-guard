@@ -20,10 +20,15 @@ use WP_Post;
  */
 final class Ledger {
 
-	public const KEY_PREFIX  = '_hierarchy_guard_path_';
-	public const ROOT_OPTION = 'hierarchy_guard_root_paths';
-	public const CACHE_GROUP = 'hierarchy_guard';
-	public const ROOT_CAP    = 200;
+	public const KEY_PREFIX    = '_hierarchy_guard_path_';
+	public const TARGET_PREFIX = '_hierarchy_guard_target_';
+	public const ROOT_OPTION   = 'hierarchy_guard_root_paths';
+	public const ROOT_TARGETS  = 'hierarchy_guard_root_targets';
+	public const RECENT        = 'hierarchy_guard_recent_records';
+	public const RECENT_STATE  = 'hierarchy_guard_recent_state';
+	public const BACKFILL_HOOK = 'hierarchy_guard_backfill_recent';
+	public const CACHE_GROUP   = 'hierarchy_guard';
+	public const ROOT_CAP      = 200;
 
 	private const CACHE_MISS = -1;
 	private const CACHE_TTL  = 12 * HOUR_IN_SECONDS;
@@ -43,6 +48,13 @@ final class Ledger {
 	private static bool $bump_pending = false;
 
 	/**
+	 * Entries recorded inside deferred(), meta IDs by post type, oldest first.
+	 *
+	 * @var array<string,int[]>
+	 */
+	private static array $recent_pending = [];
+
+	/**
 	 * Meta key for a (post type, path) pair.
 	 *
 	 * @param string $post_type Post type name.
@@ -51,6 +63,17 @@ final class Ledger {
 	 */
 	public static function key( string $post_type, string $path ): string {
 		return self::KEY_PREFIX . md5( $post_type . ':' . $path );
+	}
+
+	/**
+	 * Meta key of the override beside a record: the same hash as its entry.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized path.
+	 * @return string
+	 */
+	public static function target_key( string $post_type, string $path ): string {
+		return self::TARGET_PREFIX . md5( $post_type . ':' . $path );
 	}
 
 	/**
@@ -87,7 +110,10 @@ final class Ledger {
 			return false;
 		}
 
-		add_post_meta( $post_id, $key, $old_path, true );
+		$meta_id = add_post_meta( $post_id, $key, $old_path, true );
+		if ( is_int( $meta_id ) ) {
+			self::remember( (string) $post->post_type, [ $meta_id ] );
+		}
 		$this->bump();
 
 		return true;
@@ -114,6 +140,7 @@ final class Ledger {
 
 		$list[] = $old_path;
 		if ( count( $list ) > self::ROOT_CAP ) {
+			$this->drop_root_targets( $post_type, array_slice( $list, 0, count( $list ) - self::ROOT_CAP ) );
 			$list = array_slice( $list, -self::ROOT_CAP );
 		}
 		$roots[ $post_type ] = array_values( $list );
@@ -169,6 +196,7 @@ final class Ledger {
 
 		$dropped = false;
 		foreach ( array_unique( array_map( 'intval', $ids ) ) as $id ) {
+			$this->drop_target( $id, $type, $path );
 			$dropped = delete_post_meta( $id, $key ) || $dropped;
 		}
 		if ( $dropped ) {
@@ -196,11 +224,13 @@ final class Ledger {
 			return false;
 		}
 
-		$key = self::key( (string) $post->post_type, Paths::normalize( $old_path ) );
+		$old_path = Paths::normalize( $old_path );
+		$key      = self::key( (string) $post->post_type, $old_path );
 		if ( ! metadata_exists( 'post', $post_id, $key ) ) {
 			return false;
 		}
 
+		$this->drop_target( $post_id, (string) $post->post_type, $old_path );
 		delete_post_meta( $post_id, $key );
 		$this->bump();
 
@@ -224,6 +254,7 @@ final class Ledger {
 
 		$roots[ $post_type ] = array_values( array_diff( $list, [ $old_path ] ) );
 		update_option( self::ROOT_OPTION, $roots, false );
+		$this->drop_root_targets( $post_type, [ $old_path ] );
 		$this->bump();
 
 		return true;
@@ -257,6 +288,13 @@ final class Ledger {
 			return $callback();
 		} finally {
 			--self::$defer_depth;
+			if ( 0 === self::$defer_depth && [] !== self::$recent_pending ) {
+				$pending              = self::$recent_pending;
+				self::$recent_pending = [];
+				foreach ( $pending as $type => $ids ) {
+					self::remember( (string) $type, $ids );
+				}
+			}
 			if ( 0 === self::$defer_depth && self::$bump_pending ) {
 				self::$bump_pending = false;
 				wp_cache_set_last_changed( self::CACHE_GROUP );
@@ -313,11 +351,13 @@ final class Ledger {
 			return 0;
 		}
 
-		$key = self::key( (string) $post->post_type, Paths::uri( $post ) );
+		$path = Paths::uri( $post );
+		$key  = self::key( (string) $post->post_type, $path );
 		if ( ! metadata_exists( 'post', $post_id, $key ) ) {
 			return 0;
 		}
 
+		$this->drop_target( $post_id, (string) $post->post_type, $path );
 		delete_post_meta( $post_id, $key );
 		$this->bump();
 
@@ -448,6 +488,251 @@ final class Ledger {
 	}
 
 	/**
+	 * The override an administrator set on a record from the Redirects tab:
+	 * a URL target, a chosen code, or both. A post's record keeps it in the
+	 * sibling meta row with the entry's hash, read with one seek and cached
+	 * until the ledger changes; a root-list entry keeps it in the
+	 * ROOT_TARGETS option, by post type then path.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @param int    $holder    The post that holds the record, 0 for the root list.
+	 * @return array{url:string,code:int}|null Null when the record has no override.
+	 */
+	public function target( string $post_type, string $path, int $holder ): ?array {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( $holder <= 0 ) {
+			return self::clean_target( $this->root_targets()[ $post_type ][ $path ] ?? null );
+		}
+
+		$cache_key = 'target:' . $holder . ':' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
+		$cached    = wp_cache_get( $cache_key, self::CACHE_GROUP );
+		if ( is_array( $cached ) ) {
+			return self::clean_target( $cached['target'] ?? null );
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the post_id index, one row; cached below.
+		$raw    = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s LIMIT 1", $holder, self::target_key( $post_type, $path ) ) );
+		$target = null === $raw ? null : maybe_unserialize( (string) $raw );
+		// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
+		wp_cache_set( $cache_key, [ 'target' => $target ], self::CACHE_GROUP, self::CACHE_TTL );
+
+		return self::clean_target( $target );
+	}
+
+	/**
+	 * Stores a record's override, or removes it when it has neither a URL
+	 * nor a chosen code. Every call drops the cached lookups.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @param int    $holder    The post that holds the record, 0 for the root list.
+	 * @param string $url       An http(s) URL target, or '' for none.
+	 * @param int    $code      301 or 302, or 0 for the automatic code.
+	 */
+	public function set_target( string $post_type, string $path, int $holder, string $url, int $code ): void {
+		$path   = Paths::normalize( $path );
+		$target = self::clean_target(
+			[
+				'url'  => $url,
+				'code' => $code,
+			]
+		);
+
+		if ( $holder > 0 ) {
+			$key = self::target_key( $post_type, $path );
+			if ( null === $target ) {
+				delete_post_meta( $holder, $key );
+			} else {
+				update_post_meta( $holder, $key, $target );
+			}
+		} else {
+			$all = $this->root_targets();
+			if ( null === $target ) {
+				unset( $all[ $post_type ][ $path ] );
+			} else {
+				$all[ $post_type ][ $path ] = $target;
+			}
+			$this->save_root_targets( $all );
+		}
+
+		$this->bump();
+	}
+
+	/**
+	 * An override as stored, checked: an http(s) URL or none, and 301, 302
+	 * or 0. Null when nothing is left.
+	 *
+	 * @param mixed $value Stored value.
+	 * @return array{url:string,code:int}|null
+	 */
+	public static function clean_target( $value ): ?array {
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+		$url    = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
+		$code   = isset( $value['code'] ) && is_numeric( $value['code'] ) ? (int) $value['code'] : 0;
+		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
+		if ( '' !== $url && ! in_array( $scheme, [ 'http', 'https' ], true ) ) {
+			$url = '';
+		}
+		if ( ! in_array( $code, [ 301, 302 ], true ) ) {
+			$code = 0;
+		}
+		if ( '' === $url && 0 === $code ) {
+			return null;
+		}
+		return [
+			'url'  => $url,
+			'code' => $code,
+		];
+	}
+
+	/**
+	 * The root list: old parent paths whose children became top level, by post type.
+	 *
+	 * @return array<string,string[]>
+	 */
+	public function root_paths(): array {
+		return $this->roots();
+	}
+
+	/**
+	 * The newest post entries of the given types, newest first: the meta IDs
+	 * the RECENT option keeps per type as entries are recorded, at most
+	 * Subtree::count_cap() in all. `more` says older entries exist that the
+	 * list no longer holds. One option read; an entry deleted since may
+	 * still be named, and a reader skips it.
+	 *
+	 * @param string[] $types Post type names.
+	 * @return array{ids:int[],more:bool}
+	 */
+	public function recent( array $types ): array {
+		$all  = get_option( self::RECENT, [] );
+		$all  = is_array( $all ) ? $all : [];
+		$ids  = [];
+		$more = false;
+		foreach ( $types as $type ) {
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+			$ids  = array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
+			$more = $more || ! empty( $list['more'] );
+		}
+		rsort( $ids );
+		$cap = Subtree::count_cap();
+		return [
+			'ids'  => array_slice( $ids, 0, $cap ),
+			'more' => $more || count( $ids ) > $cap,
+		];
+	}
+
+	/**
+	 * Schedules the one-time backfill of the newest-records list, on
+	 * activation and on admin_init, while the list was never built: records
+	 * made before the list existed reach it from WP-Cron, never in a web
+	 * request. Once built, this is one read of an autoloaded option.
+	 */
+	public static function schedule_backfill(): void {
+		$state = get_option( self::RECENT_STATE );
+		if ( 'done' === $state ) {
+			return;
+		}
+		if ( 'building' !== $state ) {
+			update_option( self::RECENT_STATE, 'building', true );
+		}
+		if ( false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
+			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
+		}
+	}
+
+	/**
+	 * Clears the backfill on deactivation; one not finished is scheduled
+	 * again on the next activation.
+	 */
+	public static function unschedule_backfill(): void {
+		wp_clear_scheduled_hook( self::BACKFILL_HOOK );
+		if ( 'building' === get_option( self::RECENT_STATE ) ) {
+			delete_option( self::RECENT_STATE );
+		}
+	}
+
+	/**
+	 * Whether the newest-records list is still being built.
+	 *
+	 * @return bool
+	 */
+	public static function backfilling(): bool {
+		return 'building' === get_option( self::RECENT_STATE );
+	}
+
+	/**
+	 * The one-time backfill, on its WP-Cron event: each supported type's list
+	 * gets the newest Subtree::count_cap() entries of that type, in one query
+	 * per type ordered by meta ID, merged with what the list already holds,
+	 * so running it again changes nothing. Then it marks itself done.
+	 */
+	public static function backfill(): void {
+		global $wpdb;
+
+		$cap   = Subtree::count_cap();
+		$found = [];
+		foreach ( Post_Types::supported() as $type ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Once per site, from WP-Cron: the newest entries of one type, LIMIT the cap plus one.
+			$found[ $type ] = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT pm.meta_id FROM {$wpdb->postmeta} pm STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key LIKE %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT %d", $wpdb->esc_like( self::KEY_PREFIX ) . '%', $type, $cap + 1 ) ) );
+		}
+
+		// Entries recorded while the queries ran are kept.
+		$all = get_option( self::RECENT, [] );
+		$all = is_array( $all ) ? $all : [];
+		foreach ( $found as $type => $ids ) {
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+			$ids  = array_values( array_unique( array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
+			rsort( $ids );
+
+			$all[ $type ] = [
+				'ids'  => array_slice( $ids, 0, $cap ),
+				'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
+			];
+		}
+		update_option( self::RECENT, $all, false );
+		update_option( self::RECENT_STATE, 'done', true );
+	}
+
+	/**
+	 * Takes entries out of the newest-records list when their rows are
+	 * deleted, by forget(), prune(), claim() or core deleting their post:
+	 * hooked on deleted_post_meta. Other keys cost a prefix check.
+	 *
+	 * @param int[]  $meta_ids  Meta IDs deleted.
+	 * @param int    $object_id Post ID.
+	 * @param string $meta_key  Meta key.
+	 */
+	public static function on_deleted_meta( $meta_ids, $object_id, $meta_key ): void {
+		unset( $object_id );
+		if ( ! str_starts_with( (string) $meta_key, self::KEY_PREFIX ) ) {
+			return;
+		}
+		$gone = array_flip( array_map( 'intval', (array) $meta_ids ) );
+		$all  = get_option( self::RECENT, [] );
+		if ( ! is_array( $all ) ) {
+			return;
+		}
+		$changed = false;
+		foreach ( $all as $type => $list ) {
+			$ids  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
+			$left = array_values( array_filter( $ids, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
+			if ( count( $left ) !== count( $ids ) ) {
+				$all[ $type ]['ids'] = $left;
+				$changed             = true;
+			}
+		}
+		if ( $changed ) {
+			update_option( self::RECENT, $all, false );
+		}
+	}
+
+	/**
 	 * Single index seek on the hashed key: a live holder first, newest entry first.
 	 * A post in the trash comes back only when no live post holds the key; find()
 	 * then answers as if it held nothing.
@@ -478,6 +763,90 @@ final class Ledger {
 	private function roots(): array {
 		$roots = get_option( self::ROOT_OPTION, [] );
 		return is_array( $roots ) ? $roots : [];
+	}
+
+	/**
+	 * Puts entries just recorded at the front of their type's newest-records
+	 * list, keeping at most Subtree::count_cap(); inside deferred() they wait
+	 * and are written once at its end. The option is not autoloaded.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param int[]  $meta_ids  Meta IDs, oldest first.
+	 */
+	private static function remember( string $post_type, array $meta_ids ): void {
+		if ( self::$defer_depth > 0 ) {
+			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
+			return;
+		}
+		$all  = get_option( self::RECENT, [] );
+		$all  = is_array( $all ) ? $all : [];
+		$list = is_array( $all[ $post_type ] ?? null ) ? $all[ $post_type ] : [];
+		$ids  = array_merge( array_reverse( array_map( 'intval', $meta_ids ) ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
+		$cap  = Subtree::count_cap();
+
+		$all[ $post_type ] = [
+			'ids'  => array_slice( $ids, 0, $cap ),
+			'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
+		];
+		update_option( self::RECENT, $all, false );
+	}
+
+	/**
+	 * The root list's overrides, by post type then path.
+	 *
+	 * @return array<string,array<string,mixed>>
+	 */
+	private function root_targets(): array {
+		$all = get_option( self::ROOT_TARGETS, [] );
+		return is_array( $all ) ? $all : [];
+	}
+
+	/**
+	 * Saves the root list's overrides, not autoloaded; removes the option once it is empty.
+	 *
+	 * @param array<string,array<string,mixed>> $all Overrides by post type then path.
+	 */
+	private function save_root_targets( array $all ): void {
+		$all = array_filter( $all, static fn( $by_path ): bool => is_array( $by_path ) && [] !== $by_path );
+		if ( [] === $all ) {
+			delete_option( self::ROOT_TARGETS );
+			return;
+		}
+		update_option( self::ROOT_TARGETS, $all, false );
+	}
+
+	/**
+	 * Removes the overrides of root-list entries that are going.
+	 *
+	 * @param string   $post_type Post type name.
+	 * @param string[] $paths     Normalized paths.
+	 */
+	private function drop_root_targets( string $post_type, array $paths ): void {
+		$all = $this->root_targets();
+		if ( ! isset( $all[ $post_type ] ) || ! is_array( $all[ $post_type ] ) ) {
+			return;
+		}
+		$left = array_diff_key( $all[ $post_type ], array_flip( $paths ) );
+		if ( count( $left ) === count( $all[ $post_type ] ) ) {
+			return;
+		}
+		$all[ $post_type ] = $left;
+		$this->save_root_targets( $all );
+	}
+
+	/**
+	 * Removes the override beside a post's record that is going. The post's
+	 * meta is in the cache by then, so a record without one costs no query.
+	 *
+	 * @param int    $post_id   Post ID.
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized path.
+	 */
+	private function drop_target( int $post_id, string $post_type, string $path ): void {
+		$key = self::target_key( $post_type, $path );
+		if ( metadata_exists( 'post', $post_id, $key ) ) {
+			delete_post_meta( $post_id, $key );
+		}
 	}
 
 	/**

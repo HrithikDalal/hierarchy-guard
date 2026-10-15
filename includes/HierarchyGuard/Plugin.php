@@ -56,6 +56,12 @@ final class Plugin {
 		add_action( 'delete_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 		add_action( 'switch_blog', [ Post_Types::class, 'reset' ] );
 
+		// The newest-records list drops an entry whenever its row goes, however it goes.
+		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
+		// Records made before the list existed reach it once, from WP-Cron.
+		add_action( 'admin_init', [ Ledger::class, 'schedule_backfill' ] );
+		add_action( Ledger::BACKFILL_HOOK, [ Ledger::class, 'backfill' ] );
+
 		$ledger    = new Ledger();
 		$log       = new Trash\Change_Log();
 		$providers = new Redirects\Providers();

@@ -27,6 +27,10 @@ final class LedgerTest extends WP_UnitTestCase {
 		parent::set_up();
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
+		delete_option( Ledger::ROOT_TARGETS );
+		delete_option( Ledger::RECENT );
+		delete_option( Ledger::RECENT_STATE );
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
 		$this->ledger = new Ledger();
@@ -330,5 +334,372 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->claim( $post );
 
 		$this->assertSame( 2, $wpdb->num_queries - $queries, 'The root list not read yet costs its option read too.' );
+	}
+
+	public function test_an_override_sits_beside_its_record_with_the_same_hash(): void {
+		$this->ledger->record( $this->about, 'about-us' );
+		$this->ledger->set_target( 'page', '/About-Us/', $this->about, 'https://example.org/jobs/', 302 );
+
+		$this->assertSame( Ledger::TARGET_PREFIX . md5( 'page:about-us' ), Ledger::target_key( 'page', 'about-us' ) );
+		$this->assertSame(
+			[
+				'url'  => 'https://example.org/jobs/',
+				'code' => 302,
+			],
+			get_post_meta( $this->about, Ledger::target_key( 'page', 'about-us' ), true )
+		);
+		$this->assertSame(
+			[
+				'url'  => 'https://example.org/jobs/',
+				'code' => 302,
+			],
+			$this->ledger->target( 'page', 'about-us', $this->about )
+		);
+		$this->assertSame( [ 'about-us' ], $this->ledger->paths_for( $this->about ), 'The override is not a record of its own.' );
+		$this->assertNull( $this->ledger->target( 'page', 'elsewhere', $this->about ) );
+	}
+
+	public function test_an_override_with_nothing_left_is_removed(): void {
+		$this->ledger->record( $this->about, 'about-us' );
+		$this->ledger->set_target( 'page', 'about-us', $this->about, '', 301 );
+		$this->assertSame(
+			[
+				'url'  => '',
+				'code' => 301,
+			],
+			$this->ledger->target( 'page', 'about-us', $this->about ),
+			'A chosen code alone is an override.'
+		);
+
+		$this->ledger->set_target( 'page', 'about-us', $this->about, '', 0 );
+
+		$this->assertFalse( metadata_exists( 'post', $this->about, Ledger::target_key( 'page', 'about-us' ) ) );
+		$this->assertNull( $this->ledger->target( 'page', 'about-us', $this->about ) );
+	}
+
+	public function test_clean_target_keeps_only_http_urls_and_the_two_codes(): void {
+		$this->assertNull( Ledger::clean_target( 'https://example.org/' ) );
+		$this->assertNull(
+			Ledger::clean_target(
+				[
+					'url'  => 'javascript:alert(1)',
+					'code' => 307,
+				]
+			)
+		);
+		$this->assertSame(
+			[
+				'url'  => '',
+				'code' => 302,
+			],
+			Ledger::clean_target(
+				[
+					'url'  => 'ftp://example.org/',
+					'code' => '302',
+				]
+			)
+		);
+		$this->assertSame(
+			[
+				'url'  => 'HTTP://example.org/',
+				'code' => 0,
+			],
+			Ledger::clean_target( [ 'url' => ' HTTP://example.org/ ' ] )
+		);
+	}
+
+	public function test_a_root_entry_s_override_lives_in_its_own_option(): void {
+		global $wpdb;
+
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->ledger->set_target( 'page', '/Archive/', 0, 'https://example.org/archive/', 0 );
+
+		$this->assertSame(
+			[
+				'page' => [
+					'archive' => [
+						'url'  => 'https://example.org/archive/',
+						'code' => 0,
+					],
+				],
+			],
+			get_option( Ledger::ROOT_TARGETS )
+		);
+		$this->assertSame( 'https://example.org/archive/', $this->ledger->target( 'page', 'archive', 0 )['url'] );
+		$this->assertNull( $this->ledger->target( 'hg_docs', 'archive', 0 ), 'Overrides are scoped by post type.' );
+		$autoload = $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", Ledger::ROOT_TARGETS ) );
+		$this->assertContains( $autoload, [ 'no', 'off' ], 'The option is not autoloaded.' );
+
+		$this->ledger->set_target( 'page', 'archive', 0, '', 0 );
+		$this->assertFalse( get_option( Ledger::ROOT_TARGETS ), 'The last override gone, the option goes too.' );
+	}
+
+	public function test_forgetting_or_pruning_a_record_deletes_its_override(): void {
+		global $wpdb;
+
+		$this->ledger->record( $this->about, 'gone' );
+		$this->ledger->set_target( 'page', 'gone', $this->about, '', 302 );
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 0 );
+
+		$this->assertTrue( $this->ledger->forget( $this->about, 'gone' ) );
+		$this->assertFalse( metadata_exists( 'post', $this->about, Ledger::target_key( 'page', 'gone' ) ) );
+
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'old-about' ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+		$this->assertSame( 1, $this->ledger->prune( $this->about ) );
+		$this->assertFalse( metadata_exists( 'post', $this->about, Ledger::target_key( 'page', 'old-about' ) ) );
+	}
+
+	public function test_a_root_entry_forgotten_or_pushed_out_by_the_cap_loses_its_override(): void {
+		$this->ledger->record_root( 'page', 'first' );
+		$this->ledger->record_root( 'page', 'second' );
+		$this->ledger->set_target( 'page', 'first', 0, '', 301 );
+		$this->ledger->set_target( 'page', 'second', 0, '', 302 );
+
+		$this->assertTrue( $this->ledger->forget_root( 'page', 'second' ) );
+		$this->assertNull( $this->ledger->target( 'page', 'second', 0 ) );
+		$this->assertSame( 301, $this->ledger->target( 'page', 'first', 0 )['code'] );
+
+		for ( $i = 0; $i < Ledger::ROOT_CAP; $i++ ) {
+			$this->ledger->record_root( 'page', 'later-' . $i );
+		}
+		$this->assertNull( $this->ledger->find( 'page', 'first' ), 'Precondition: the oldest entry fell off the end.' );
+		$this->assertFalse( get_option( Ledger::ROOT_TARGETS ), 'Its override went with it.' );
+	}
+
+	public function test_a_page_that_takes_a_path_drops_the_overrides_with_the_entries(): void {
+		$moved = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'moved',
+			]
+		);
+		$this->ledger->record( $moved, 'taken' );
+		$this->ledger->set_target( 'page', 'taken', $moved, 'https://example.org/', 0 );
+		$this->ledger->record_root( 'page', 'taken' );
+		$this->ledger->set_target( 'page', 'taken', 0, '', 302 );
+
+		self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'taken',
+			]
+		);
+
+		$this->assertFalse( metadata_exists( 'post', $moved, Ledger::target_key( 'page', 'taken' ) ) );
+		$this->assertFalse( get_option( Ledger::ROOT_TARGETS ) );
+	}
+
+	public function test_an_override_is_read_once_and_re_read_after_any_ledger_write(): void {
+		$this->ledger->record( $this->about, 'about-us' );
+		$this->assertNull( $this->ledger->target( 'page', 'about-us', $this->about ) );
+
+		$queries = get_num_queries();
+		$this->assertNull( $this->ledger->target( 'page', 'about-us', $this->about ) );
+		$this->assertSame( $queries, get_num_queries(), 'A repeated read is served from the cache.' );
+
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+		$this->ledger->set_target( 'page', 'about-us', $this->about, '', 302 );
+		$this->assertNotSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ), 'An edit bumps the ledger cache key.' );
+		$this->assertSame( 302, $this->ledger->target( 'page', 'about-us', $this->about )['code'] );
+	}
+
+	/**
+	 * The meta ID of a post's entry for a path.
+	 *
+	 * @param int    $post_id Post.
+	 * @param string $path    Normalized path.
+	 * @param string $type    Post type.
+	 * @return int
+	 */
+	private function meta_id( int $post_id, string $path, string $type = 'page' ): int {
+		global $wpdb;
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $post_id, Ledger::key( $type, $path ) ) );
+	}
+
+	public function test_each_entry_recorded_goes_first_on_its_type_s_newest_list(): void {
+		global $wpdb;
+
+		$doc = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$this->ledger->record( $this->about, 'one' );
+		$this->ledger->record( $doc, 'manual' );
+		$this->ledger->record( $this->about, 'two' );
+
+		$one    = $this->meta_id( $this->about, 'one' );
+		$two    = $this->meta_id( $this->about, 'two' );
+		$manual = $this->meta_id( $doc, 'manual', 'hg_docs' );
+		$this->assertSame(
+			[
+				'ids'  => [ $two, $one ],
+				'more' => false,
+			],
+			$this->ledger->recent( [ 'page' ] )
+		);
+		$this->assertSame( [ $two, $manual, $one ], $this->ledger->recent( [ 'page', 'hg_docs' ] )['ids'], 'Types merge newest first.' );
+		$this->assertSame( [], $this->ledger->recent( [ 'post' ] )['ids'] );
+		$autoload = $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", Ledger::RECENT ) );
+		$this->assertContains( $autoload, [ 'no', 'off' ], 'The list is not autoloaded.' );
+	}
+
+	public function test_the_newest_list_keeps_the_cap_and_says_older_entries_exist(): void {
+		$cap = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		foreach ( [ 'one', 'two', 'three' ] as $path ) {
+			$this->ledger->record( $this->about, $path );
+		}
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+
+		$this->assertSame(
+			[
+				'ids'  => [ $this->meta_id( $this->about, 'three' ), $this->meta_id( $this->about, 'two' ) ],
+				'more' => true,
+			],
+			$this->ledger->recent( [ 'page' ] )
+		);
+	}
+
+	public function test_an_entry_leaves_the_newest_list_however_its_row_goes(): void {
+		global $wpdb;
+
+		$other = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'other',
+			]
+		);
+		foreach ( [ 'forgotten', 'pruned', 'taken', 'kept' ] as $path ) {
+			$this->ledger->record( $this->about, $path );
+		}
+		$this->ledger->record( $other, 'deleted-with-its-page' );
+		$kept = $this->meta_id( $this->about, 'kept' );
+
+		$this->ledger->forget( $this->about, 'forgotten' );
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'pruned' ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+		$this->ledger->prune( $this->about );
+		self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'taken',
+			]
+		);
+		wp_delete_post( $other, true );
+
+		$this->assertSame( [ $kept ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
+	public function test_entries_recorded_in_a_batch_join_the_newest_list_at_its_end(): void {
+		$inside = null;
+		Ledger::deferred(
+			function () use ( &$inside ): void {
+				$this->ledger->record( $this->about, 'one' );
+				$this->ledger->record( $this->about, 'two' );
+				$inside = get_option( Ledger::RECENT );
+			}
+		);
+
+		$this->assertFalse( $inside, 'Nothing is written while deferred.' );
+		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
+	/**
+	 * An entry written straight into post meta, as records made before the
+	 * newest-records list existed are: not on the list.
+	 *
+	 * @param int    $post_id Post.
+	 * @param string $path    Normalized path.
+	 * @return int Meta ID.
+	 */
+	private function old_entry( int $post_id, string $path ): int {
+		return (int) add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true );
+	}
+
+	public function test_records_made_before_the_list_reach_it_once_the_backfill_runs(): void {
+		$first  = $this->old_entry( $this->about, 'first' );
+		$second = $this->old_entry( $this->about, 'second' );
+		$this->assertSame( [], $this->ledger->recent( [ 'page' ] )['ids'], 'Precondition: not on the list.' );
+
+		Ledger::schedule_backfill();
+		$this->assertTrue( Ledger::backfilling() );
+		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'It runs from WP-Cron.' );
+
+		$this->assertSame( 'hierarchy_guard_backfill_recent', Ledger::BACKFILL_HOOK );
+		do_action( 'hierarchy_guard_backfill_recent' );
+
+		$this->assertSame( [ $second, $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
+		$this->assertFalse( Ledger::backfilling() );
+		$this->assertSame( 'done', get_option( Ledger::RECENT_STATE ) );
+	}
+
+	public function test_the_backfill_is_idempotent_keeps_what_was_recorded_meanwhile_and_stops_at_the_cap(): void {
+		$old = [];
+		foreach ( [ 'a', 'b', 'c' ] as $path ) {
+			$old[] = $this->old_entry( $this->about, $path );
+		}
+		$this->ledger->record( $this->about, 'meanwhile' );
+		$meanwhile = $this->meta_id( $this->about, 'meanwhile' );
+
+		Ledger::backfill();
+		$once = get_option( Ledger::RECENT );
+		Ledger::backfill();
+
+		$this->assertSame( $once, get_option( Ledger::RECENT ), 'Running it again changes nothing.' );
+		$this->assertSame( [ $meanwhile, $old[2], $old[1], $old[0] ], $this->ledger->recent( [ 'page' ] )['ids'] );
+
+		delete_option( Ledger::RECENT );
+		$cap = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		Ledger::backfill();
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+		$this->assertSame(
+			[
+				'ids'  => [ $meanwhile, $old[2] ],
+				'more' => true,
+			],
+			$this->ledger->recent( [ 'page' ] ),
+			'One bounded query per type: the newest, and whether there are older ones.'
+		);
+	}
+
+	public function test_once_built_a_normal_load_runs_nothing(): void {
+		global $wp_filter;
+
+		Ledger::schedule_backfill();
+		Ledger::backfill();
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+
+		$queries = get_num_queries();
+		Ledger::schedule_backfill();
+		$this->assertSame( $queries, get_num_queries(), 'One read of an autoloaded option.' );
+		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'Nothing is scheduled again.' );
+
+		$hooked = static function ( string $hook, string $method ) use ( $wp_filter ): bool {
+			foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
+				if ( [ Ledger::class, $method ] === $callback['function'] ) {
+					return true;
+				}
+			}
+			return false;
+		};
+		$this->assertTrue( $hooked( 'admin_init', 'schedule_backfill' ) );
+		$this->assertTrue( $hooked( Ledger::BACKFILL_HOOK, 'backfill' ) );
+		foreach ( [ 'init', 'wp', 'template_redirect', 'admin_init' ] as $hook ) {
+			$this->assertFalse( $hooked( $hook, 'backfill' ), "The backfill never runs on $hook." );
+		}
+	}
+
+	public function test_deactivation_clears_an_unfinished_backfill(): void {
+		Ledger::schedule_backfill();
+
+		Ledger::unschedule_backfill();
+
+		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ) );
+		$this->assertFalse( get_option( Ledger::RECENT_STATE ), 'The next activation schedules it again.' );
 	}
 }
