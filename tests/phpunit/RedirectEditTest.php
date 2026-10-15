@@ -126,7 +126,8 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<form method="post" action="' . esc_url( Settings_Page::url( 'redirects' ) ) . '">', $html );
 		$this->assertStringContainsString( '<tr><th scope="row">Old URL</th><td><code>/old-about/</code> and the URLs under it</td></tr>', $html );
 		$this->assertStringContainsString( '<td><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" dir="ltr" aria-describedby="hierarchy-guard-target-description">', $html, 'A text field, so a path is not stopped by the browser.' );
-		$this->assertStringContainsString( '<p class="description" id="hierarchy-guard-target-description">A page on this site: the redirect follows it when it moves, and the URLs under /old-about/ go to the matching URLs under it. Any other URL: only /old-about/ redirects, and this redirect no longer covers the URLs under it. A path on this site, such as /about/team/, works as well as a full URL.</p>', $html );
+		$this->assertStringContainsString( '<p class="description" id="hierarchy-guard-target-description">A page on this site: the redirect follows it when it moves, and the URLs under <code>/old-about/</code> go to the matching URLs under it. Any other URL: only <code>/old-about/</code> redirects, and this redirect no longer covers the URLs under it. A path on this site, such as <code>/about/team/</code>, works as well as a full URL.</p>', $html );
+		$this->assertStringContainsString( 'the URLs under <code>/old-about/</code> go to', $html, 'The old URL prints in <code> in the help, so it reads left to right in a right-to-left admin.' );
 		$this->assertStringNotContainsString( 'Leave empty to keep this.', $html );
 		$this->assertMatchesRegularExpression( '#<input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description"\s+checked=\'checked\'> Automatic</label><p class="description" id="hierarchy-guard-code-automatic-description">301, or 302 while restoring a page from the Trash could undo the move.</p>#', $html );
 		$this->assertStringContainsString( '301 (permanent)', $html );
@@ -264,7 +265,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$html = $this->view();
 
-		$this->assertStringContainsString( '<td><p>Now redirects to the same page at the top level, for example /about/team/ to /team/.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value=""', $html, 'The field starts empty.' );
+		$this->assertStringContainsString( '<td><p>Now redirects to the same page at the top level, for example <code>/about/team/</code> to <code>/team/</code>.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value=""', $html, 'The field starts empty.' );
 		$this->assertStringContainsString( 'id="hierarchy-guard-target-description">Leave empty to keep this. Enter a URL to send these URLs somewhere else. A page on this site:', $html );
 
 		$this->submit( '', '302' );

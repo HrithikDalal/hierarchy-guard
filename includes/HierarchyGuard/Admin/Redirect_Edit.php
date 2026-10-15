@@ -164,17 +164,19 @@ final class Redirect_Edit {
 			$url  = Records::target_url( $record );
 			$code = null !== $record['target'] ? (int) $record['target']['code'] : 0;
 		}
-		$old  = (string) $record['old'];
-		$help = [];
+		$old     = (string) $record['old'];
+		$in_code = '<code>' . esc_html( $old ) . '</code>';
+		$help    = [];
 		if ( Records::is_top_level( $record ) ) {
-			$help[] = __( 'Leave empty to keep this.', 'hierarchy-guard' );
-			$help[] = __( 'Enter a URL to send these URLs somewhere else.', 'hierarchy-guard' );
+			$help[] = esc_html__( 'Leave empty to keep this.', 'hierarchy-guard' );
+			$help[] = esc_html__( 'Enter a URL to send these URLs somewhere else.', 'hierarchy-guard' );
 		}
 		/* translators: %s: the old URL, such as /about/team/. */
-		$help[] = sprintf( __( 'A page on this site: the redirect follows it when it moves, and the URLs under %s go to the matching URLs under it.', 'hierarchy-guard' ), $old );
+		$help[] = sprintf( esc_html__( 'A page on this site: the redirect follows it when it moves, and the URLs under %s go to the matching URLs under it.', 'hierarchy-guard' ), $in_code );
 		/* translators: %s: the old URL, such as /about/team/. */
-		$help[] = sprintf( __( 'Any other URL: only %s redirects, and this redirect no longer covers the URLs under it.', 'hierarchy-guard' ), $old );
-		$help[] = __( 'A path on this site, such as /about/team/, works as well as a full URL.', 'hierarchy-guard' );
+		$help[] = sprintf( esc_html__( 'Any other URL: only %s redirects, and this redirect no longer covers the URLs under it.', 'hierarchy-guard' ), $in_code );
+		/* translators: %s: an example path, /about/team/. */
+		$help[] = sprintf( esc_html__( 'A path on this site, such as %s, works as well as a full URL.', 'hierarchy-guard' ), '<code>/about/team/</code>' );
 
 		echo '<h2>' . esc_html__( 'Edit redirect', 'hierarchy-guard' ) . '</h2>';
 		printf( '<form method="post" action="%s">', esc_url( Settings_Page::url( 'redirects' ) ) );
@@ -183,13 +185,14 @@ final class Redirect_Edit {
 		wp_nonce_field( self::NONCE_SAVE . $record['id'] );
 		echo '<table class="form-table" role="presentation"><tbody>';
 		printf( '<tr><th scope="row">%1$s</th><td>%2$s</td></tr>', esc_html__( 'Old URL', 'hierarchy-guard' ), Redirects_Table::old_label( $record ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- old_label() escapes its parts.
-		$now = Records::is_top_level( $record ) ? '<p>' . esc_html__( 'Now redirects to the same page at the top level, for example /about/team/ to /team/.', 'hierarchy-guard' ) . '</p>' : '';
+		/* translators: 1: an example old URL, /about/team/; 2: where it leads, /team/. */
+		$now = Records::is_top_level( $record ) ? '<p>' . sprintf( esc_html__( 'Now redirects to the same page at the top level, for example %1$s to %2$s.', 'hierarchy-guard' ), '<code>/about/team/</code>', '<code>/team/</code>' ) . '</p>' : '';
 		printf(
 			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="hierarchy-guard-target-description"><p class="description" id="hierarchy-guard-target-description">%4$s</p></td></tr>',
 			esc_html__( 'Redirect to', 'hierarchy-guard' ),
 			$now, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 			esc_attr( $url ),
-			esc_html( implode( ' ', $help ) )
+			implode( ' ', $help ) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Each sentence is escaped above; the old URL is escaped inside its <code>.
 		);
 		echo '<tr><th scope="row">' . esc_html__( 'Code', 'hierarchy-guard' ) . '</th><td><fieldset><legend class="screen-reader-text"><span>' . esc_html__( 'Code', 'hierarchy-guard' ) . '</span></legend>';
 		printf( '<label><input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description" %1$s> %2$s</label><p class="description" id="hierarchy-guard-code-automatic-description">%3$s</p>', checked( 0, $code, false ), esc_html__( 'Automatic', 'hierarchy-guard' ), esc_html__( '301, or 302 while restoring a page from the Trash could undo the move.', 'hierarchy-guard' ) );
