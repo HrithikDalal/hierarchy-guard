@@ -358,8 +358,6 @@ final class ResolverTest extends WP_UnitTestCase {
 		clean_post_cache( $this->team );
 		foreach ( [ 'company/about', 'company/about-us' ] as $path ) {
 			$this->ledger->record_alias( 'page', $this->company, $path );
-			// As the trash flow writes it: after the alias, even where about held the path already.
-			$this->ledger->forget( $this->about, $path );
 			$this->ledger->record( $this->about, $path );
 		}
 
@@ -547,5 +545,21 @@ final class ResolverTest extends WP_UnitTestCase {
 		$temporary = false;
 		$this->assertSame( $newer, $this->resolver->resolve( 'page', 'company/about', $temporary )->ID );
 		$this->assertFalse( $temporary );
+	}
+
+	public function test_an_older_entry_of_a_page_not_above_the_path_does_not_beat_a_page_in_the_trash(): void {
+		$elsewhere = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'elsewhere',
+				'post_parent' => $this->company,
+			]
+		);
+		// An entry from before a page that takes a path drops the others.
+		$this->ledger->record( $elsewhere, 'company/about' );
+		wp_trash_post( $this->about );
+		$this->ledger->record( $this->about, 'company/about' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'The page in the trash holds the newest entry.' );
 	}
 }

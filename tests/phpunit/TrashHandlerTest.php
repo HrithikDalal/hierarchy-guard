@@ -867,6 +867,64 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertFalse( get_option( Ledger::ROOT_OPTION ), 'Nothing in the root list.' );
 	}
 
+	public function test_an_older_url_of_a_trashed_page_is_not_redirected_to_its_parent(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about',
+			]
+		);
+		$this->assertSame( [ 'company/about-us' ], $this->ledger->paths_for( $this->ids['about'] ), 'Precondition: about holds its older URL.' );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ), 'A restore would give the page its URLs back.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ) );
+		$this->assertSame( $this->ids['team'], $this->resolver->resolve( 'page', 'company/about-us/team' )->ID );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_parent_after_the_parent_is_trashed_and_restored(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		wp_trash_post( $this->ids['about'] );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['company'] );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+
+		wp_untrash_post( $this->ids['company'] );
+		wp_publish_post( $this->ids['company'] );
+
+		$this->assertSame( 'trash', get_post_status( $this->ids['about'] ), 'Precondition: about is still in the trash.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ) );
+		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'company/about/history' )->ID );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_parent_after_a_page_above_is_deleted(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$org = $this->page( 'org' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['company'],
+				'post_parent' => $org,
+			]
+		);
+		wp_trash_post( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['company'], true );
+
+		$this->assertSame( $org, (int) get_post( $this->ids['about'] )->post_parent, 'Precondition: core moved about up under org.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'org/company/about' ) );
+		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'org/company/about/history' )->ID );
+	}
+
 	public function test_too_many_subpages_to_trash_move_up_instead(): void {
 		$this->policy( Settings::POLICY_TRASH_CHILDREN );
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
