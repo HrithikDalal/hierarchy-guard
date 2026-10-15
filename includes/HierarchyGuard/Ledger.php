@@ -603,8 +603,10 @@ final class Ledger {
 	 * The newest post entries of the given types, newest first: the meta IDs
 	 * the RECENT option keeps per type as entries are recorded, at most
 	 * Subtree::count_cap() in all. `more` says older entries exist that the
-	 * list no longer holds. One option read; an entry deleted since may
-	 * still be named, and a reader skips it.
+	 * list no longer holds; when deletes take a full list below the cap,
+	 * the backfill reads the older entries back in and reads `more` afresh.
+	 * One option read; an entry deleted since may still be named, and a
+	 * reader skips it.
 	 *
 	 * @param string[] $types Post type names.
 	 * @return array{ids:int[],more:bool}
@@ -628,22 +630,41 @@ final class Ledger {
 	}
 
 	/**
-	 * Schedules the one-time backfill of the newest-records list, on
-	 * activation and on admin_init, while the list was never built: records
-	 * made before the list existed reach it from WP-Cron, never in a web
-	 * request. Once built, this is one read of an autoloaded option.
+	 * Schedules the backfill of the newest-records list, on activation and
+	 * on admin_init, while the list was never built for the types supported
+	 * now: records made before the list existed, or before their type was
+	 * supported, reach it from WP-Cron, never in a web request. Once built,
+	 * this is one read of an autoloaded option.
 	 */
 	public static function schedule_backfill(): void {
-		$state = get_option( self::RECENT_STATE );
-		if ( 'done' === $state ) {
+		if ( self::done_state( Post_Types::supported() ) === get_option( self::RECENT_STATE ) ) {
 			return;
 		}
-		if ( 'building' !== $state ) {
+		self::rebuild();
+	}
+
+	/**
+	 * Marks the newest-records list as being built and schedules the backfill once.
+	 */
+	private static function rebuild(): void {
+		if ( 'building' !== get_option( self::RECENT_STATE ) ) {
 			update_option( self::RECENT_STATE, 'building', true );
 		}
 		if ( false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
 			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
 		}
+	}
+
+	/**
+	 * The state that says the list is built, for the types it was built for.
+	 *
+	 * @param string[] $types Post type names.
+	 * @return string
+	 */
+	private static function done_state( array $types ): string {
+		$types = array_map( 'strval', $types );
+		sort( $types );
+		return 'done:' . implode( ',', $types );
 	}
 
 	/**
@@ -667,36 +688,52 @@ final class Ledger {
 	}
 
 	/**
-	 * The one-time backfill, on its WP-Cron event: each supported type's list
-	 * gets the newest Subtree::count_cap() entries of that type, in one query
-	 * per type ordered by meta ID, merged with what the list already holds,
-	 * so running it again changes nothing. Then it marks itself done.
+	 * The backfill, on its WP-Cron event: each supported type's list gets
+	 * the newest Subtree::count_cap() entries of that type, in one query per
+	 * type ordered by meta ID, merged with what the list already holds, so
+	 * running it again changes nothing. Whether older entries exist is read
+	 * afresh. Then it marks itself done for those types; when a query
+	 * fails, the list stays being built and the next admin load schedules
+	 * the backfill again.
 	 */
 	public static function backfill(): void {
 		global $wpdb;
 
-		$cap   = Subtree::count_cap();
-		$found = [];
-		foreach ( Post_Types::supported() as $type ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Once per site, from WP-Cron: the newest entries of one type, LIMIT the cap plus one.
-			$found[ $type ] = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT pm.meta_id FROM {$wpdb->postmeta} pm STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key LIKE %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT %d", $wpdb->esc_like( self::KEY_PREFIX ) . '%', $type, $cap + 1 ) ) );
+		$cap    = Subtree::count_cap();
+		$types  = Post_Types::supported();
+		$found  = [];
+		$failed = false;
+		foreach ( $types as $type ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- From WP-Cron only: the newest entries of one type, LIMIT the cap plus one.
+			$ids = $wpdb->get_col( $wpdb->prepare( "SELECT pm.meta_id FROM {$wpdb->postmeta} pm STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key LIKE %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT %d", $wpdb->esc_like( self::KEY_PREFIX ) . '%', $type, $cap + 1 ) );
+			if ( '' !== (string) $wpdb->last_error ) {
+				$failed = true;
+				continue;
+			}
+			$found[ $type ] = array_map( 'intval', (array) $ids );
 		}
 
 		// Entries recorded while the queries ran are kept.
-		$all = get_option( self::RECENT, [] );
-		$all = is_array( $all ) ? $all : [];
-		foreach ( $found as $type => $ids ) {
-			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
-			$ids  = array_values( array_unique( array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
-			rsort( $ids );
+		self::locked(
+			static function () use ( $found, $cap ): void {
+				$all = get_option( self::RECENT, [] );
+				$all = is_array( $all ) ? $all : [];
+				foreach ( $found as $type => $ids ) {
+					$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+					$ids  = array_values( array_unique( array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
+					rsort( $ids );
 
-			$all[ $type ] = [
-				'ids'  => array_slice( $ids, 0, $cap ),
-				'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
-			];
+					$all[ $type ] = [
+						'ids'  => array_slice( $ids, 0, $cap ),
+						'more' => count( $ids ) > $cap,
+					];
+				}
+				update_option( self::RECENT, $all, false );
+			}
+		);
+		if ( ! $failed ) {
+			update_option( self::RECENT_STATE, self::done_state( $types ), true );
 		}
-		update_option( self::RECENT, $all, false );
-		update_option( self::RECENT_STATE, 'done', true );
 	}
 
 	/**
@@ -723,21 +760,44 @@ final class Ledger {
 			}
 		}
 
-		$all = get_option( self::RECENT, [] );
-		if ( ! is_array( $all ) ) {
-			return;
-		}
-		$changed = false;
-		foreach ( $all as $type => $list ) {
-			$ids  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
-			$left = array_values( array_filter( $ids, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
-			if ( count( $left ) !== count( $ids ) ) {
-				$all[ $type ]['ids'] = $left;
-				$changed             = true;
+		// Most deletes name no entry the list holds: one cached read, no lock.
+		$listed = get_option( self::RECENT, [] );
+		$named  = false;
+		foreach ( is_array( $listed ) ? $listed : [] as $list ) {
+			if ( [] !== array_intersect_key( array_flip( array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ), $gone ) ) {
+				$named = true;
+				break;
 			}
 		}
-		if ( $changed ) {
-			update_option( self::RECENT, $all, false );
+		if ( ! $named ) {
+			return;
+		}
+
+		$short = false;
+		self::locked(
+			static function () use ( $gone, &$short ): void {
+				$all = get_option( self::RECENT, [] );
+				if ( ! is_array( $all ) ) {
+					return;
+				}
+				$changed = false;
+				foreach ( $all as $type => $list ) {
+					$ids  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
+					$left = array_values( array_filter( $ids, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
+					if ( count( $left ) !== count( $ids ) ) {
+						$all[ $type ]['ids'] = $left;
+						$changed             = true;
+						$short               = $short || ( ! empty( $list['more'] ) && count( $left ) < Subtree::count_cap() );
+					}
+				}
+				if ( $changed ) {
+					update_option( self::RECENT, $all, false );
+				}
+			}
+		);
+		// Older entries the full list left out are read back in, from WP-Cron.
+		if ( $short ) {
+			self::rebuild();
 		}
 	}
 
@@ -787,17 +847,55 @@ final class Ledger {
 			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
 			return;
 		}
-		$all  = get_option( self::RECENT, [] );
-		$all  = is_array( $all ) ? $all : [];
-		$list = is_array( $all[ $post_type ] ?? null ) ? $all[ $post_type ] : [];
-		$ids  = array_merge( array_reverse( array_map( 'intval', $meta_ids ) ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
-		$cap  = Subtree::count_cap();
+		self::locked(
+			static function () use ( $post_type, $meta_ids ): void {
+				$all  = get_option( self::RECENT, [] );
+				$all  = is_array( $all ) ? $all : [];
+				$list = is_array( $all[ $post_type ] ?? null ) ? $all[ $post_type ] : [];
+				$ids  = array_merge( array_reverse( array_map( 'intval', $meta_ids ) ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
+				$cap  = Subtree::count_cap();
 
-		$all[ $post_type ] = [
-			'ids'  => array_slice( $ids, 0, $cap ),
-			'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
-		];
-		update_option( self::RECENT, $all, false );
+				$all[ $post_type ] = [
+					'ids'  => array_slice( $ids, 0, $cap ),
+					'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
+				];
+				update_option( self::RECENT, $all, false );
+			}
+		);
+	}
+
+	/**
+	 * Runs a read-modify-write of the newest-records list under a database
+	 * lock, reading the option afresh, so two requests that record or
+	 * delete entries at once both keep their change. Where the database
+	 * has no named locks, the write runs unlocked, on a fresh read.
+	 *
+	 * @param callable $write Reads the option, changes it and saves it.
+	 */
+	private static function locked( callable $write ): void {
+		global $wpdb;
+
+		$name   = 'hierarchy_guard_recent_' . md5( $wpdb->prefix );
+		$errors = $wpdb->suppress_errors( true );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A named lock, held for one option write.
+		$held = '1' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', $name, 5 ) );
+		$wpdb->suppress_errors( $errors );
+
+		// What another request wrote meanwhile is in the database, not in this request's cache.
+		wp_cache_delete( self::RECENT, 'options' );
+		$missing = wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $missing ) && isset( $missing[ self::RECENT ] ) ) {
+			unset( $missing[ self::RECENT ] );
+			wp_cache_set( 'notoptions', $missing, 'options' );
+		}
+		try {
+			$write();
+		} finally {
+			if ( $held ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Releases the lock taken above.
+				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $name ) );
+			}
+		}
 	}
 
 	/**
@@ -844,8 +942,11 @@ final class Ledger {
 	}
 
 	/**
-	 * Removes the override beside a post's record that is going. The post's
-	 * meta is in the cache by then, so a record without one costs no query.
+	 * Removes the override beside a post's record that is going. From
+	 * forget() and prune() the post's meta is in the cache by then, as
+	 * metadata_exists() read it, so a record without one costs no query;
+	 * claim() finds its holders by one query, and loads each holder's meta
+	 * once here.
 	 *
 	 * @param int    $post_id   Post ID.
 	 * @param string $post_type Post type name.

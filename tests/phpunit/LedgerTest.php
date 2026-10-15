@@ -634,7 +634,7 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ $second, $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
 		$this->assertFalse( Ledger::backfilling() );
-		$this->assertSame( 'done', get_option( Ledger::RECENT_STATE ) );
+		$this->assertSame( 'done:page', get_option( Ledger::RECENT_STATE ), 'Done, for the types it covered.' );
 	}
 
 	public function test_the_backfill_is_idempotent_keeps_what_was_recorded_meanwhile_and_stops_at_the_cap(): void {
@@ -679,10 +679,13 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( $queries, get_num_queries(), 'One read of an autoloaded option.' );
 		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'Nothing is scheduled again.' );
 
+		// At any priority.
 		$hooked = static function ( string $hook, string $method ) use ( $wp_filter ): bool {
-			foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
-				if ( [ Ledger::class, $method ] === $callback['function'] ) {
-					return true;
+			foreach ( isset( $wp_filter[ $hook ] ) ? $wp_filter[ $hook ]->callbacks : [] as $callbacks ) {
+				foreach ( $callbacks as $callback ) {
+					if ( [ Ledger::class, $method ] === $callback['function'] ) {
+						return true;
+					}
 				}
 			}
 			return false;
@@ -692,6 +695,110 @@ final class LedgerTest extends WP_UnitTestCase {
 		foreach ( [ 'init', 'wp', 'template_redirect', 'admin_init' ] as $hook ) {
 			$this->assertFalse( $hooked( $hook, 'backfill' ), "The backfill never runs on $hook." );
 		}
+	}
+
+	public function test_a_backfill_whose_query_fails_is_not_done_and_runs_again(): void {
+		global $wpdb;
+
+		$first = $this->old_entry( $this->about, 'first' );
+		Ledger::schedule_backfill();
+		$break  = static fn( string $query ): string => str_contains( $query, 'ORDER BY pm.meta_id DESC LIMIT' ) ? 'SELECT nope FROM nowhere' : $query;
+		add_filter( 'query', $break );
+		$errors = $wpdb->suppress_errors( true );
+		do_action( 'hierarchy_guard_backfill_recent' );
+		$wpdb->suppress_errors( $errors );
+		remove_filter( 'query', $break );
+
+		$this->assertTrue( Ledger::backfilling(), 'A failed query does not mark the list built.' );
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+		Ledger::schedule_backfill();
+		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The next admin load schedules it again.' );
+
+		do_action( 'hierarchy_guard_backfill_recent' );
+		$this->assertFalse( Ledger::backfilling() );
+		$this->assertSame( [ $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
+	public function test_a_type_supported_after_the_backfill_ran_is_backfilled_then(): void {
+		$doc   = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$entry = (int) add_post_meta( $doc, Ledger::key( 'hg_docs', 'manual' ), 'manual', true );
+		$only  = static fn(): array => [ 'page' ];
+		add_filter( 'hierarchy_guard_post_types', $only );
+		Post_Types::reset();
+		Ledger::schedule_backfill();
+		do_action( 'hierarchy_guard_backfill_recent' );
+		$this->assertFalse( Ledger::backfilling() );
+		$this->assertSame( [], $this->ledger->recent( [ 'hg_docs' ] )['ids'], 'Precondition: the type was not supported then.' );
+
+		remove_filter( 'hierarchy_guard_post_types', $only );
+		$both = static fn(): array => [ 'page', 'hg_docs' ];
+		add_filter( 'hierarchy_guard_post_types', $both );
+		Post_Types::reset();
+		Ledger::schedule_backfill();
+
+		$this->assertTrue( Ledger::backfilling(), 'The list is built again for the type now supported.' );
+		do_action( 'hierarchy_guard_backfill_recent' );
+		remove_filter( 'hierarchy_guard_post_types', $both );
+		Post_Types::reset();
+		$this->assertSame( [ $entry ], $this->ledger->recent( [ 'hg_docs' ] )['ids'] );
+	}
+
+	public function test_a_full_list_that_loses_entries_is_filled_again_from_older_ones(): void {
+		$cap = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		foreach ( [ 'one', 'two', 'three' ] as $path ) {
+			$this->ledger->record( $this->about, $path );
+		}
+		Ledger::backfill();
+		$this->assertTrue( $this->ledger->recent( [ 'page' ] )['more'], 'Precondition: older entries exist than the list holds.' );
+
+		$this->ledger->forget( $this->about, 'three' );
+
+		$this->assertTrue( Ledger::backfilling(), 'The list fell below the cap with older entries left out: it is filled again, from WP-Cron.' );
+		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ) );
+		do_action( 'hierarchy_guard_backfill_recent' );
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+		$this->assertSame(
+			[
+				'ids'  => [ $this->meta_id( $this->about, 'two' ), $this->meta_id( $this->about, 'one' ) ],
+				'more' => false,
+			],
+			$this->ledger->recent( [ 'page' ] ),
+			'Every entry fits now, so the list no longer says older ones exist.'
+		);
+	}
+
+	public function test_a_write_to_the_newest_list_keeps_what_another_request_wrote_meanwhile(): void {
+		global $wpdb;
+
+		$this->ledger->record( $this->about, 'one' );
+		$one = $this->meta_id( $this->about, 'one' );
+		get_option( Ledger::RECENT );
+		// Another request records an entry: the row is in the database, this request's cache is stale.
+		$other = (int) add_post_meta( $this->about, Ledger::key( 'page', 'other' ), 'other', true );
+		$wpdb->update(
+			$wpdb->options,
+			[
+				'option_value' => maybe_serialize(
+					[
+						'page' => [
+							'ids'  => [ $other, $one ],
+							'more' => false,
+						],
+					]
+				),
+			],
+			[ 'option_name' => Ledger::RECENT ]
+		);
+
+		$this->ledger->record( $this->about, 'two' );
+
+		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $other, $one ], $this->ledger->recent( [ 'page' ] )['ids'] );
 	}
 
 	public function test_deactivation_clears_an_unfinished_backfill(): void {
