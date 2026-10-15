@@ -26,9 +26,10 @@ use WP_Post;
  * the server's segment cap. Last, every pair is checked against a model of
  * the server (Batch_Resolver): the request must be a 404 by the site's
  * rewrite rules as Rules::is_404() reads them, and the resolver's rules must
- * lead to the pair's page. A pair the model cannot vouch for is left out.
- * Nothing is stored: the collected pairs are cached for a few minutes, keyed
- * on the posts' last change.
+ * lead to the pair's page, or to the URL target an administrator set on its
+ * record, with the code chosen there. A pair the model cannot vouch for is
+ * left out. Nothing is stored: the collected pairs are cached for a few
+ * minutes, keyed on the posts' and the ledger's last change.
  */
 final class Pairs {
 
@@ -42,7 +43,7 @@ final class Pairs {
 	 * pairs.
 	 *
 	 * @param array<string,mixed> $change A change from Change_Log.
-	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool,gone:bool}
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool,url:string}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool,gone:bool}
 	 */
 	public function collect_change( array $change ): array {
 		return $this->cached(
@@ -77,7 +78,7 @@ final class Pairs {
 	 *
 	 * @param array<int,array<string,mixed>> $blocks    Blocks.
 	 * @param string                         $post_type Post type name.
-	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
+	 * @return array{post_type:string,pairs:array<int,array{old:string,id:int,temporary:bool,url:string}>,unresolved:array<int,array{old:string,reason:string}>,capped:bool}
 	 */
 	public function collect( array $blocks, string $post_type ): array {
 		$cap        = Subtree::count_cap();
@@ -283,7 +284,9 @@ final class Pairs {
 	 * serves elsewhere, or that something else is shown at, is in use, and one
 	 * it serves nowhere leads nowhere, or is in the trash when the newest live
 	 * page that held it sits under the trash. A pair the server answers with a
-	 * 302, as a restore from the trash could still undo it, is temporary.
+	 * 302, as a restore from the trash could still undo it, is temporary. A
+	 * pair whose record has a URL target is listed with that URL, and a code
+	 * chosen on its record decides whether it is temporary.
 	 *
 	 * @param array<int,array<string,mixed>>             $open       Blocks by index.
 	 * @param array<string,mixed>                        $listing    From listing().
@@ -291,7 +294,7 @@ final class Pairs {
 	 * @param string                                     $post_type  Post type name.
 	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts      Ledger facts read so far, by path.
 	 * @param array<int,array{old:string,reason:string}> $unresolved Unresolved rows; one is added per old path with no new URL.
-	 * @return array<int,array{old:string,id:int,temporary:bool}>
+	 * @return array<int,array{old:string,id:int,temporary:bool,url:string}>
 	 */
 	private static function served_only( array $open, array $listing, array $gone, string $post_type, array $facts, array &$unresolved ): array {
 		$pairs = $listing['pairs'];
@@ -303,7 +306,8 @@ final class Pairs {
 			}
 		}
 		$temporary = [];
-		$served    = Batch_Resolver::served( array_values( array_unique( array_merge( array_column( $left, 'old' ), array_values( $heads ) ) ) ), $post_type, $facts, $temporary );
+		$chosen    = [];
+		$served    = Batch_Resolver::served( array_values( array_unique( array_merge( array_column( $left, 'old' ), array_values( $heads ) ) ) ), $post_type, $facts, $temporary, $chosen );
 		$reason    = static fn( int $target, bool $trashed ): string => 0 !== $target ? 'in_use' : ( $trashed ? 'trash' : 'none' );
 
 		foreach ( $heads as $old ) {
@@ -315,7 +319,7 @@ final class Pairs {
 		$dropped = $gone['dropped'];
 		foreach ( $left as $i => $pair ) {
 			$target = $served[ $pair['old'] ] ?? 0;
-			if ( $target === $pair['id'] ) {
+			if ( $target === $pair['id'] || Batch_Resolver::URL === $target ) {
 				continue;
 			}
 			$dropped[ $i ] = true;
@@ -328,7 +332,13 @@ final class Pairs {
 		}
 		return array_values(
 			array_map(
-				static fn( array $pair ): array => $pair + [ 'temporary' => isset( $temporary[ $pair['old'] ] ) ],
+				static function ( array $pair ) use ( $temporary, $chosen ): array {
+					$code = $chosen[ $pair['old'] ]['code'] ?? 0;
+					return $pair + [
+						'temporary' => $code > 0 ? 302 === $code : isset( $temporary[ $pair['old'] ] ),
+						'url'       => $chosen[ $pair['old'] ]['url'] ?? '',
+					];
+				},
 				array_diff_key( $pairs, $dropped )
 			)
 		);
@@ -402,8 +412,8 @@ final class Pairs {
 	 * @return array<string,mixed>
 	 */
 	private function cached( string $key, callable $build ): array {
-		// The pairs depend on the permalink structure, which a change of it does not bump.
-		$key = 'pairs:' . $key . ':' . md5( (string) get_option( 'permalink_structure' ) ) . ':' . wp_cache_get_last_changed( 'posts' );
+		// The pairs depend on the permalink structure, which a change of it does not bump, and on the ledger's overrides.
+		$key = 'pairs:' . $key . ':' . md5( (string) get_option( 'permalink_structure' ) ) . ':' . wp_cache_get_last_changed( 'posts' ) . ':' . wp_cache_get_last_changed( Ledger::CACHE_GROUP );
 		$hit = wp_cache_get( $key, Ledger::CACHE_GROUP );
 		if ( is_array( $hit ) ) {
 			return $hit;
@@ -485,25 +495,28 @@ final class Pairs {
 
 	/**
 	 * Old and new URLs for pairs, priming the posts first, each saying
-	 * whether the server answers it with a 302.
+	 * whether the server answers it with a 302. A URL target on this site is
+	 * relative to the home URL like a page's; one on another host stays absolute.
 	 *
-	 * @param array<int,array{old:string,id:int,temporary?:bool}> $pairs Pairs.
-	 * @param string                                              $type  Post type name.
+	 * @param array<int,array{old:string,id:int,temporary?:bool,url?:string}> $pairs Pairs.
+	 * @param string                                                         $type  Post type name.
 	 * @return array<int,array{old:string,new:string,temporary:bool}>
 	 */
 	private function urls( array $pairs, string $type ): array {
 		_prime_post_caches( array_map( static fn( array $pair ): int => $pair['id'], $pairs ), false, false );
 
-		$out = [];
+		$home = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		$out  = [];
 		foreach ( $pairs as $pair ) {
 			$old = Paths::url( $type, $pair['old'] );
-			$new = get_permalink( $pair['id'] );
+			$url = (string) ( $pair['url'] ?? '' );
+			$new = '' !== $url ? $url : get_permalink( $pair['id'] );
 			if ( '' === $old || ! is_string( $new ) || '' === $new ) {
 				continue;
 			}
 			$out[] = [
 				'old'       => Paths::relative( $old ),
-				'new'       => Paths::relative( $new ),
+				'new'       => '' === $url || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === $home ? Paths::relative( $new ) : $url,
 				'temporary' => ! empty( $pair['temporary'] ),
 			];
 		}
