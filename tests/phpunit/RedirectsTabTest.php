@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\Redirect_Edit;
+use HierarchyGuard\Admin\Redirects_Table;
 use HierarchyGuard\Admin\Settings_Page;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
@@ -170,6 +171,18 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'aria-label="Delete the redirect from /old-about/" data-hierarchy-guard-confirm="Delete the redirect from /old-about/? This can’t be undone."', $html );
 		$this->assertStringContainsString( 'data-hierarchy-guard-confirm-one="Delete the redirect from /old-about/? This can’t be undone."', $html, 'A bulk Delete of one row asks about that row.' );
 		$this->assertStringContainsString( '<form method="get" id="hierarchy-guard-redirects" data-hierarchy-guard-confirm="Delete the selected redirects? This can’t be undone.">', $html );
+	}
+
+	public function test_a_row_with_no_status_computed_never_reads_active(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+		$table  = new Redirects_Table( $this->records );
+		$column = new \ReflectionMethod( $table, 'column_status' );
+		$column->setAccessible( true );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+
+		$this->assertSame( '', $column->invoke( $table, $record ), 'Statuses were never read for this row: the cell stays empty.' );
+		$this->assertSame( '', Redirects_Table::status_label( 'unknown' ) );
+		$this->assertSame( 'Active', Redirects_Table::status_label( Records::STATUS_ACTIVE ) );
 	}
 
 	public function test_the_post_type_filter_appears_only_when_two_types_are_supported(): void {

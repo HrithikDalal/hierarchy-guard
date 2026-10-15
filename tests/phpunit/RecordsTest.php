@@ -13,6 +13,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Records;
 use HierarchyGuard\Redirects\Resolver;
+use HierarchyGuard\Redirects\Server;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Markers;
 use WP_Error;
@@ -81,6 +82,57 @@ final class RecordsTest extends WP_UnitTestCase {
 			]
 		);
 		Post_Types::reset();
+	}
+
+	/**
+	 * Each row's status on the first page, by old URL; the holder's ID is
+	 * added for an old URL two rows share.
+	 *
+	 * @return array<string,string>
+	 */
+	private function statuses_by_old(): array {
+		$rows = $this->records->page( '', '', 1 )['rows'];
+		$all  = $this->records->statuses( $rows );
+		$olds = array_count_values( array_column( $rows, 'old' ) );
+		$out  = [];
+		foreach ( $rows as $row ) {
+			$key         = $olds[ $row['old'] ] > 1 ? $row['old'] . ' ' . $row['holder'] : $row['old'];
+			$out[ $key ] = $all[ $row['id'] ] ?? '';
+		}
+		return $out;
+	}
+
+	/**
+	 * What the server sends for a request of a URL relative to the home URL.
+	 *
+	 * @param string $old Old URL, such as /about/.
+	 * @return array{url:string,status:int}|null
+	 */
+	private function served_at( string $old ): ?array {
+		$this->go_to( home_url( $old ) );
+		return ( new Server( new Resolver( $this->ledger ) ) )->target_for_current_request();
+	}
+
+	/**
+	 * Every row that reads Active is served for its old URL, by the server
+	 * itself; a top-level root-list entry, whose old URL leads nowhere of
+	 * its own, for a URL under it.
+	 *
+	 * @param string $under A top-level page, for the URLs under a top-level root-list entry.
+	 */
+	private function assert_every_active_row_is_served( string $under ): void {
+		$rows     = $this->records->page( '', '', 1 )['rows'];
+		$statuses = $this->records->statuses( $rows );
+		$active   = 0;
+		foreach ( $rows as $row ) {
+			if ( Records::STATUS_ACTIVE !== $statuses[ $row['id'] ] ) {
+				continue;
+			}
+			++$active;
+			$old = Records::is_top_level( $row ) ? $row['old'] . $under . '/' : $row['old'];
+			$this->assertNotNull( $this->served_at( $old ), $old . ' reads Active, so the server serves it.' );
+		}
+		$this->assertGreaterThan( 0, $active, 'Precondition: some row reads Active.' );
 	}
 
 	public function test_each_entry_and_each_root_entry_is_one_row_and_nothing_else_is(): void {
@@ -509,6 +561,134 @@ final class RecordsTest extends WP_UnitTestCase {
 			$statuses(),
 			'Only a row that would be active says built-in redirects are off.'
 		);
+	}
+
+	public function test_a_row_is_in_use_when_a_blog_post_is_shown_at_its_old_url(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['about'], 'news' );
+		$this->ledger->record( $this->ids['team'], 'crew' );
+		self::factory()->post->create( [ 'post_name' => 'news' ] );
+
+		$this->assertNull( $this->served_at( '/news/' ), 'Precondition: the blog post is shown, so the server never runs.' );
+		$this->assertSame(
+			[
+				'/crew/' => Records::STATUS_ACTIVE,
+				'/news/' => Records::STATUS_IN_USE,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_a_live_holder_s_row_is_in_use_while_a_page_in_the_trash_holds_the_newest_entry(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['team'], 'old-crew' );
+		$this->ledger->record( $this->ids['history'], 'old-crew' );
+		wp_trash_post( $this->ids['history'] );
+		wp_cache_flush();
+
+		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server leaves it for the page in the Trash.' );
+		$this->assertSame(
+			[
+				'/old-crew/ ' . $this->ids['team']    => Records::STATUS_IN_USE,
+				'/old-crew/ ' . $this->ids['history'] => Records::STATUS_UNPUBLISHED,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_a_root_entry_a_post_entry_answers_instead_is_in_use(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->ledger->set_target( 'page', 'archive', 0, 'https://example.org/archive/', 0 );
+		$this->ledger->record( $this->ids['team'], 'archive' );
+
+		$this->assertSame( get_permalink( $this->ids['team'] ), $this->served_at( '/archive/' )['url'] ?? null, 'Precondition: the post entry answers.' );
+		$this->assertSame(
+			[
+				'/archive/ 0'                     => Records::STATUS_IN_USE,
+				'/archive/ ' . $this->ids['team'] => Records::STATUS_ACTIVE,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_an_old_url_deeper_than_the_segment_cap_never_reads_active(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['team'], 'a/b/c' );
+		$this->ledger->record( $this->ids['history'], 'a/b' );
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 2 );
+
+		$this->assertNull( $this->served_at( '/a/b/c/' ), 'Precondition: the server refuses it.' );
+		$this->assertSame(
+			[
+				'/a/b/'   => Records::STATUS_ACTIVE,
+				'/a/b/c/' => Records::STATUS_OFF,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_a_url_target_at_its_own_old_url_never_reads_active(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['team'], 'old-crew' );
+		// Written straight into the ledger, as before the Edit view refused it.
+		$this->ledger->set_target( 'page', 'old-crew', $this->ids['team'], home_url( '/old-crew/' ), 0 );
+
+		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server refuses the loop.' );
+		$this->assertNotSame( Records::STATUS_ACTIVE, $this->statuses_by_old()['/old-crew/'] );
+	}
+
+	public function test_a_row_another_type_answers_first_is_in_use(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->register_docs();
+		$this->set_permalink_structure( '/%postname%/' );
+		$guide = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$this->ledger->record( $guide, 'old-guide' );
+		// A page entry at the docs prefix: the server tries hg_docs first.
+		$this->ledger->record( $this->ids['team'], 'docs/old-guide' );
+
+		$this->assertSame( get_permalink( $guide ), $this->served_at( '/docs/old-guide/' )['url'] ?? null, 'Precondition: the docs entry answers.' );
+		$this->assertSame(
+			[
+				'/docs/old-guide/ ' . $guide             => Records::STATUS_ACTIVE,
+				'/docs/old-guide/ ' . $this->ids['team'] => Records::STATUS_IN_USE,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_every_row_that_reads_active_is_served_by_the_server(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->page( 'faq' );
+		$draft   = $this->page( 'whats-on', 0, 'draft' );
+		$trashed = $this->page( 'gone' );
+		self::factory()->post->create( [ 'post_name' => 'news' ] );
+		$this->ledger->record( $this->ids['about'], 'news' );
+		$this->ledger->record( $draft, 'events' );
+		$this->ledger->record( $draft, 'events-feed' );
+		$this->ledger->set_target( 'page', 'events-feed', $draft, 'https://example.org/feed/', 0 );
+		$this->ledger->record( $trashed, 'old-gone' );
+		wp_trash_post( $trashed );
+		$this->ledger->record( $this->ids['team'], 'crew' );
+		$this->ledger->record( $this->ids['team'], 'crew/old-lead' );
+		$this->ledger->record( $this->ids['leadership'], 'old-lead' );
+		$this->ledger->set_target( 'page', 'old-lead', $this->ids['leadership'], 'https://example.org/lead/', 302 );
+		$this->ledger->record( $this->ids['history'], 'old-crew' );
+		$this->ledger->record( $this->ids['team'], 'old-crew' );
+		$this->ledger->record( $this->ids['team'], 'self' );
+		$this->ledger->set_target( 'page', 'self', $this->ids['team'], home_url( '/self/' ), 0 );
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->ledger->record_root( 'page', 'crew' );
+		$this->ledger->record( $this->ids['history'], 'a/b/c/d/e' );
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 4 );
+		wp_cache_flush();
+
+		$this->assert_every_active_row_is_served( 'faq' );
 	}
 
 	public function test_an_old_url_with_other_scripts_reads_and_searches_as_people_type_it(): void {

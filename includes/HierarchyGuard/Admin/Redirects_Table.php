@@ -296,13 +296,14 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * Active, or why the redirect isn't served.
+	 * Active, or why the redirect isn't served. A row whose status was not
+	 * computed reads nothing: never Active.
 	 *
 	 * @param array<string,mixed> $item Record.
 	 * @return string
 	 */
 	protected function column_status( $item ): string {
-		return esc_html( self::status_label( $this->statuses[ (string) $item['id'] ] ?? Records::STATUS_ACTIVE ) );
+		return esc_html( self::status_label( $this->statuses[ (string) $item['id'] ] ?? '' ) );
 	}
 
 	/**
@@ -358,7 +359,7 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * The words for a status.
+	 * The words for a status; none for anything else.
 	 *
 	 * @param string $status One of the Records::STATUS_ constants.
 	 * @return string
@@ -371,7 +372,9 @@ final class Redirects_Table extends WP_List_Table {
 				return __( 'Not active: the page it points to isn’t published', 'hierarchy-guard' );
 			case Records::STATUS_OFF:
 				return __( 'Not active: built-in redirects are off', 'hierarchy-guard' );
+			case Records::STATUS_ACTIVE:
+				return __( 'Active', 'hierarchy-guard' );
 		}
-		return __( 'Active', 'hierarchy-guard' );
+		return '';
 	}
 }

@@ -63,16 +63,19 @@ final class Batch_Resolver {
 	 * server would answer it with a 302: a restore from the trash could still
 	 * undo the move the redirect follows. A record's override is honoured as
 	 * the server honours it: a URL target answers its exact old path with
-	 * URL, and a chosen code is set in $chosen.
+	 * URL, and a chosen code is set in $chosen. The record the rules use
+	 * first for each path this type answers or passes on is set in $used, so
+	 * a caller can tell whether a given record is the one that answers it.
 	 *
 	 * @param string[]                                $paths     Normalized old paths, at most the count cap.
 	 * @param string                                  $post_type Post type name.
 	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[],target?:array{url:string,code:int}|null}> $facts     Ledger facts read so far, by path; more are added, for every path.
 	 * @param array<string,true>|null                 $temporary Set to the paths redirected by this type's records that are temporary.
 	 * @param array<string,array{url:string,code:int}>|null $chosen Set to the URL target and the chosen code of each path this type's records answer with an override.
+	 * @param array<string,array{0:string,1:int}>|null $used Set to the prefix and the holder (Rules::ROOT for the root list) of the first record the rules use for each path, where no type the server tries first takes the path; a path the rules use no record for is absent.
 	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there, URL for a URL target.
 	 */
-	public static function served( array $paths, string $post_type, array &$facts, ?array &$temporary = null, ?array &$chosen = null ): array {
+	public static function served( array $paths, string $post_type, array &$facts, ?array &$temporary = null, ?array &$chosen = null, ?array &$used = null ): array {
 		$prefix = Server::prefix( $post_type );
 		$room   = self::room( $post_type );
 		$out    = [];
@@ -88,7 +91,8 @@ final class Batch_Resolver {
 		}
 		$held    = [];
 		$answers = [];
-		$found   = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true, $held, $answers );
+		$firsts  = [];
+		$found   = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true, $held, $answers, $firsts );
 		$ours    = $found;
 
 		// The candidates the server tries before this type's own, by path.
@@ -135,11 +139,15 @@ final class Batch_Resolver {
 		$chains = [];
 		$chosen = [];
 		$urls   = [];
+		$used   = [];
 		foreach ( $found as $start => $target ) {
 			$start         = (string) $start;
 			$out[ $start ] = self::UNKNOWN === $target ? 0 : $target;
 			if ( $target !== $ours[ $start ] ) {
 				continue;
+			}
+			if ( isset( $firsts[ $start ] ) ) {
+				$used[ $start ] = $firsts[ $start ];
 			}
 			if ( isset( $answers[ $start ] ) ) {
 				$chosen[ $start ] = $answers[ $start ];
@@ -203,11 +211,13 @@ final class Batch_Resolver {
 	 * @param bool                                    $requests  Whether each path is a request that must be a 404 first.
 	 * @param array<string,true>|null                 $held      Set to the paths led to a post or URL through a prefix a page in the trash holds.
 	 * @param array<string,array{url:string,code:int}>|null $answers Set to each answered path's URL target and chosen code, where it has either.
+	 * @param array<string,array{0:string,1:int}>|null $firsts Set to the prefix and holder of the first record the rules used for each path, where they used one.
 	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, URL for a URL target, UNKNOWN when it cannot be told.
 	 */
-	private static function run( array $paths, string $post_type, array &$facts, bool $requests, ?array &$held = null, ?array &$answers = null ): array {
+	private static function run( array $paths, string $post_type, array &$facts, bool $requests, ?array &$held = null, ?array &$answers = null, ?array &$firsts = null ): array {
 		$held    = [];
 		$answers = [];
+		$firsts  = [];
 		$view    = new Prefetched_View( $post_type, $facts );
 		$out     = [];
 		$pending = [];
@@ -252,6 +262,9 @@ final class Batch_Resolver {
 				try {
 					// Only a 404 reaches the resolver.
 					$target = ! $requests || $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace, $code ) : null;
+					if ( [] !== $trace && ( null === $target || ! $view->guessed() ) ) {
+						$firsts[ $start ] = [ (string) $trace[0][0], (int) $trace[0][1] ];
+					}
 					if ( null !== $target && ! $view->guessed() ) {
 						$url           = is_string( $target ) ? $target : '';
 						$out[ $start ] = '' !== $url ? self::URL : (int) $target->ID;

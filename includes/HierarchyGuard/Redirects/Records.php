@@ -162,46 +162,91 @@ final class Records {
 	}
 
 	/**
-	 * Each row's status, the first that applies: a live page uses the old
-	 * URL; the page the record points to is not published (a page target
-	 * whose page nobody can view or that sits under the trash, or any record
-	 * whose page is in the trash, which the resolver passes over); built-in
-	 * redirects are off, or the site has plain permalinks, under which the
-	 * server serves nothing; or active. One query per post type for the pages
-	 * at the old URLs, and the holders primed.
+	 * Each row's status, from what the server's own model answers for the
+	 * row's exact old path (Batch_Resolver::served(), the rules the server
+	 * runs), the first that applies:
+	 *
+	 * - in use: something is shown at the old URL, a blog post or an archive
+	 *   included, so the server never runs; or another record answers the
+	 *   path instead: a newer holder, a page in the Trash that holds the
+	 *   newest entry, a post entry over a root-list entry, or another type's
+	 *   record the server tries first;
+	 * - unpublished: the page the record points to is not published, or its
+	 *   holder is in the Trash, which the resolver passes over;
+	 * - off: built-in redirects are off, the site has plain permalinks, or
+	 *   the server refuses the request before it looks: a path deeper than
+	 *   its segment cap, or a URL target at the old URL itself, a loop;
+	 * - active: the server serves the row's own record at its old URL. A
+	 *   top-level root-list entry leads nowhere at its own old URL, only for
+	 *   the URLs under it, so it is active when its record is the one the
+	 *   rules use there.
+	 *
+	 * A row the model cannot vouch for is in use: the model leaves a path
+	 * several posts share unanswered. Under plain permalinks the model does
+	 * not run. One served() call per post type, for these rows only.
 	 *
 	 * @param array<int,array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}> $rows Rows, one page at most.
 	 * @return array<string,string> One of the STATUS_ constants by row ID.
 	 */
 	public function statuses( array $rows ): array {
-		$paths = [];
+		$pretty  = '' !== (string) get_option( 'permalink_structure' );
+		$serving = Settings::serve_redirects() && $pretty;
+		$paths   = [];
 		foreach ( $rows as $row ) {
-			$paths[ $row['post_type'] ][] = $row['path'];
+			$paths[ $row['post_type'] ][ $row['path'] ] = true;
 		}
-		$owners = [];
-		foreach ( $paths as $type => $list ) {
-			$owners[ $type ] = Batch_Resolver::owners( array_values( array_unique( $list ) ), (string) $type );
+		$served = [];
+		$used   = [];
+		$chosen = [];
+		foreach ( $pretty ? $paths : [] as $type => $list ) {
+			$facts           = [];
+			$temporary       = [];
+			$served[ $type ] = Batch_Resolver::served( array_map( 'strval', array_keys( $list ) ), (string) $type, $facts, $temporary, $chosen[ $type ], $used[ $type ] );
 		}
 		Batch_Resolver::prime_with_ancestors( array_values( array_filter( array_column( $rows, 'holder' ) ) ) );
 
-		$serving = Settings::serve_redirects() && '' !== (string) get_option( 'permalink_structure' );
-		$out     = [];
+		$out = [];
 		foreach ( $rows as $row ) {
-			$owner  = $owners[ $row['post_type'] ][ $row['path'] ] ?? 0;
+			$type   = $row['post_type'];
+			$path   = $row['path'];
 			$holder = $row['holder'] > 0 ? get_post( $row['holder'] ) : null;
 			$url    = null !== $row['target'] ? $row['target']['url'] : '';
-			if ( $owner > 0 && is_post_publicly_viewable( $owner ) ) {
+			$answer = $served[ $type ][ $path ] ?? 0;
+			$first  = $used[ $type ][ $path ] ?? null;
+			$own    = null !== $first && $first[0] === $path && $first[1] === $row['holder'];
+			if ( ! $pretty ) {
+				$status = $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ? self::STATUS_UNPUBLISHED : self::STATUS_OFF;
+			} elseif ( Batch_Resolver::NOT_404 === $answer || ( 0 !== $answer && ! $own ) ) {
 				$status = self::STATUS_IN_USE;
 			} elseif ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
 				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( ! $serving ) {
+			} elseif ( ! $serving || substr_count( $path, '/' ) + 1 > Batch_Resolver::room( $type ) || ( Batch_Resolver::URL === $answer && self::loops( $type, $path, (string) ( $chosen[ $type ][ $path ]['url'] ?? '' ) ) ) ) {
 				$status = self::STATUS_OFF;
+			} elseif ( ! $own || ( 0 === $answer && ! self::is_top_level( $row ) ) ) {
+				$status = self::STATUS_IN_USE;
 			} else {
 				$status = self::STATUS_ACTIVE;
 			}
 			$out[ $row['id'] ] = $status;
 		}
 		return $out;
+	}
+
+	/**
+	 * Whether the server refuses a URL target as a loop: on this host, at
+	 * the old URL's own path, as Server::target_for_current_request() compares them.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized old path.
+	 * @param string $url       The URL target.
+	 * @return bool
+	 */
+	private static function loops( string $post_type, string $path, string $url ): bool {
+		$old = Paths::url( $post_type, $path );
+		if ( '' === $url || '' === $old || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) !== strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) ) {
+			return false;
+		}
+		return untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === untrailingslashit( (string) wp_parse_url( $old, PHP_URL_PATH ) );
 	}
 
 	/**
