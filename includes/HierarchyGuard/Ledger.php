@@ -26,6 +26,9 @@ final class Ledger {
 	public const ROOT_TARGETS  = 'hierarchy_guard_root_targets';
 	public const RECENT        = 'hierarchy_guard_recent_records';
 	public const RECENT_STATE  = 'hierarchy_guard_recent_state';
+	public const RECENT_LOCK   = 'hierarchy_guard_recent_lock';
+	public const RECENT_QUEUE  = 'hierarchy_guard_recent_queue';
+	public const LOCK_TTL      = 10;
 	public const BACKFILL_HOOK = 'hierarchy_guard_backfill_recent';
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
@@ -714,23 +717,12 @@ final class Ledger {
 		}
 
 		// Entries recorded while the queries ran are kept.
-		self::locked(
-			static function () use ( $found, $cap ): void {
-				$all = get_option( self::RECENT, [] );
-				$all = is_array( $all ) ? $all : [];
-				foreach ( $found as $type => $ids ) {
-					$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
-					$ids  = array_values( array_unique( array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
-					rsort( $ids );
-
-					$all[ $type ] = [
-						'ids'  => array_slice( $ids, 0, $cap ),
-						'more' => count( $ids ) > $cap,
-					];
-				}
-				update_option( self::RECENT, $all, false );
-			}
-		);
+		unset( $cap );
+		$ops = [];
+		foreach ( $found as $type => $ids ) {
+			$ops[] = [ 'fill', (string) $type, $ids ];
+		}
+		self::write_recent( $ops );
 		if ( ! $failed ) {
 			update_option( self::RECENT_STATE, self::done_state( $types ), true );
 		}
@@ -773,32 +765,7 @@ final class Ledger {
 			return;
 		}
 
-		$short = false;
-		self::locked(
-			static function () use ( $gone, &$short ): void {
-				$all = get_option( self::RECENT, [] );
-				if ( ! is_array( $all ) ) {
-					return;
-				}
-				$changed = false;
-				foreach ( $all as $type => $list ) {
-					$ids  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
-					$left = array_values( array_filter( $ids, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
-					if ( count( $left ) !== count( $ids ) ) {
-						$all[ $type ]['ids'] = $left;
-						$changed             = true;
-						$short               = $short || ( ! empty( $list['more'] ) && count( $left ) < Subtree::count_cap() );
-					}
-				}
-				if ( $changed ) {
-					update_option( self::RECENT, $all, false );
-				}
-			}
-		);
-		// Older entries the full list left out are read back in, from WP-Cron.
-		if ( $short ) {
-			self::rebuild();
-		}
+		self::write_recent( [ [ 'drop', '', array_map( 'intval', array_keys( $gone ) ) ] ] );
 	}
 
 	/**
@@ -847,54 +814,193 @@ final class Ledger {
 			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
 			return;
 		}
-		self::locked(
-			static function () use ( $post_type, $meta_ids ): void {
-				$all  = get_option( self::RECENT, [] );
-				$all  = is_array( $all ) ? $all : [];
-				$list = is_array( $all[ $post_type ] ?? null ) ? $all[ $post_type ] : [];
-				$ids  = array_merge( array_reverse( array_map( 'intval', $meta_ids ) ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
-				$cap  = Subtree::count_cap();
-
-				$all[ $post_type ] = [
-					'ids'  => array_slice( $ids, 0, $cap ),
-					'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
-				];
-				update_option( self::RECENT, $all, false );
-			}
-		);
+		self::write_recent( [ [ 'add', $post_type, array_map( 'intval', $meta_ids ) ] ] );
 	}
 
 	/**
-	 * Runs a read-modify-write of the newest-records list under a database
-	 * lock, reading the option afresh, so two requests that record or
-	 * delete entries at once both keep their change. Where the database
-	 * has no named locks, the write runs unlocked, on a fresh read.
+	 * Applies changes to the newest-records list without losing any, and
+	 * without waiting: under an option-row lock (an INSERT, which only one
+	 * request can make, expiring after LOCK_TTL seconds, as the job queue's
+	 * locks do), on a fresh read of the row. A request that finds the lock
+	 * held appends its changes to a queue row in one atomic statement
+	 * instead, and whichever request holds the lock next applies them; the
+	 * holder looks at the queue again after it lets go. The lock's INSERT
+	 * comes before every read here, so a read/write-split database drop-in
+	 * sends the reads to the primary.
 	 *
-	 * @param callable $write Reads the option, changes it and saves it.
+	 * @param array<int,array{0:string,1:string,2:int[]}> $ops Changes: add (a type's IDs just recorded, oldest first), drop (IDs deleted, any type) or fill (a type's newest IDs, from the backfill).
 	 */
-	private static function locked( callable $write ): void {
+	private static function write_recent( array $ops ): void {
+		if ( [] === $ops ) {
+			return;
+		}
+		$token = self::lock_recent();
+		if ( 0 === $token ) {
+			self::queue_recent( $ops );
+			// The holder may have let go meanwhile; if so, apply what waits now.
+			$token = self::lock_recent();
+			if ( 0 === $token ) {
+				return;
+			}
+			$ops = [];
+		}
+		for ( $round = 0; $round < 3 && 0 !== $token; $round++ ) {
+			self::apply_recent( $ops );
+			self::unlock_recent( $token );
+			$ops   = [];
+			$token = '' !== self::read_row( self::RECENT_QUEUE ) ? self::lock_recent() : 0;
+		}
+		if ( 0 !== $token ) {
+			self::unlock_recent( $token );
+		}
+	}
+
+	/**
+	 * Applies the queued changes and these, under the lock: one fresh read
+	 * of the list and the queue, one write of the list, and the queue's
+	 * applied part taken off its front. A supported type's list that drops
+	 * below the cap while older entries exist is filled again quietly, by
+	 * the backfill's cron event, without marking the list as being built.
+	 *
+	 * @param array<int,array{0:string,1:string,2:int[]}> $ops Changes.
+	 */
+	private static function apply_recent( array $ops ): void {
 		global $wpdb;
 
-		$name   = 'hierarchy_guard_recent_' . md5( $wpdb->prefix );
-		$errors = $wpdb->suppress_errors( true );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A named lock, held for one option write.
-		$held = '1' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK( %s, %d )', $name, 5 ) );
-		$wpdb->suppress_errors( $errors );
-
-		// What another request wrote meanwhile is in the database, not in this request's cache.
-		wp_cache_delete( self::RECENT, 'options' );
-		$missing = wp_cache_get( 'notoptions', 'options' );
-		if ( is_array( $missing ) && isset( $missing[ self::RECENT ] ) ) {
-			unset( $missing[ self::RECENT ] );
-			wp_cache_set( 'notoptions', $missing, 'options' );
-		}
-		try {
-			$write();
-		} finally {
-			if ( $held ) {
-				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Releases the lock taken above.
-				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK( %s )', $name ) );
+		// What waited in the queue happened first.
+		$queued = self::read_row( self::RECENT_QUEUE );
+		$first  = [];
+		foreach ( '' !== $queued ? explode( "\n", trim( $queued ) ) : [] as $line ) {
+			$op = json_decode( $line, true );
+			if ( is_array( $op ) && 3 === count( $op ) ) {
+				$first[] = [ (string) $op[0], (string) $op[1], array_map( 'intval', (array) $op[2] ) ];
 			}
+		}
+		$ops = array_merge( $first, $ops );
+		$all = maybe_unserialize( self::read_row( self::RECENT ) );
+		$all = is_array( $all ) ? $all : [];
+
+		$cap       = Subtree::count_cap();
+		$supported = Post_Types::supported();
+		$short     = false;
+		foreach ( $ops as [ $kind, $type, $ids ] ) {
+			if ( 'drop' === $kind ) {
+				$gone = array_flip( $ids );
+				foreach ( $all as $listed => $list ) {
+					$had  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
+					$left = array_values( array_filter( $had, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
+					if ( count( $left ) !== count( $had ) ) {
+						$all[ $listed ]['ids'] = $left;
+						$short                 = $short || ( ! empty( $list['more'] ) && count( $left ) < $cap && in_array( (string) $listed, $supported, true ) );
+					}
+				}
+				continue;
+			}
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+			$had  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
+			if ( 'add' === $kind ) {
+				$merged = array_merge( array_reverse( $ids ), $had );
+				$more   = ! empty( $list['more'] ) || count( $merged ) > $cap;
+			} else {
+				$merged = array_values( array_unique( array_merge( $ids, $had ) ) );
+				rsort( $merged );
+				$more = count( $merged ) > $cap;
+			}
+			$all[ $type ] = [
+				'ids'  => array_slice( $merged, 0, $cap ),
+				'more' => $more,
+			];
+		}
+
+		$data = maybe_serialize( $all );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Written under the lock, on the fresh read above; the cache is cleared below.
+		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' ) ON DUPLICATE KEY UPDATE option_value = %s", self::RECENT, $data, $data ) );
+		if ( '' !== $queued ) {
+			// Only the part read is taken off: what was appended since stays queued.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Under the lock; the queue is never cached.
+			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = SUBSTRING( option_value, %d ) WHERE option_name = %s", strlen( $queued ) + 1, self::RECENT_QUEUE ) );
+		}
+		self::forget_cached( self::RECENT );
+
+		// Older entries the full list left out are read back in, from WP-Cron.
+		if ( $short && false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
+			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
+		}
+	}
+
+	/**
+	 * Appends changes to the queue row in one statement, which no other
+	 * request's append can interleave with.
+	 *
+	 * @param array<int,array{0:string,1:string,2:int[]}> $ops Changes.
+	 */
+	private static function queue_recent( array $ops ): void {
+		global $wpdb;
+
+		$lines = '';
+		foreach ( $ops as $op ) {
+			$lines .= wp_json_encode( $op ) . "\n";
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- An atomic append; the queue is never cached.
+		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' ) ON DUPLICATE KEY UPDATE option_value = CONCAT( option_value, %s )", self::RECENT_QUEUE, $lines, $lines ) );
+	}
+
+	/**
+	 * Takes the list's lock: inserts its row, or takes over one whose time ran out.
+	 *
+	 * @return int The lock's expiry, its token; 0 when another request holds it.
+	 */
+	private static function lock_recent(): int {
+		global $wpdb;
+
+		$now   = time();
+		$token = $now + self::LOCK_TTL;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- add_option() is an upsert, so it cannot serve as a mutex.
+		if ( 1 === $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", self::RECENT_LOCK, (string) $token ) ) ) {
+			return $token;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Atomic takeover of a lock whose request died.
+		$taken = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND CAST( option_value AS UNSIGNED ) < %d", (string) $token, self::RECENT_LOCK, $now ) );
+		return 1 === $taken ? $token : 0;
+	}
+
+	/**
+	 * Lets go of the list's lock, unless another request took it over since.
+	 *
+	 * @param int $token Token lock_recent() returned.
+	 */
+	private static function unlock_recent( int $token ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Releases only this request's own lock.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::RECENT_LOCK, (string) $token ) );
+	}
+
+	/**
+	 * An option row as the database holds it now, past any cache.
+	 *
+	 * @param string $name Option name.
+	 * @return string The raw value, '' when there is no row.
+	 */
+	private static function read_row( string $name ): string {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A fresh read, after the lock's write, so from the primary.
+		return (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name ) );
+	}
+
+	/**
+	 * Drops an option written directly from every request's cache, the
+	 * persistent object cache included, so the next get_option() reads it.
+	 *
+	 * @param string $name Option name.
+	 */
+	private static function forget_cached( string $name ): void {
+		wp_cache_delete( $name, 'options' );
+		$missing = wp_cache_get( 'notoptions', 'options' );
+		if ( is_array( $missing ) && isset( $missing[ $name ] ) ) {
+			unset( $missing[ $name ] );
+			wp_cache_set( 'notoptions', $missing, 'options' );
 		}
 	}
 

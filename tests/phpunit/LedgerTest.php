@@ -757,10 +757,12 @@ final class LedgerTest extends WP_UnitTestCase {
 		Ledger::backfill();
 		$this->assertTrue( $this->ledger->recent( [ 'page' ] )['more'], 'Precondition: older entries exist than the list holds.' );
 
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+
 		$this->ledger->forget( $this->about, 'three' );
 
-		$this->assertTrue( Ledger::backfilling(), 'The list fell below the cap with older entries left out: it is filled again, from WP-Cron.' );
-		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ) );
+		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The list fell below the cap with older entries left out: it is filled again, from WP-Cron.' );
+		$this->assertFalse( Ledger::backfilling(), 'Quietly: the tab does not say the list is being built for a refill.' );
 		do_action( 'hierarchy_guard_backfill_recent' );
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 		$this->assertSame(
@@ -771,6 +773,70 @@ final class LedgerTest extends WP_UnitTestCase {
 			$this->ledger->recent( [ 'page' ] ),
 			'Every entry fits now, so the list no longer says older ones exist.'
 		);
+	}
+
+	public function test_a_short_list_of_a_type_no_longer_supported_is_not_filled_again(): void {
+		$this->ledger->record( $this->about, 'one' );
+		$one = $this->meta_id( $this->about, 'one' );
+		update_option(
+			Ledger::RECENT,
+			[
+				'retired' => [
+					'ids'  => [ $one ],
+					'more' => true,
+				],
+			],
+			false
+		);
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+
+		$this->ledger->forget( $this->about, 'one' );
+
+		$this->assertSame( [], $this->ledger->recent( [ 'retired' ] )['ids'], 'Precondition: the entry left the list.' );
+		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The backfill reads supported types only, so it is not scheduled for this one.' );
+	}
+
+	public function test_a_write_while_another_request_holds_the_list_s_lock_is_kept_and_does_not_wait(): void {
+		global $wpdb;
+
+		$this->ledger->record( $this->about, 'one' );
+		// Another request holds the lock, for a while yet.
+		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", Ledger::RECENT_LOCK, (string) ( time() + 60 ) ) );
+
+		$start = microtime( true );
+		$this->ledger->record( $this->about, 'two' );
+		$this->assertLessThan( 1.0, microtime( true ) - $start, 'A held lock does not stall the request.' );
+
+		// The other request finishes; the next write takes in what waited.
+		$wpdb->delete( $wpdb->options, [ 'option_name' => Ledger::RECENT_LOCK ] );
+		$this->ledger->record( $this->about, 'three' );
+
+		$this->assertSame( [ $this->meta_id( $this->about, 'three' ), $this->meta_id( $this->about, 'two' ), $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'], 'No write is lost.' );
+		$this->assertNull( $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Ledger::RECENT_LOCK ) ), 'The lock is released.' );
+	}
+
+	public function test_a_lock_left_by_a_request_that_died_is_taken_over(): void {
+		global $wpdb;
+
+		$wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", Ledger::RECENT_LOCK, (string) ( time() - 1 ) ) );
+
+		$this->ledger->record( $this->about, 'one' );
+
+		$this->assertSame( [ $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
+	public function test_the_list_s_writes_take_no_named_database_lock(): void {
+		$queries = [];
+		$spy     = static function ( string $query ) use ( &$queries ): string {
+			$queries[] = $query;
+			return $query;
+		};
+		add_filter( 'query', $spy );
+		$this->ledger->record( $this->about, 'one' );
+		$this->ledger->forget( $this->about, 'one' );
+		remove_filter( 'query', $spy );
+
+		$this->assertSame( [], preg_grep( '/GET_LOCK|RELEASE_LOCK/i', $queries ), 'A named lock can be routed to a replica, and waits.' );
 	}
 
 	public function test_a_write_to_the_newest_list_keeps_what_another_request_wrote_meanwhile(): void {

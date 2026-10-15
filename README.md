@@ -29,7 +29,7 @@ One request moves at most 200 subpages and trashes or restores at most 25 throug
 wp hierarchy-guard process-jobs
 ```
 
-The Redirects tab lists the newest 1,000 records from a list the plugin keeps. Records made before that list existed, or before their post type was supported, are added to it by a WP-Cron event scheduled on activation or the first admin page load after an update; the same event reads older records back in when deletes leave a full list short. Until it has run, the tab says the list is still being built. Without cron, run it with:
+The Redirects tab lists the newest 1,000 records from a list the plugin keeps. Records made before that list existed, or before their post type was supported, are added to it by a WP-Cron event scheduled on activation or the first admin page load after an update; the same event quietly reads older records back in when deletes leave a full list short. Until the list is first built, the tab says it is still being built. Without cron, run it with:
 
 ```bash
 wp cron event run hierarchy_guard_backfill_recent
