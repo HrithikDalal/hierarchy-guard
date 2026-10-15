@@ -59,8 +59,8 @@ final class Plugin {
 		// The newest-records list drops an entry whenever its row goes, however it goes.
 		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
 		// Records made before the list existed reach it once, from WP-Cron.
-		add_action( 'admin_init', [ Ledger::class, 'schedule_backfill' ] );
-		add_action( Ledger::BACKFILL_HOOK, [ Ledger::class, 'backfill' ] );
+		add_action( 'admin_init', [ Ledger::class, 'schedule_rebuild' ] );
+		add_action( Ledger::REBUILD_HOOK, [ Ledger::class, 'rebuild_recent' ] );
 
 		$ledger    = new Ledger();
 		$log       = new Trash\Change_Log();

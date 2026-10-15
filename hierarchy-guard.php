@@ -45,8 +45,8 @@ spl_autoload_register(
 );
 
 register_activation_hook( __FILE__, [ Batch\Processor::class, 'activate' ] );
-register_activation_hook( __FILE__, [ Ledger::class, 'schedule_backfill' ] );
+register_activation_hook( __FILE__, [ Ledger::class, 'schedule_rebuild' ] );
 register_deactivation_hook( __FILE__, [ Batch\Processor::class, 'deactivate' ] );
-register_deactivation_hook( __FILE__, [ Ledger::class, 'unschedule_backfill' ] );
+register_deactivation_hook( __FILE__, [ Ledger::class, 'unschedule_rebuild' ] );
 
 Plugin::instance()->register();

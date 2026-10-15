@@ -26,7 +26,7 @@ final class Ledger {
 	public const ROOT_TARGETS  = 'hierarchy_guard_root_targets';
 	public const RECENT        = 'hierarchy_guard_recent_records';
 	public const RECENT_STATE  = 'hierarchy_guard_recent_state';
-	public const BACKFILL_HOOK = 'hierarchy_guard_backfill_recent';
+	public const REBUILD_HOOK  = 'hierarchy_guard_rebuild_recent';
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
 
@@ -604,7 +604,7 @@ final class Ledger {
 	 * the RECENT option keeps per type as entries are recorded, at most
 	 * Subtree::count_cap() in all. `more` says older entries exist that the
 	 * list no longer holds; when deletes take a full list below the cap,
-	 * the backfill reads the older entries back in and reads `more` afresh.
+	 * the rebuild reads the older entries back in and reads `more` afresh.
 	 * One option read; an entry deleted since may still be named, and a
 	 * reader skips it.
 	 *
@@ -630,29 +630,36 @@ final class Ledger {
 	}
 
 	/**
-	 * Schedules the backfill of the newest-records list, on activation and
-	 * on admin_init, while the list was never built for the types supported
-	 * now: records made before the list existed, or before their type was
-	 * supported, reach it from WP-Cron, never in a web request. Once built,
-	 * this is one read of an autoloaded option.
+	 * Schedules the daily rebuild of the newest-records list, on activation
+	 * and on admin_init while it is missing. Until the list was first built
+	 * for the types supported now, the list reads as being built and the
+	 * rebuild runs on the next cron run. It never runs in a web request, and
+	 * once built a page load only reads autoloaded options here.
 	 */
-	public static function schedule_backfill(): void {
+	public static function schedule_rebuild(): void {
 		if ( self::done_state( Post_Types::supported() ) === get_option( self::RECENT_STATE ) ) {
+			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) ) {
+				wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', self::REBUILD_HOOK );
+			}
 			return;
 		}
-		self::rebuild();
-	}
-
-	/**
-	 * Marks the newest-records list as being built and schedules the backfill once.
-	 */
-	private static function rebuild(): void {
 		if ( 'building' !== get_option( self::RECENT_STATE ) ) {
 			update_option( self::RECENT_STATE, 'building', true );
 		}
-		if ( false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
-			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
+		self::rebuild_soon();
+	}
+
+	/**
+	 * Brings the daily rebuild forward to the next cron run, where it stays
+	 * daily, unless it is due within a minute already.
+	 */
+	private static function rebuild_soon(): void {
+		$next = wp_next_scheduled( self::REBUILD_HOOK );
+		if ( false !== $next && $next <= time() + MINUTE_IN_SECONDS ) {
+			return;
 		}
+		wp_clear_scheduled_hook( self::REBUILD_HOOK );
+		wp_schedule_event( time(), 'daily', self::REBUILD_HOOK );
 	}
 
 	/**
@@ -668,35 +675,38 @@ final class Ledger {
 	}
 
 	/**
-	 * Clears the backfill on deactivation; one not finished is scheduled
-	 * again on the next activation.
+	 * Clears the daily rebuild on deactivation; a first build not finished
+	 * is started again on the next activation.
 	 */
-	public static function unschedule_backfill(): void {
-		wp_clear_scheduled_hook( self::BACKFILL_HOOK );
+	public static function unschedule_rebuild(): void {
+		wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		if ( 'building' === get_option( self::RECENT_STATE ) ) {
 			delete_option( self::RECENT_STATE );
 		}
 	}
 
 	/**
-	 * Whether the newest-records list is still being built.
+	 * Whether the newest-records list is still being built for the first time.
 	 *
 	 * @return bool
 	 */
-	public static function backfilling(): bool {
+	public static function building(): bool {
 		return 'building' === get_option( self::RECENT_STATE );
 	}
 
 	/**
-	 * The backfill, on its WP-Cron event: each supported type's list gets
-	 * the newest Subtree::count_cap() entries of that type, in one query per
-	 * type ordered by meta ID, merged with what the list already holds, so
-	 * running it again changes nothing. Whether older entries exist is read
-	 * afresh. Then it marks itself done for those types; when a query
-	 * fails, the list stays being built and the next admin load schedules
-	 * the backfill again.
+	 * The rebuild, on its daily WP-Cron event: each supported type's list
+	 * is read again from the database, the newest Subtree::count_cap()
+	 * entries in one query per type ordered by meta ID, LIMIT the cap plus
+	 * one, which also tells whether older entries exist. So an entry a lost
+	 * update dropped comes back, and one whose row was deleted without its
+	 * hook goes, within a day; meanwhile a search for a full old URL finds
+	 * any record. Entries recorded while the queries ran are kept. Running
+	 * it again changes nothing. The first build marks the list as built
+	 * for those types; when a query fails, that type's list is left as it
+	 * was and the list is not marked built.
 	 */
-	public static function backfill(): void {
+	public static function rebuild_recent(): void {
 		global $wpdb;
 
 		$cap    = Subtree::count_cap();
@@ -713,22 +723,51 @@ final class Ledger {
 			$found[ $type ] = array_map( 'intval', (array) $ids );
 		}
 
-		// Entries recorded while the queries ran are kept.
-		$all = self::fresh_recent();
-		foreach ( $found as $type => $ids ) {
-			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
-			$ids  = array_values( array_unique( array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
+		$all  = self::fresh_recent();
+		$kept = [];
+		foreach ( $types as $type ) {
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : null;
+			if ( ! isset( $found[ $type ] ) ) {
+				// Its query failed: left as it was.
+				if ( null !== $list ) {
+					$kept[ $type ] = $list;
+				}
+				continue;
+			}
+			$ids = $found[ $type ];
+			// Entries recorded after the query read the newest one, while their rows exist.
+			$top   = [] !== $ids ? max( $ids ) : 0;
+			$newer = self::existing( array_filter( array_map( 'intval', (array) ( $list['ids'] ?? [] ) ), static fn( int $id ): bool => $id > $top ) );
+			$ids   = array_values( array_unique( array_merge( $newer, $ids ) ) );
 			rsort( $ids );
 
-			$all[ $type ] = [
+			$kept[ $type ] = [
 				'ids'  => array_slice( $ids, 0, $cap ),
 				'more' => count( $ids ) > $cap,
 			];
 		}
-		update_option( self::RECENT, $all, false );
+		update_option( self::RECENT, $kept, false );
 		if ( ! $failed ) {
 			update_option( self::RECENT_STATE, self::done_state( $types ), true );
 		}
+	}
+
+	/**
+	 * The meta IDs whose rows exist: one primary-key lookup, none for no IDs.
+	 *
+	 * @param int[] $ids Meta IDs, a few at most.
+	 * @return int[]
+	 */
+	private static function existing( array $ids ): array {
+		global $wpdb;
+
+		$ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
+		if ( [] === $ids ) {
+			return [];
+		}
+		$in = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds only %d, one per ID; primary-key lookups, from WP-Cron only.
+		return array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_id IN ( {$in} )", $ids ) ) );
 	}
 
 	/**
@@ -785,9 +824,9 @@ final class Ledger {
 		if ( $changed ) {
 			update_option( self::RECENT, $all, false );
 		}
-		// Older entries the full list left out are read back in from WP-Cron, quietly: the tab says nothing for it.
-		if ( $short && false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
-			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
+		// Older entries the full list left out are read back in by the next cron run, quietly: the tab says nothing for it.
+		if ( $short ) {
+			self::rebuild_soon();
 		}
 	}
 

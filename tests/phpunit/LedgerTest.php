@@ -30,7 +30,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		delete_option( Ledger::ROOT_TARGETS );
 		delete_option( Ledger::RECENT );
 		delete_option( Ledger::RECENT_STATE );
-		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
 		$this->ledger = new Ledger();
@@ -620,24 +620,25 @@ final class LedgerTest extends WP_UnitTestCase {
 		return (int) add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true );
 	}
 
-	public function test_records_made_before_the_list_reach_it_once_the_backfill_runs(): void {
+	public function test_records_made_before_the_list_reach_it_on_the_first_rebuild(): void {
 		$first  = $this->old_entry( $this->about, 'first' );
 		$second = $this->old_entry( $this->about, 'second' );
 		$this->assertSame( [], $this->ledger->recent( [ 'page' ] )['ids'], 'Precondition: not on the list.' );
 
-		Ledger::schedule_backfill();
-		$this->assertTrue( Ledger::backfilling() );
-		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'It runs from WP-Cron.' );
+		Ledger::schedule_rebuild();
+		$this->assertTrue( Ledger::building(), 'Until the first build, the tab says the list is being built.' );
+		$this->assertLessThanOrEqual( time(), wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The first build runs on the next cron run.' );
+		$this->assertSame( 'daily', wp_get_schedule( Ledger::REBUILD_HOOK ), 'Then once a day.' );
 
-		$this->assertSame( 'hierarchy_guard_backfill_recent', Ledger::BACKFILL_HOOK );
-		do_action( 'hierarchy_guard_backfill_recent' );
+		$this->assertSame( 'hierarchy_guard_rebuild_recent', Ledger::REBUILD_HOOK );
+		do_action( 'hierarchy_guard_rebuild_recent' );
 
 		$this->assertSame( [ $second, $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
-		$this->assertFalse( Ledger::backfilling() );
+		$this->assertFalse( Ledger::building() );
 		$this->assertSame( 'done:page', get_option( Ledger::RECENT_STATE ), 'Done, for the types it covered.' );
 	}
 
-	public function test_the_backfill_is_idempotent_keeps_what_was_recorded_meanwhile_and_stops_at_the_cap(): void {
+	public function test_the_rebuild_is_idempotent_keeps_what_was_recorded_and_stops_at_the_cap(): void {
 		$old = [];
 		foreach ( [ 'a', 'b', 'c' ] as $path ) {
 			$old[] = $this->old_entry( $this->about, $path );
@@ -645,9 +646,9 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->record( $this->about, 'meanwhile' );
 		$meanwhile = $this->meta_id( $this->about, 'meanwhile' );
 
-		Ledger::backfill();
+		Ledger::rebuild_recent();
 		$once = get_option( Ledger::RECENT );
-		Ledger::backfill();
+		Ledger::rebuild_recent();
 
 		$this->assertSame( $once, get_option( Ledger::RECENT ), 'Running it again changes nothing.' );
 		$this->assertSame( [ $meanwhile, $old[2], $old[1], $old[0] ], $this->ledger->recent( [ 'page' ] )['ids'] );
@@ -655,7 +656,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		delete_option( Ledger::RECENT );
 		$cap = static fn(): int => 2;
 		add_filter( 'hierarchy_guard_count_cap', $cap );
-		Ledger::backfill();
+		Ledger::rebuild_recent();
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 		$this->assertSame(
 			[
@@ -670,14 +671,20 @@ final class LedgerTest extends WP_UnitTestCase {
 	public function test_once_built_a_normal_load_runs_nothing(): void {
 		global $wp_filter;
 
-		Ledger::schedule_backfill();
-		Ledger::backfill();
-		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+		Ledger::schedule_rebuild();
+		Ledger::rebuild_recent();
+		$next = wp_next_scheduled( Ledger::REBUILD_HOOK );
 
 		$queries = get_num_queries();
-		Ledger::schedule_backfill();
-		$this->assertSame( $queries, get_num_queries(), 'One read of an autoloaded option.' );
-		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'Nothing is scheduled again.' );
+		Ledger::schedule_rebuild();
+		$this->assertSame( $queries, get_num_queries(), 'Reads of autoloaded options only.' );
+		$this->assertSame( $next, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The daily run is left where it is.' );
+
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+		Ledger::schedule_rebuild();
+		$this->assertSame( 'daily', wp_get_schedule( Ledger::REBUILD_HOOK ), 'A missing daily run is scheduled again.' );
+		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'A day ahead: the list is built.' );
+		$this->assertFalse( Ledger::building() );
 
 		// At any priority.
 		$hooked = static function ( string $hook, string $method ) use ( $wp_filter ): bool {
@@ -690,36 +697,37 @@ final class LedgerTest extends WP_UnitTestCase {
 			}
 			return false;
 		};
-		$this->assertTrue( $hooked( 'admin_init', 'schedule_backfill' ) );
-		$this->assertTrue( $hooked( Ledger::BACKFILL_HOOK, 'backfill' ) );
+		$this->assertTrue( $hooked( 'admin_init', 'schedule_rebuild' ) );
+		$this->assertTrue( $hooked( Ledger::REBUILD_HOOK, 'rebuild_recent' ) );
 		foreach ( [ 'init', 'wp', 'template_redirect', 'admin_init' ] as $hook ) {
-			$this->assertFalse( $hooked( $hook, 'backfill' ), "The backfill never runs on $hook." );
+			$this->assertFalse( $hooked( $hook, 'rebuild_recent' ), "The rebuild never runs on $hook." );
 		}
 	}
 
-	public function test_a_backfill_whose_query_fails_is_not_done_and_runs_again(): void {
+	public function test_a_first_build_whose_query_fails_is_not_done_and_runs_again(): void {
 		global $wpdb;
 
 		$first = $this->old_entry( $this->about, 'first' );
-		Ledger::schedule_backfill();
+		Ledger::schedule_rebuild();
 		$break  = static fn( string $query ): string => str_contains( $query, 'ORDER BY pm.meta_id DESC LIMIT' ) ? 'SELECT nope FROM nowhere' : $query;
 		add_filter( 'query', $break );
 		$errors = $wpdb->suppress_errors( true );
-		do_action( 'hierarchy_guard_backfill_recent' );
+		do_action( 'hierarchy_guard_rebuild_recent' );
 		$wpdb->suppress_errors( $errors );
 		remove_filter( 'query', $break );
 
-		$this->assertTrue( Ledger::backfilling(), 'A failed query does not mark the list built.' );
-		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
-		Ledger::schedule_backfill();
-		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The next admin load schedules it again.' );
+		$this->assertTrue( Ledger::building(), 'A failed query does not mark the list built.' );
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+		wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', Ledger::REBUILD_HOOK );
+		Ledger::schedule_rebuild();
+		$this->assertLessThanOrEqual( time() + MINUTE_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The next admin load has it run again soon.' );
 
-		do_action( 'hierarchy_guard_backfill_recent' );
-		$this->assertFalse( Ledger::backfilling() );
+		do_action( 'hierarchy_guard_rebuild_recent' );
+		$this->assertFalse( Ledger::building() );
 		$this->assertSame( [ $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
 	}
 
-	public function test_a_type_supported_after_the_backfill_ran_is_backfilled_then(): void {
+	public function test_a_type_supported_after_the_first_build_is_built_then(): void {
 		$doc   = self::factory()->post->create(
 			[
 				'post_type' => 'hg_docs',
@@ -730,19 +738,19 @@ final class LedgerTest extends WP_UnitTestCase {
 		$only  = static fn(): array => [ 'page' ];
 		add_filter( 'hierarchy_guard_post_types', $only );
 		Post_Types::reset();
-		Ledger::schedule_backfill();
-		do_action( 'hierarchy_guard_backfill_recent' );
-		$this->assertFalse( Ledger::backfilling() );
+		Ledger::schedule_rebuild();
+		do_action( 'hierarchy_guard_rebuild_recent' );
+		$this->assertFalse( Ledger::building() );
 		$this->assertSame( [], $this->ledger->recent( [ 'hg_docs' ] )['ids'], 'Precondition: the type was not supported then.' );
 
 		remove_filter( 'hierarchy_guard_post_types', $only );
 		$both = static fn(): array => [ 'page', 'hg_docs' ];
 		add_filter( 'hierarchy_guard_post_types', $both );
 		Post_Types::reset();
-		Ledger::schedule_backfill();
+		Ledger::schedule_rebuild();
 
-		$this->assertTrue( Ledger::backfilling(), 'The list is built again for the type now supported.' );
-		do_action( 'hierarchy_guard_backfill_recent' );
+		$this->assertTrue( Ledger::building(), 'The list is built again for the type now supported.' );
+		do_action( 'hierarchy_guard_rebuild_recent' );
 		remove_filter( 'hierarchy_guard_post_types', $both );
 		Post_Types::reset();
 		$this->assertSame( [ $entry ], $this->ledger->recent( [ 'hg_docs' ] )['ids'] );
@@ -754,16 +762,18 @@ final class LedgerTest extends WP_UnitTestCase {
 		foreach ( [ 'one', 'two', 'three' ] as $path ) {
 			$this->ledger->record( $this->about, $path );
 		}
-		Ledger::backfill();
+		Ledger::rebuild_recent();
 		$this->assertTrue( $this->ledger->recent( [ 'page' ] )['more'], 'Precondition: older entries exist than the list holds.' );
 
-		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+		wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', Ledger::REBUILD_HOOK );
 
 		$this->ledger->forget( $this->about, 'three' );
 
-		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The list fell below the cap with older entries left out: it is filled again, from WP-Cron.' );
-		$this->assertFalse( Ledger::backfilling(), 'Quietly: the tab does not say the list is being built for a refill.' );
-		do_action( 'hierarchy_guard_backfill_recent' );
+		$this->assertLessThanOrEqual( time() + MINUTE_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The list fell below the cap with older entries left out: the rebuild runs soon.' );
+		$this->assertSame( 'daily', wp_get_schedule( Ledger::REBUILD_HOOK ), 'And stays daily.' );
+		$this->assertFalse( Ledger::building(), 'Quietly: the tab does not say the list is being built for a refill.' );
+		do_action( 'hierarchy_guard_rebuild_recent' );
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 		$this->assertSame(
 			[
@@ -788,12 +798,52 @@ final class LedgerTest extends WP_UnitTestCase {
 			],
 			false
 		);
-		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+		wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', Ledger::REBUILD_HOOK );
 
 		$this->ledger->forget( $this->about, 'one' );
 
 		$this->assertSame( [], $this->ledger->recent( [ 'retired' ] )['ids'], 'Precondition: the entry left the list.' );
-		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'The backfill reads supported types only, so it is not scheduled for this one.' );
+		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The rebuild reads supported types only, so it is not brought forward for this one.' );
+	}
+
+	public function test_the_daily_rebuild_restores_an_entry_a_lost_update_dropped(): void {
+		$this->ledger->record( $this->about, 'one' );
+		$this->ledger->record( $this->about, 'two' );
+		Ledger::schedule_rebuild();
+		Ledger::rebuild_recent();
+		$one = $this->meta_id( $this->about, 'one' );
+		// Two writes at the same moment: one of them is lost.
+		update_option(
+			Ledger::RECENT,
+			[
+				'page' => [
+					'ids'  => [ $one ],
+					'more' => false,
+				],
+			],
+			false
+		);
+
+		do_action( 'hierarchy_guard_rebuild_recent' );
+
+		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $one ], $this->ledger->recent( [ 'page' ] )['ids'] );
+		$this->assertFalse( Ledger::building(), 'A daily rebuild is quiet.' );
+	}
+
+	public function test_the_daily_rebuild_drops_an_entry_whose_row_is_gone(): void {
+		global $wpdb;
+
+		$this->ledger->record( $this->about, 'one' );
+		$this->ledger->record( $this->about, 'two' );
+		$two = $this->meta_id( $this->about, 'two' );
+		// Deleted without its hook, as a direct query does.
+		$wpdb->delete( $wpdb->postmeta, [ 'meta_id' => $two ] );
+		$this->assertContains( $two, $this->ledger->recent( [ 'page' ] )['ids'], 'Precondition: still listed.' );
+
+		do_action( 'hierarchy_guard_rebuild_recent' );
+
+		$this->assertSame( [ $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
 	}
 
 	public function test_a_write_to_the_newest_list_keeps_what_another_request_wrote_meanwhile(): void {
@@ -850,12 +900,12 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( [ $this->meta_id( $this->about, 'four' ), $three ], $this->ledger->recent( [ 'page' ] )['ids'], 'Newest first before the cap is applied, so the oldest goes.' );
 	}
 
-	public function test_deactivation_clears_an_unfinished_backfill(): void {
-		Ledger::schedule_backfill();
+	public function test_deactivation_clears_the_rebuild_and_an_unfinished_first_build(): void {
+		Ledger::schedule_rebuild();
 
-		Ledger::unschedule_backfill();
+		Ledger::unschedule_rebuild();
 
-		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ) );
+		$this->assertFalse( wp_next_scheduled( Ledger::REBUILD_HOOK ) );
 		$this->assertFalse( get_option( Ledger::RECENT_STATE ), 'The next activation schedules it again.' );
 	}
 

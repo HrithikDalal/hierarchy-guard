@@ -226,7 +226,7 @@ final class Settings_Page {
 		$table = new Redirects_Table( $this->records );
 		$table->prepare_items();
 
-		if ( Ledger::backfilling() ) {
+		if ( Ledger::building() ) {
 			$building = __( 'The list of recorded redirects is still being built.', 'hierarchy-guard' );
 			$older    = __( 'Older redirects appear here once it’s done.', 'hierarchy-guard' );
 			$this->inline_notice( esc_html( $building . ' ' . $older ), 'info' );
