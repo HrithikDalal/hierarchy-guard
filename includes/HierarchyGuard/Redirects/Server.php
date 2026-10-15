@@ -151,12 +151,13 @@ final class Server {
 		}
 
 		// Never redirect to the URL being requested; that would loop. Compare the
-		// raw request path: on PATH_INFO permalinks $wp->request omits index.php
-		// while the target keeps it. The query string is carried over, so it is
-		// left out of the comparison. A URL target on another host never loops.
-		$requested = untrailingslashit( (string) wp_parse_url( $this->request_uri(), PHP_URL_PATH ) );
-		$here      = null !== $post || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
-		if ( $here && untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === $requested ) {
+		// raw request path, decoded and normalized as a request is read (/café/
+		// and /caf%C3%A9/ are one path): on PATH_INFO permalinks $wp->request
+		// omits index.php while the target keeps it. The query string is carried
+		// over, so it is left out of the comparison. A URL target on another
+		// host never loops.
+		$here = null !== $post || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		if ( $here && self::same_path( $url, $this->request_uri() ) ) {
 			return null;
 		}
 
@@ -167,9 +168,23 @@ final class Server {
 	}
 
 	/**
+	 * Whether two URLs on this site name the same path as the server reads a
+	 * request: decoded and normalized, so `/café/`, `/caf%C3%A9/` and
+	 * `/caf%c3%a9` are one path. The query and any #fragment are left out.
+	 *
+	 * @param string $url   A URL or a request URI.
+	 * @param string $other Another.
+	 * @return bool
+	 */
+	public static function same_path( string $url, string $other ): bool {
+		return Paths::normalize( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === Paths::normalize( (string) wp_parse_url( $other, PHP_URL_PATH ) );
+	}
+
+	/**
 	 * A URL target as it is sent: through esc_url_raw(), and only while it
-	 * is http(s), typed so: esc_url_raw() would read `example.org/x` as
-	 * http://example.org/x.
+	 * is http(s), typed so (esc_url_raw() would read `example.org/x` as
+	 * http://example.org/x), and names a host, as Ledger::clean_target()
+	 * requires.
 	 *
 	 * @param string $url URL.
 	 * @return string The URL, or '' when it is not http(s).
@@ -179,7 +194,7 @@ final class Server {
 			return '';
 		}
 		$url = esc_url_raw( $url, [ 'http', 'https' ] );
-		return in_array( strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ? $url : '';
+		return in_array( strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) && '' !== (string) wp_parse_url( $url, PHP_URL_HOST ) ? $url : '';
 	}
 
 	/**

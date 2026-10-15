@@ -604,6 +604,32 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( 'https://other.example.org/old-about/', $this->server->target_for_current_request()['url'], 'The same path on another host does not.' );
 	}
 
+	public function test_a_url_target_at_the_requested_path_in_another_script_is_not_sent(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'café' );
+		foreach ( [ home_url( '/café/' ), home_url( '/caf%C3%A9/' ), home_url( '/caf%c3%a9' ) ] as $url ) {
+			$ledger->set_target( 'page', 'caf%c3%a9', $this->about, $url, 0 );
+			foreach ( [ '/caf%C3%A9/', '/caf%c3%a9/' ] as $request ) {
+				$this->go_to( $request );
+				$this->assertNull( $this->server->target_for_current_request(), $url . ' from ' . $request . ' would loop.' );
+			}
+		}
+	}
+
+	public function test_a_url_target_filtered_to_a_url_with_no_host_is_never_sent(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 0 );
+		$this->go_to( '/old-about/' );
+
+		foreach ( [ 'http:example.org', 'https:///x', 'http:/path' ] as $url ) {
+			$to = static fn(): string => $url;
+			add_filter( 'hierarchy_guard_redirect_url', $to );
+			$this->assertNull( $this->server->target_for_current_request(), $url . ' has no host.' );
+			remove_filter( 'hierarchy_guard_redirect_url', $to );
+		}
+	}
+
 	public function test_a_live_page_at_the_old_url_wins_over_a_url_target(): void {
 		$ledger = new Ledger();
 		$ledger->record( $this->about, 'news' );
