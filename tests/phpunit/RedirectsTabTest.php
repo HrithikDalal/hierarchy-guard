@@ -474,7 +474,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( '<code>/café/équipe/</code>', $html );
 		$this->assertStringNotContainsString( '/other/', $html );
-		$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong>' . esc_html( home_url( '/café/équipe/' ) ) . '</strong></span>', $html );
+		$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong><span dir="ltr">' . esc_html( home_url( '/café/équipe/' ) ) . '</span></strong></span>', $html, 'A URL searched reads left to right in a right-to-left admin too.' );
 	}
 
 	public function test_a_page_past_the_last_one_shows_the_last_one_with_its_rows(): void {

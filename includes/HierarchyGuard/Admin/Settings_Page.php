@@ -197,7 +197,7 @@ final class Settings_Page {
 		} else {
 			echo '<h1 class="wp-heading-inline">' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1> ';
 			/* translators: %s: the search text. */
-			printf( '<span class="subtitle">%s</span>', sprintf( esc_html__( 'Search results for: %s', 'hierarchy-guard' ), '<strong>' . esc_html( $search ) . '</strong>' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Both parts are escaped.
+			printf( '<span class="subtitle">%s</span>', sprintf( esc_html__( 'Search results for: %s', 'hierarchy-guard' ), '<strong><span dir="ltr">' . esc_html( $search ) . '</span></strong>' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Both parts are escaped.
 		}
 		$this->render_tabs( $tab );
 		// Core moves notices to just after this, below the tabs.
