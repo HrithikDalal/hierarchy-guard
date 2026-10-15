@@ -37,8 +37,11 @@ final class AssetsTest extends WP_UnitTestCase {
 		}
 		rmdir( $this->dir . '/build' );
 		rmdir( $this->dir );
-		wp_dequeue_script( 'hierarchy-guard-list-table' );
-		wp_deregister_script( 'hierarchy-guard-list-table' );
+		foreach ( [ 'list-table', 'redirects' ] as $bundle ) {
+			wp_dequeue_script( 'hierarchy-guard-' . $bundle );
+			wp_deregister_script( 'hierarchy-guard-' . $bundle );
+		}
+		unset( $_GET['tab'] );
 		wp_dequeue_style( 'wp-components' );
 		set_current_screen( 'front' );
 		parent::tear_down();
@@ -130,5 +133,21 @@ final class AssetsTest extends WP_UnitTestCase {
 		}
 
 		$this->assertTrue( $found );
+	}
+
+	public function test_the_redirects_tab_gets_the_bundle_that_asks_before_a_delete(): void {
+		$this->build( 'redirects', [ 'wp-dom-ready' ] );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ), 'Not on the Settings tab.' );
+
+		$_GET['tab'] = 'redirects';
+		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ) );
+
+		wp_dequeue_script( 'hierarchy-guard-redirects' );
+		$assets->enqueue_admin( 'options-general.php' );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ), 'Not on another settings page.' );
 	}
 }

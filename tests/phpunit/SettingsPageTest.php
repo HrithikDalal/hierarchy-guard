@@ -10,8 +10,10 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\Settings_Page;
+use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Providers;
+use HierarchyGuard\Redirects\Records;
 use HierarchyGuard\Settings;
 use WP_UnitTestCase;
 
@@ -30,7 +32,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 		Post_Types::reset();
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
-		$this->page = new Settings_Page( new Providers() );
+		$this->page = new Settings_Page( new Providers(), new Records( new Ledger() ) );
 	}
 
 	public function tear_down(): void {

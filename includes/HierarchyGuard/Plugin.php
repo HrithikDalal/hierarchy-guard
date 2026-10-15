@@ -68,7 +68,7 @@ final class Plugin {
 		( new Change_Listener( $ledger, $log ) )->register();
 		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
 		add_action( 'init', [ Settings::class, 'register_option' ] );
-		( new Admin\Settings_Page( $providers ) )->register();
+		( new Admin\Settings_Page( $providers, new Redirects\Records( $ledger ) ) )->register();
 		( new Trash\Markers() )->register();
 
 		$queue      = new Batch\Queue();

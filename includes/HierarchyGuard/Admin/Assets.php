@@ -102,11 +102,16 @@ final class Assets {
 	}
 
 	/**
-	 * The classic-editor script where the block editor is off.
+	 * The classic-editor script where the block editor is off, and the
+	 * Redirects tab's script, which asks before a Delete.
 	 *
 	 * @param mixed $hook_suffix Admin page.
 	 */
 	public function enqueue_admin( $hook_suffix ): void {
+		if ( 'settings_page_' . Settings_Page::SLUG === $hook_suffix && 'redirects' === Settings_Page::current_tab() ) {
+			$this->enqueue( 'redirects' );
+			return;
+		}
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
