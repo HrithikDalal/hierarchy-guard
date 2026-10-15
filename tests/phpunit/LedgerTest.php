@@ -702,4 +702,24 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ) );
 		$this->assertFalse( get_option( Ledger::RECENT_STATE ), 'The next activation schedules it again.' );
 	}
+
+	public function test_an_entry_recorded_and_deleted_in_the_same_batch_never_reaches_the_newest_list(): void {
+		$kept = null;
+		Ledger::deferred(
+			function () use ( &$kept ): void {
+				$this->ledger->record( $this->about, 'kept' );
+				$this->ledger->record( $this->about, 'forgotten' );
+				$this->ledger->record( $this->about, 'pruned' );
+				$kept = $this->meta_id( $this->about, 'kept' );
+
+				$this->ledger->forget( $this->about, 'forgotten' );
+				global $wpdb;
+				$wpdb->update( $wpdb->posts, [ 'post_name' => 'pruned' ], [ 'ID' => $this->about ] );
+				clean_post_cache( $this->about );
+				$this->ledger->prune( $this->about );
+			}
+		);
+
+		$this->assertSame( [ $kept ], $this->ledger->recent( [ 'page' ] )['ids'], 'Only the entry that still exists is listed.' );
+	}
 }

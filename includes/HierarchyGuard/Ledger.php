@@ -714,7 +714,16 @@ final class Ledger {
 			return;
 		}
 		$gone = array_flip( array_map( 'intval', (array) $meta_ids ) );
-		$all  = get_option( self::RECENT, [] );
+
+		// Entries recorded inside deferred() wait in memory: a row deleted in the same batch never reaches the list.
+		foreach ( self::$recent_pending as $type => $ids ) {
+			self::$recent_pending[ $type ] = array_values( array_filter( $ids, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
+			if ( [] === self::$recent_pending[ $type ] ) {
+				unset( self::$recent_pending[ $type ] );
+			}
+		}
+
+		$all = get_option( self::RECENT, [] );
 		if ( ! is_array( $all ) ) {
 			return;
 		}
