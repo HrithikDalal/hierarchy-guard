@@ -33,6 +33,7 @@ final class ServerTest extends WP_UnitTestCase {
 	public function set_up(): void {
 		parent::set_up();
 		delete_option( Ledger::ROOT_OPTION );
+		delete_option( Ledger::ROOT_TARGETS );
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
@@ -499,5 +500,110 @@ final class ServerTest extends WP_UnitTestCase {
 
 		$this->assertSame( get_permalink( $this->team ), $target['url'] );
 		$this->assertSame( 302, $target['status'], 'Browsers must not keep it: a restore moves team back.' );
+	}
+
+	public function test_a_url_target_is_sent_for_its_exact_old_url_only(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->company, 'old/sub' );
+		$ledger->record( $this->about, 'old/sub/about' );
+		$ledger->set_target( 'page', 'old/sub/about', $this->about, 'https://jobs.example.org/about/', 0 );
+
+		$this->go_to( '/old/sub/about/?ref=mail' );
+		$this->assertTrue( is_404() );
+		$this->assertSame(
+			[
+				'url'    => 'https://jobs.example.org/about/?ref=mail',
+				'status' => 301,
+			],
+			$this->server->target_for_current_request(),
+			'Another host, through wp_redirect(): wp_validate_redirect() would refuse it.'
+		);
+
+		$this->go_to( '/old/sub/about/feed/' );
+		$this->assertTrue( is_404() );
+		$this->assertSame( 'https://jobs.example.org/about/', $this->server->target_for_current_request()['url'], 'Suffixes are re-applied to pages only.' );
+
+		$this->go_to( '/old/sub/about/team/' );
+		$this->assertSame( get_permalink( $this->team ), $this->server->target_for_current_request()['url'], 'A longer path goes past the URL target to the shorter prefix.' );
+	}
+
+	public function test_a_chosen_code_is_sent_as_chosen(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, '', 302 );
+
+		$this->go_to( '/old-about/team/' );
+		$this->assertSame(
+			[
+				'url'    => get_permalink( $this->team ),
+				'status' => 302,
+			],
+			$this->server->target_for_current_request()
+		);
+
+		$ledger->set_target( 'page', 'old-about', $this->about, '', 301 );
+		$this->go_to( '/old-about/team/' );
+		$this->assertSame( 301, $this->server->target_for_current_request()['status'] );
+	}
+
+	public function test_a_url_target_that_is_not_http_is_never_sent(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 0 );
+		$this->go_to( '/old-about/' );
+
+		$scheme = static fn(): string => 'javascript:alert(1)';
+		add_filter( 'hierarchy_guard_redirect_url', $scheme );
+		$this->assertNull( $this->server->target_for_current_request() );
+		remove_filter( 'hierarchy_guard_redirect_url', $scheme );
+
+		$passed = null;
+		$spy    = static function ( int $status, $target ) use ( &$passed ): int {
+			$passed = $target;
+			return $status;
+		};
+		add_filter( 'hierarchy_guard_redirect_status', $spy, 10, 2 );
+		$this->assertSame( 'https://example.org/', $this->server->target_for_current_request()['url'] );
+		remove_filter( 'hierarchy_guard_redirect_status', $spy );
+		$this->assertNull( $passed, 'The filters get no post for a URL target.' );
+	}
+
+	public function test_a_url_target_on_this_site_at_the_requested_path_is_not_sent(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, home_url( '/old-about/' ), 0 );
+		$this->go_to( '/old-about/' );
+
+		$this->assertNull( $this->server->target_for_current_request(), 'That would loop.' );
+
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://other.example.org/old-about/', 0 );
+		$this->assertSame( 'https://other.example.org/old-about/', $this->server->target_for_current_request()['url'], 'The same path on another host does not.' );
+	}
+
+	public function test_a_live_page_at_the_old_url_wins_over_a_url_target(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'news' );
+		$ledger->set_target( 'page', 'news', $this->about, 'https://example.org/', 302 );
+		self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'news',
+			]
+		);
+
+		$this->go_to( '/news/' );
+		$this->assertFalse( is_404() );
+		$this->assertNull( $this->server->target_for_current_request() );
+	}
+
+	public function test_the_query_string_goes_before_a_url_target_s_fragment(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/landing/#section', 0 );
+		$this->go_to( '/old-about/?utm_source=news' );
+		$this->assertSame( 'https://example.org/landing/?utm_source=news#section', $this->server->target_for_current_request()['url'] );
+
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/landing/?ref=hg#section', 0 );
+		$this->assertSame( 'https://example.org/landing/?ref=hg&utm_source=news#section', $this->server->target_for_current_request()['url'] );
 	}
 }

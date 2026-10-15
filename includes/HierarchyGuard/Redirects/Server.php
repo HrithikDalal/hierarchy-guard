@@ -61,7 +61,7 @@ final class Server {
 			return;
 		}
 
-		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- URL passed through wp_validate_redirect() in target_for_current_request().
+		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- A page target passed wp_validate_redirect() in target_for_current_request(); a URL target, which only an administrator can set, passed esc_url_raw() as http(s).
 		if ( wp_redirect( $target['url'], $target['status'], 'Hierarchy Guard' ) ) {
 			exit;
 		}
@@ -99,8 +99,9 @@ final class Server {
 
 		$target    = null;
 		$temporary = false;
+		$code      = 0;
 		foreach ( self::candidates( $request['path'] ) as [ $post_type, $path ] ) {
-			$target = $this->resolver->resolve( $post_type, $path, $temporary );
+			$target = $this->resolver->resolve( $post_type, $path, $temporary, $code );
 			if ( null !== $target ) {
 				break;
 			}
@@ -109,34 +110,42 @@ final class Server {
 			return null;
 		}
 
-		$url = get_permalink( $target );
-		if ( ! is_string( $url ) || '' === $url ) {
-			return null;
+		// A URL target is sent as it was set: the suffixes are re-applied to a page only.
+		$post = $target instanceof WP_Post ? $target : null;
+		if ( null !== $post ) {
+			$url = get_permalink( $post );
+			if ( ! is_string( $url ) || '' === $url ) {
+				return null;
+			}
+			$url = $this->reapply_suffixes( $url, $post, $request );
+		} else {
+			$url = (string) $target;
 		}
-		$url = $this->reapply_suffixes( $url, $target, $request );
 		$url = $this->append_query_string( $url );
 
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
 		 *
-		 * @param int     $status Status code: 301, or 302 while a restore from the trash could still undo the move the redirect follows.
-		 * @param WP_Post $target The post being redirected to.
-		 * @param string  $path   The requested path, normalized, suffixes removed.
+		 * @param int          $status Status code: the 301 or 302 chosen on the Redirects tab, or else 301, or 302 while a restore from the trash could still undo the move the redirect follows.
+		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
+		 * @param string       $path   The requested path, normalized, suffixes removed.
 		 */
-		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', $temporary ? 302 : 301, $target, $request['path'] );
+		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', $code > 0 ? $code : ( $temporary ? 302 : 301 ), $post, $request['path'] );
 		if ( ! in_array( $status, [ 301, 302, 307, 308 ], true ) ) {
 			$status = 301;
 		}
 
 		/**
-		 * Filters the URL a hierarchy redirect sends visitors to.
+		 * Filters the URL a hierarchy redirect sends visitors to. A page
+		 * target's URL still passes wp_validate_redirect(); a URL target's is
+		 * sent only while it is http(s).
 		 *
-		 * @param string  $url    Target URL, with the request's query string appended.
-		 * @param WP_Post $target The post being redirected to.
-		 * @param string  $path   The requested path, normalized, suffixes removed.
+		 * @param string       $url    Target URL, with the request's query string appended.
+		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
+		 * @param string       $path   The requested path, normalized, suffixes removed.
 		 */
-		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $target, $request['path'] );
-		$url = wp_validate_redirect( $url, '' );
+		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $post, $request['path'] );
+		$url = null !== $post ? wp_validate_redirect( $url, '' ) : self::external( $url );
 		if ( '' === $url ) {
 			return null;
 		}
@@ -144,9 +153,10 @@ final class Server {
 		// Never redirect to the URL being requested; that would loop. Compare the
 		// raw request path: on PATH_INFO permalinks $wp->request omits index.php
 		// while the target keeps it. The query string is carried over, so it is
-		// left out of the comparison.
+		// left out of the comparison. A URL target on another host never loops.
 		$requested = untrailingslashit( (string) wp_parse_url( $this->request_uri(), PHP_URL_PATH ) );
-		if ( untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === $requested ) {
+		$here      = null !== $post || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		if ( $here && untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === $requested ) {
 			return null;
 		}
 
@@ -154,6 +164,17 @@ final class Server {
 			'url'    => $url,
 			'status' => $status,
 		];
+	}
+
+	/**
+	 * A URL target as it is sent: through esc_url_raw(), and only while it is http(s).
+	 *
+	 * @param string $url URL.
+	 * @return string The URL, or '' when it is not http(s).
+	 */
+	private static function external( string $url ): string {
+		$url = esc_url_raw( $url, [ 'http', 'https' ] );
+		return in_array( strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ? $url : '';
 	}
 
 	/**
@@ -322,9 +343,10 @@ final class Server {
 	}
 
 	/**
-	 * Carries the current request's query string over to the target URL. The
-	 * query is read from the request URI, as redirect_canonical() does, because
-	 * some servers rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
+	 * Carries the current request's query string over to the target URL,
+	 * before any #fragment a URL target has. The query is read from the
+	 * request URI, as redirect_canonical() does, because some servers
+	 * rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
 	 *
 	 * @param string $url Target URL.
 	 * @return string
@@ -334,7 +356,10 @@ final class Server {
 		if ( '' === $query ) {
 			return $url;
 		}
-		return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . $query;
+		// A URL target may carry a #fragment: the query goes before it, or the browser never sends it.
+		$parts    = explode( '#', $url, 2 );
+		$parts[0] = $parts[0] . ( str_contains( $parts[0], '?' ) ? '&' : '?' ) . $query;
+		return implode( '#', $parts );
 	}
 
 	/**
