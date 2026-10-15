@@ -876,7 +876,7 @@ final class Ledger {
 				$first[] = [ (string) $op[0], (string) $op[1], array_map( 'intval', (array) $op[2] ) ];
 			}
 		}
-		$ops = array_merge( $first, $ops );
+		$ops = array_merge( self::still_there( $first ), $ops );
 		$all = maybe_unserialize( self::read_row( self::RECENT ) );
 		$all = is_array( $all ) ? $all : [];
 
@@ -919,6 +919,11 @@ final class Ledger {
 			// Only the part read is taken off: what was appended since stays queued.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Under the lock; the queue is never cached.
 			$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = SUBSTRING( option_value, %d ) WHERE option_name = %s", strlen( $queued ) + 1, self::RECENT_QUEUE ) );
+			// The row goes once it is empty. An append is one statement that the row
+			// lock orders with this one: before, the row isn't empty and stays; after,
+			// the append inserts it again. Nothing is lost.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Under the lock; the queue is never cached.
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = ''", self::RECENT_QUEUE ) );
 		}
 		self::forget_cached( self::RECENT );
 
@@ -926,6 +931,38 @@ final class Ledger {
 		if ( $short && false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
 			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
 		}
+	}
+
+	/**
+	 * Queued changes without the IDs whose rows were deleted while they
+	 * waited: a delete then found nothing on the list to take off. One
+	 * primary-key lookup, bounded by the queue's size.
+	 *
+	 * @param array<int,array{0:string,1:string,2:int[]}> $ops Queued changes.
+	 * @return array<int,array{0:string,1:string,2:int[]}>
+	 */
+	private static function still_there( array $ops ): array {
+		global $wpdb;
+
+		$ids = [];
+		foreach ( $ops as [ $kind, , $list ] ) {
+			if ( 'drop' !== $kind ) {
+				$ids = array_merge( $ids, $list );
+			}
+		}
+		$ids = array_values( array_unique( array_filter( $ids, static fn( int $id ): bool => $id > 0 ) ) );
+		if ( [] === $ids ) {
+			return $ops;
+		}
+		$in = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds only %d, one per queued meta ID; primary-key lookups, under the lock.
+		$there = array_flip( array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_id IN ( {$in} )", $ids ) ) ) );
+		foreach ( $ops as $i => [ $kind, $type, $list ] ) {
+			if ( 'drop' !== $kind ) {
+				$ops[ $i ] = [ $kind, $type, array_values( array_filter( $list, static fn( int $id ): bool => isset( $there[ $id ] ) ) ) ];
+			}
+		}
+		return $ops;
 	}
 
 	/**
