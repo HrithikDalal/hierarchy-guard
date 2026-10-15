@@ -210,8 +210,10 @@ final class Records {
 	 *   the URLs under it, so it is active when its record is the one the
 	 *   rules use there.
 	 *
-	 * Under plain permalinks the model does not run. One served() call per
-	 * post type, for these rows only.
+	 * A row whose own holder is in the Trash is unpublished whatever else
+	 * answers its old URL: its own page is why it is not served. Under plain
+	 * permalinks the model does not run, but what the server can't send
+	 * still says so. One served() call per post type, for these rows only.
 	 *
 	 * @param array<int,array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}> $rows Rows, one page at most.
 	 * @return array<string,string> One of the STATUS_ constants by row ID.
@@ -243,13 +245,18 @@ final class Records {
 			$answer = $served[ $type ][ $path ] ?? 0;
 			$first  = $used[ $type ][ $path ] ?? null;
 			$own    = null !== $first && $first[0] === $path && $first[1] === $row['holder'];
-			if ( ! $pretty ) {
-				$status = $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ? self::STATUS_UNPUBLISHED : self::STATUS_OFF;
+			$cannot = self::too_deep( $type, $path ) || self::loops( $type, $path, $url );
+			$hidden = $holder instanceof WP_Post && ! self::reachable( $holder, $url );
+			if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
+				// Its own page is why it is not served, whatever else answers its old URL.
+				$status = self::STATUS_UNPUBLISHED;
+			} elseif ( ! $pretty ) {
+				$status = $hidden ? self::STATUS_UNPUBLISHED : ( $cannot ? self::STATUS_REFUSED : self::STATUS_OFF );
 			} elseif ( Batch_Resolver::NOT_404 === $answer || ( 0 !== $answer && ! $own ) ) {
 				$status = self::STATUS_IN_USE;
-			} elseif ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
+			} elseif ( $hidden ) {
 				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( substr_count( $path, '/' ) + 1 > Batch_Resolver::room( $type ) || ( Batch_Resolver::URL === $answer && self::loops( $type, $path, (string) ( $chosen[ $type ][ $path ]['url'] ?? '' ) ) ) ) {
+			} elseif ( $cannot ) {
 				$status = self::STATUS_REFUSED;
 			} elseif ( ! $own && self::held_by_another( $facts[ $type ][ $path ] ?? null, $first, $row['holder'] ) ) {
 				$status = self::STATUS_IN_USE;
@@ -293,11 +300,25 @@ final class Records {
 	 * @return bool
 	 */
 	private static function loops( string $post_type, string $path, string $url ): bool {
-		$old = Paths::url( $post_type, $path );
-		if ( '' === $url || '' === $old || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) !== strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) ) {
+		if ( '' === $url || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) !== strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) ) {
 			return false;
 		}
-		return untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === untrailingslashit( (string) wp_parse_url( $old, PHP_URL_PATH ) );
+		// Under plain permalinks, the URL the old path has with pretty ones.
+		$old = Paths::url( $post_type, $path );
+		return Server::same_path( $url, '' !== $old ? $old : home_url( self::old_url( $post_type, $path ) ) );
+	}
+
+	/**
+	 * Whether an old path is deeper than the server looks: its segments and
+	 * its type's rewrite prefix's, past Server::max_segments().
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized old path.
+	 * @return bool
+	 */
+	private static function too_deep( string $post_type, string $path ): bool {
+		$prefix = self::prefix( $post_type );
+		return substr_count( $path, '/' ) + 1 + ( '' !== $prefix ? substr_count( $prefix, '/' ) + 1 : 0 ) > Server::max_segments();
 	}
 
 	/**

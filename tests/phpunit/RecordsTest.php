@@ -109,7 +109,8 @@ final class RecordsTest extends WP_UnitTestCase {
 	 * @return array{url:string,status:int}|null
 	 */
 	private function served_at( string $old ): ?array {
-		$this->go_to( home_url( $old ) );
+		// As a browser sends it: percent-encoded, in capitals.
+		$this->go_to( home_url( implode( '/', array_map( 'rawurlencode', explode( '/', $old ) ) ) ) );
 		return ( new Server( new Resolver( $this->ledger ) ) )->target_for_current_request();
 	}
 
@@ -554,6 +555,16 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ), 'No override written.' );
 		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
 		$this->assertTrue( $this->records->save( $record, 'https://example.org/old-about/', 0 ), 'The same path on another host is no loop.' );
+
+		$this->ledger->record( $this->ids['team'], 'café' );
+		$cafe = $this->records->find( Records::id( $this->ids['team'], 'page', 'caf%c3%a9' ) );
+		$this->assertNotNull( $cafe, 'Precondition: stored percent-encoded.' );
+		foreach ( [ home_url( '/café/' ), home_url( '/caf%C3%A9/' ), home_url( '/caf%c3%a9' ), '/café/', '/CAF%C3%A9/' ] as $value ) {
+			$result = $this->records->save( $cafe, $value, 0 );
+			$this->assertInstanceOf( WP_Error::class, $result, $value . ' is the old URL as typed or as a browser pastes it.' );
+			$this->assertSame( 'hierarchy_guard_own_url', $result->get_error_code(), $value );
+		}
+		$this->assertNull( $this->ledger->target( 'page', 'caf%c3%a9', $this->ids['team'] ) );
 	}
 
 	public function test_an_http_url_with_no_host_is_refused(): void {
@@ -735,6 +746,52 @@ final class RecordsTest extends WP_UnitTestCase {
 
 		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server refuses the loop.' );
 		$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/old-crew/'] );
+
+		$this->ledger->record( $this->ids['history'], 'café' );
+		foreach ( [ home_url( '/café/' ), home_url( '/caf%C3%A9/' ) ] as $url ) {
+			$this->ledger->set_target( 'page', 'caf%c3%a9', $this->ids['history'], $url, 0 );
+			$this->assertNull( $this->served_at( '/café/' ), $url . ': the server refuses the loop.' );
+			$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/café/'], $url );
+		}
+	}
+
+	public function test_under_plain_permalinks_what_the_server_can_t_send_still_says_so(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['team'], 'a/b/c' );
+		$this->ledger->record( $this->ids['team'], 'old-crew' );
+		$this->ledger->set_target( 'page', 'old-crew', $this->ids['team'], home_url( '/old-crew/' ), 0 );
+		$this->ledger->record( $this->ids['history'], 'story' );
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 2 );
+		$this->set_permalink_structure( '' );
+
+		$this->assertSame(
+			[
+				'/a/b/c/'    => Records::STATUS_REFUSED,
+				'/old-crew/' => Records::STATUS_REFUSED,
+				'/story/'    => Records::STATUS_OFF,
+			],
+			$this->statuses_by_old(),
+			'Whether built-in redirects are on or off, and whatever the permalinks.'
+		);
+	}
+
+	public function test_a_row_whose_holder_is_in_the_trash_is_unpublished_whatever_answers_its_old_url(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$gone = $this->page( 'gone' );
+		$this->ledger->record( $gone, 'legacy/team' );
+		$this->ledger->record( $this->ids['about'], 'legacy' );
+		wp_trash_post( $gone );
+		wp_cache_flush();
+
+		$this->assertSame( get_permalink( $this->ids['team'] ), $this->served_at( '/legacy/team/' )['url'] ?? null, 'Precondition: the shorter prefix answers, legacy → company/about.' );
+		$this->assertSame(
+			[
+				'/legacy/'      => Records::STATUS_ACTIVE,
+				'/legacy/team/' => Records::STATUS_UNPUBLISHED,
+			],
+			$this->statuses_by_old(),
+			'Its own target is why it is not served.'
+		);
 	}
 
 	public function test_a_record_the_server_uses_but_can_t_send_through_is_refused_not_in_use(): void {
@@ -806,6 +863,9 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->ledger->record_root( 'page', 'archive' );
 		$this->ledger->record_root( 'page', 'crew' );
 		$this->ledger->record( $this->ids['history'], 'a/b/c/d/e' );
+		$this->ledger->record( $this->ids['history'], 'équipe' );
+		$this->ledger->record( $this->ids['team'], 'café' );
+		$this->ledger->set_target( 'page', 'caf%c3%a9', $this->ids['team'], home_url( '/café/' ), 0 );
 		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 4 );
 		wp_cache_flush();
 
