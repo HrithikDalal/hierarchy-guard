@@ -37,22 +37,27 @@ final class SettingsPageTest extends WP_UnitTestCase {
 
 	public function tear_down(): void {
 		// add_fields() and add_page() write core's globals; later tests must not see them.
-		unset( $GLOBALS['wp_settings_sections'][ Settings_Page::SLUG ], $GLOBALS['wp_settings_fields'][ Settings_Page::SLUG ], $GLOBALS['submenu']['options-general.php'] );
+		unset( $GLOBALS['wp_settings_sections'][ Settings_Page::SLUG ], $GLOBALS['wp_settings_fields'][ Settings_Page::SLUG ], $GLOBALS['submenu']['options-general.php'], $GLOBALS['_registered_pages'][ 'settings_page_' . Settings_Page::SLUG ], $GLOBALS['_parent_pages'][ Settings_Page::SLUG ] );
 		parent::tear_down();
 	}
 
 	/**
-	 * Whether a callback of the plugin's is hooked at priority 10. has_action( $hook )
-	 * alone proves nothing: core hooks the same actions.
+	 * Whether a callback of the plugin's is hooked, at the priority given or
+	 * at any. has_action( $hook ) alone proves nothing: core hooks the same
+	 * actions.
 	 *
 	 * @param string   $hook     Hook name.
 	 * @param callable $matches  Tells the plugin's callback: fn( mixed $function ): bool.
+	 * @param int|null $priority Priority, or null for any.
 	 */
-	private function hooked( string $hook, callable $matches ): bool {
+	private function hooked( string $hook, callable $matches, ?int $priority = 10 ): bool {
 		global $wp_filter;
-		foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
-			if ( $matches( $callback['function'] ) ) {
-				return true;
+		$all = isset( $wp_filter[ $hook ] ) ? $wp_filter[ $hook ]->callbacks : [];
+		foreach ( null === $priority ? $all : [ $all[ $priority ] ?? [] ] as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				if ( $matches( $callback['function'] ) ) {
+					return true;
+				}
 			}
 		}
 		return false;
@@ -72,13 +77,14 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertTrue( $this->page_on( 'admin_menu', 'add_page' ) );
 		$this->assertTrue( $this->page_on( 'admin_init', 'add_fields' ) );
 		$this->assertTrue( $this->page_on( 'plugin_action_links_' . plugin_basename( HIERARCHY_GUARD_FILE ), 'action_links' ) );
-		$this->assertSame( 'hierarchy-guard/hierarchy-guard.php', plugin_basename( HIERARCHY_GUARD_FILE ) );
+		$this->assertSame( 'hierarchy-guard.php', wp_basename( plugin_basename( HIERARCHY_GUARD_FILE ) ), 'The link follows the plugin’s file, whatever its folder is named.' );
 	}
 
 	public function test_the_option_is_registered_on_init_in_the_page_s_group(): void {
 		global $wp_registered_settings;
 
 		$this->assertTrue( $this->hooked( 'init', static fn( $callback ): bool => [ Settings::class, 'register_option' ] === $callback ), 'Registering on init lets the sanitize callback cover WP-CLI and REST writes.' );
+		$this->assertFalse( $this->hooked( 'admin_init', static fn( $callback ): bool => [ Settings::class, 'register_option' ] === $callback, null ), 'Not on admin_init, which WP-CLI and REST never run.' );
 
 		unregister_setting( Settings::GROUP, Settings::OPTION );
 		$this->assertArrayNotHasKey( Settings::OPTION, $wp_registered_settings, 'Precondition: the bootstrap init registration is undone.' );
