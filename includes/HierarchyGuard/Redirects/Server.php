@@ -167,12 +167,17 @@ final class Server {
 	}
 
 	/**
-	 * A URL target as it is sent: through esc_url_raw(), and only while it is http(s).
+	 * A URL target as it is sent: through esc_url_raw(), and only while it
+	 * is http(s), typed so: esc_url_raw() would read `example.org/x` as
+	 * http://example.org/x.
 	 *
 	 * @param string $url URL.
 	 * @return string The URL, or '' when it is not http(s).
 	 */
 	private static function external( string $url ): string {
+		if ( ! in_array( strtolower( (string) wp_parse_url( trim( $url ), PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ) {
+			return '';
+		}
 		$url = esc_url_raw( $url, [ 'http', 'https' ] );
 		return in_array( strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ? $url : '';
 	}
@@ -368,7 +373,7 @@ final class Server {
 	 * @return string
 	 */
 	private function request_uri(): string {
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect().
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect(), for a page target, or through external(), esc_url_raw() and http(s) only, for a URL target.
 		return isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
 	}
 

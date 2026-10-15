@@ -557,15 +557,39 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertNull( $this->server->target_for_current_request() );
 		remove_filter( 'hierarchy_guard_redirect_url', $scheme );
 
-		$passed = null;
-		$spy    = static function ( int $status, $target ) use ( &$passed ): int {
-			$passed = $target;
-			return $status;
+		$passed = [];
+		$spy    = static function ( $value, $target ) use ( &$passed ) {
+			$passed[ current_filter() ] = $target;
+			return $value;
 		};
 		add_filter( 'hierarchy_guard_redirect_status', $spy, 10, 2 );
+		add_filter( 'hierarchy_guard_redirect_url', $spy, 10, 2 );
 		$this->assertSame( 'https://example.org/', $this->server->target_for_current_request()['url'] );
 		remove_filter( 'hierarchy_guard_redirect_status', $spy );
-		$this->assertNull( $passed, 'The filters get no post for a URL target.' );
+		remove_filter( 'hierarchy_guard_redirect_url', $spy );
+		$this->assertSame(
+			[
+				'hierarchy_guard_redirect_status' => null,
+				'hierarchy_guard_redirect_url'    => null,
+			],
+			$passed,
+			'Both filters get no post for a URL target.'
+		);
+	}
+
+	public function test_a_url_target_filtered_to_a_url_with_no_scheme_is_never_sent(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 0 );
+		$this->go_to( '/old-about/' );
+
+		foreach ( [ '//evil.example.org/x', '/relative/', 'evil.example.org/x', 'ftp://example.org/' ] as $url ) {
+			$to = static fn(): string => $url;
+			add_filter( 'hierarchy_guard_redirect_url', $to );
+			$this->assertNull( $this->server->target_for_current_request(), $url . ' is not http(s).' );
+			remove_filter( 'hierarchy_guard_redirect_url', $to );
+		}
+		$this->assertSame( 'https://example.org/', $this->server->target_for_current_request()['url'], 'Unfiltered, it is sent.' );
 	}
 
 	public function test_a_url_target_on_this_site_at_the_requested_path_is_not_sent(): void {

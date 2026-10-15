@@ -336,7 +336,7 @@ final class Batch_Resolver {
 		if ( [] === $keys ) {
 			return [];
 		}
-		$placeholders = implode( ',', array_fill( 0, 2 * count( $keys ), '%s' ) );
+		$placeholders = implode( ',', array_fill( 0, count( $keys ) + count( $targets ), '%s' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, two per path listed or prefix of one (its entry and its override), bounded by the count cap; a range on the meta_key index.
 		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id, pm.meta_value, p.post_status FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY pm.meta_id DESC", ...array_merge( array_keys( $keys ), array_keys( $targets ), [ $post_type ] ) ), ARRAY_A );
 
