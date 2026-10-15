@@ -249,6 +249,8 @@ final class ResolverTest extends WP_UnitTestCase {
 				'post_name' => 'firm',
 			]
 		);
+		// The new about took company/about from the moved one; an entry from before that rule is still there.
+		$this->ledger->record( $this->about, 'company/about' );
 		wp_trash_post( $this->about );
 		$this->assertTrue( $this->ledger->held_in_trash( 'page', 'company/about' ), 'Precondition: the longest prefix is held only by the trashed page.' );
 
@@ -450,5 +452,114 @@ final class ResolverTest extends WP_UnitTestCase {
 		$temporary = false;
 		$this->assertSame( $alice, $this->resolver->resolve( 'page', 'company/about/team/alice-old', $temporary )->ID );
 		$this->assertTrue( $temporary, 'alice moves back with team when the trashed page is restored.' );
+	}
+
+	/**
+	 * Team moves out of about to company, recording company/about/team on
+	 * it; a new team with a subpage crew takes company/about/team; then about
+	 * is renamed to about-us.
+	 *
+	 * @param string $status The new team's status.
+	 * @return array{0:int,1:int} The new team and crew.
+	 */
+	private function team_replaced( string $status ): array {
+		wp_update_post(
+			[
+				'ID'          => $this->team,
+				'post_parent' => $this->company,
+			]
+		);
+		$new_team = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'team',
+				'post_parent' => $this->about,
+				'post_status' => $status,
+			]
+		);
+		$crew     = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'crew',
+				'post_parent' => $new_team,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-us',
+			]
+		);
+		return [ $new_team, $crew ];
+	}
+
+	public function test_a_page_that_took_a_recorded_path_keeps_it_after_its_parent_is_renamed(): void {
+		[ $new_team, $crew ] = $this->team_replaced( 'publish' );
+
+		$this->assertSame( $new_team, $this->resolver->resolve( 'page', 'company/about/team' )->ID, 'The URL last showed the new team.' );
+		$this->assertSame( $crew, $this->resolver->resolve( 'page', 'company/about/team/crew' )->ID );
+		$this->assertSame( [], $this->ledger->paths_for( $this->team ), 'The old team gave up the path the new team took.' );
+	}
+
+	public function test_a_draft_at_a_recorded_path_does_not_take_it(): void {
+		[ $new_team ] = $this->team_replaced( 'draft' );
+
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'company/about/team' )->ID, 'The URL last showed the old team.' );
+		$this->assertNotSame( $new_team, $this->team );
+	}
+
+	public function test_a_newer_page_s_old_url_resolves_while_an_older_holder_is_in_the_trash(): void {
+		add_filter( 'hierarchy_guard_trash_policy', static fn(): string => Settings::POLICY_REPARENT, 20 );
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$history = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'history',
+				'post_parent' => $this->about,
+			]
+		);
+		wp_trash_post( $this->about );
+		$this->assertSame( $this->company, (int) get_post( $history )->post_parent, 'Precondition: the trash moved the subpages up.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'Precondition: the trashed page\'s own URL is not redirected.' );
+
+		$newer = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'about',
+				'post_parent' => $this->company,
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $newer,
+				'post_name' => 'about-us',
+			]
+		);
+
+		$temporary = false;
+		$this->assertSame( $newer, $this->resolver->resolve( 'page', 'company/about', $temporary )->ID );
+		$this->assertTrue( $temporary, 'A restore of the page in the trash would take the URL back.' );
+
+		wp_delete_post( $this->about, true );
+
+		$temporary = false;
+		$this->assertSame( $newer, $this->resolver->resolve( 'page', 'company/about', $temporary )->ID );
+		$this->assertFalse( $temporary );
+	}
+
+	public function test_an_older_entry_of_a_page_not_its_ancestor_does_not_beat_a_page_in_the_trash(): void {
+		$elsewhere = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'elsewhere',
+				'post_parent' => $this->company,
+			]
+		);
+		// An entry from before a page that takes a path drops the others.
+		$this->ledger->record( $elsewhere, 'company/about' );
+		wp_trash_post( $this->about );
+		$this->ledger->record( $this->about, 'company/about' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ), 'The page in the trash holds the newest entry.' );
 	}
 }

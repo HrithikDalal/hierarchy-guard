@@ -271,7 +271,8 @@ final class Operations {
 			do_action( 'hierarchy_guard_children_reparented', $moved, $root, $to );
 		}
 
-		$job['finished'] = count( $children ) < $moves;
+		// A budget that ended on the last child leaves nothing to queue.
+		$job['finished'] = count( $children ) < $moves || [] === Subtree::live_children( $root, $type, 1, (int) $job['cursor'] );
 		return $job;
 	}
 
@@ -343,6 +344,13 @@ final class Operations {
 			foreach ( array_reverse( Subtree::with_live_children( $now_trashed, $type ) ) as $parent_id ) {
 				$stack[] = [ $parent_id, 0 ];
 			}
+		}
+
+		// A budget that ended on the last subpage leaves nothing to queue: drop the frames with no live child left.
+		$frame = end( $stack );
+		while ( false !== $frame && [] === Subtree::live_children( (int) $frame[0], $type, 1, (int) $frame[1] ) ) {
+			array_pop( $stack );
+			$frame = end( $stack );
 		}
 
 		$job['stack']    = $stack;
@@ -457,7 +465,7 @@ final class Operations {
 			do_action( 'hierarchy_guard_children_reparented', $ids, (int) $from, $root );
 		}
 		$job['work']['moves'] = count( $rows );
-		if ( count( $rows ) < $moves ) {
+		if ( count( $rows ) < $moves || [] === Markers::rows( Markers::moved_key( $root ), 1, (int) $job['cursor'] ) ) {
 			$job['phase']  = 'trashed';
 			$job['cursor'] = 0;
 		}
@@ -514,7 +522,7 @@ final class Operations {
 
 		Markers::remove( $done );
 		$job['work']['calls'] += $used;
-		$job['finished']       = count( $rows ) < $calls;
+		$job['finished']       = count( $rows ) < $calls || [] === Markers::rows( Markers::trashed_key( $root ), 1, (int) $job['cursor'] );
 
 		return $job;
 	}

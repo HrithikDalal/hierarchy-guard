@@ -168,6 +168,10 @@ final class Change_Listener {
 		if ( 'trash' === $before->post_status || 'trash' === $after->post_status ) {
 			return;
 		}
+		if ( 'publish' === $before->post_status ) {
+			// A published page moved or renamed onto a path takes it; a page being published takes it in on_status_changed().
+			$this->ledger->claim( $after );
+		}
 		if ( ! Paths::is_recordable( $before ) ) {
 			return;
 		}
@@ -277,9 +281,12 @@ final class Change_Listener {
 			return;
 		}
 
-		// Subpages trashed together with a parent are deleted with it, so their own
-		// paths would be carried onto pages about to be deleted too.
+		// A subpage trashed together with its parent: a page it was carried to
+		// could be deleted next, so each of its own subpages keeps its URL from
+		// before the trash itself. Only the trash-the-subpages policy makes such
+		// a row, and only for a subtree within the count cap.
 		if ( Markers::has_trashed_row( $post_id ) ) {
+			$this->record_on_children( $post_id, (string) $post->post_type );
 			return;
 		}
 
@@ -297,17 +304,60 @@ final class Change_Listener {
 	}
 
 	/**
-	 * A post went into or out of the trash by a status change, as
-	 * wp_update_post(), WP-CLI's `post update` and the REST API make it with
-	 * no wp_trash_post() or wp_untrash_post(): see on_holder_changed(). Core's
-	 * own trash and restore make the same change first.
+	 * Records each direct child's path from before the trash on the child,
+	 * for a child that was published then: one in the trash by the status
+	 * core kept from before its trash.
+	 *
+	 * @param int    $post_id   The post being deleted.
+	 * @param string $post_type Its post type.
+	 */
+	private function record_on_children( int $post_id, string $post_type ): void {
+		$children = get_posts(
+			[
+				'post_parent'            => $post_id,
+				'post_type'              => $post_type,
+				'post_status'            => array_values( array_diff( array_keys( get_post_stati() ), [ 'auto-draft', 'inherit' ] ) ),
+				'posts_per_page'         => Subtree::count_cap(),
+				'orderby'                => 'ID',
+				'order'                  => 'ASC',
+				'no_found_rows'          => true,
+				'update_post_term_cache' => false,
+			]
+		);
+
+		Ledger::deferred(
+			function () use ( $children ): void {
+				foreach ( $children as $child ) {
+					$was = 'trash' === $child->post_status ? (string) get_post_meta( $child->ID, '_wp_trash_meta_status', true ) : (string) $child->post_status;
+					if ( 'publish' === $was ) {
+						$this->ledger->record( (int) $child->ID, Paths::untrashed_uri( $child ) );
+					}
+				}
+			}
+		);
+	}
+
+	/**
+	 * A page that was not published is published: it takes its path from
+	 * whatever page recorded it (Ledger::claim()). Or a post went into or out
+	 * of the trash by a status change, as wp_update_post(), WP-CLI's `post
+	 * update` and the REST API make it with no wp_trash_post() or
+	 * wp_untrash_post(): see on_holder_changed(). Core's own trash and restore
+	 * make the same change first.
 	 *
 	 * @param string  $new_status New status.
 	 * @param string  $old_status Old status.
 	 * @param WP_Post $post       Post.
 	 */
 	public function on_status_changed( string $new_status, string $old_status, WP_Post $post ): void {
-		if ( $new_status === $old_status || ( 'trash' !== $new_status && 'trash' !== $old_status ) ) {
+		if ( $new_status === $old_status ) {
+			return;
+		}
+		if ( 'publish' === $new_status && ! self::$suspended ) {
+			// A page published, or published again, takes its path.
+			$this->ledger->claim( $post );
+		}
+		if ( 'trash' !== $new_status && 'trash' !== $old_status ) {
 			return;
 		}
 		$this->crossed[ (int) $post->ID ] = true;

@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Ledger;
 use HierarchyGuard\Trash\Markers;
 use WP_UnitTestCase;
 
@@ -52,7 +53,7 @@ final class MarkersTest extends WP_UnitTestCase {
 		foreach ( [ Markers::moved_key( 12 ), Markers::trashed_key( 12 ), Markers::ALIASES ] as $key ) {
 			$this->assertTrue( $markers->skip_on_export( false, $key ), $key );
 		}
-		$this->assertFalse( $markers->skip_on_export( false, '_hierarchy_guard_path_abc' ), 'Old-path entries stay exportable.' );
+		$this->assertFalse( $markers->skip_on_export( false, Ledger::KEY_PREFIX . 'abc' ), 'Old-path entries stay exportable.' );
 		$this->assertTrue( $markers->skip_on_export( true, 'anything' ), 'An earlier skip is kept.' );
 	}
 

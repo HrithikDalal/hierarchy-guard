@@ -59,7 +59,7 @@ final class Batch_Resolver {
 	 *
 	 * @param string[]                                $paths     Normalized old paths, at most the count cap.
 	 * @param string                                  $post_type Post type name.
-	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts read so far, by path; more are added, for every path.
+	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts     Ledger facts read so far, by path; more are added, for every path.
 	 * @param array<string,true>|null                 $temporary Set to the paths redirected to a post of this type that are temporary.
 	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there.
 	 */
@@ -178,7 +178,7 @@ final class Batch_Resolver {
 	 *
 	 * @param string[]                                $paths     Normalized old paths.
 	 * @param string                                  $post_type Post type name.
-	 * @param array<string,array{live:int,held:bool}> $facts     Ledger facts read so far, by path; more are added.
+	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts     Ledger facts read so far, by path; more are added.
 	 * @param bool                                    $requests  Whether each path is a request that must be a 404 first.
 	 * @param array<string,true>|null                 $held      Set to the paths led to a post through a prefix a page in the trash holds.
 	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, UNKNOWN when it cannot be told.
@@ -261,13 +261,15 @@ final class Batch_Resolver {
 	}
 
 	/**
-	 * What the ledger says about each path, the way Ledger::find() and
-	 * Ledger::held_in_trash() read it: the newest post of the type not in the
-	 * trash that holds it, and whether a post in the trash holds it. One query.
+	 * What the ledger says about each path, the way Ledger::find(),
+	 * Ledger::held_in_trash() and Ledger::newest_in_trash() read it: the
+	 * newest post of the type not in the trash that holds it, whether a post
+	 * in the trash holds it, whether the newest entry is one, and which posts
+	 * in the trash hold it. One query.
 	 *
 	 * @param string[] $paths     Normalized paths, at most a few per pair listed.
 	 * @param string   $post_type Post type name.
-	 * @return array<string,array{live:int,held:bool}> Facts by path, for every path asked about.
+	 * @return array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> Facts by path, for every path asked about.
 	 */
 	public static function ledger_facts( array $paths, string $post_type ): array {
 		global $wpdb;
@@ -276,8 +278,10 @@ final class Batch_Resolver {
 		$keys = [];
 		foreach ( $paths as $path ) {
 			$out[ (string) $path ]                             = [
-				'live' => 0,
-				'held' => false,
+				'live'    => 0,
+				'held'    => false,
+				'newest'  => false,
+				'trashed' => [],
 			];
 			$keys[ Ledger::key( $post_type, (string) $path ) ] = (string) $path;
 		}
@@ -288,13 +292,19 @@ final class Batch_Resolver {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per path listed or prefix of one, bounded by the count cap; a range on the meta_key index.
 		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id, p.post_status FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY pm.meta_id DESC", ...array_merge( array_keys( $keys ), [ $post_type ] ) ), ARRAY_A );
 
+		$seen = [];
 		foreach ( (array) $rows as $row ) {
 			$path = $keys[ (string) $row['meta_key'] ] ?? '';
 			if ( '' === $path ) {
 				continue;
 			}
+			if ( ! isset( $seen[ $path ] ) ) {
+				$seen[ $path ]          = true;
+				$out[ $path ]['newest'] = 'trash' === (string) $row['post_status'];
+			}
 			if ( 'trash' === (string) $row['post_status'] ) {
-				$out[ $path ]['held'] = true;
+				$out[ $path ]['held']      = true;
+				$out[ $path ]['trashed'][] = (int) $row['post_id'];
 			} elseif ( 0 === $out[ $path ]['live'] ) {
 				$out[ $path ]['live'] = (int) $row['post_id'];
 			}
@@ -330,7 +340,7 @@ final class Batch_Resolver {
 	 * under a page in the trash, which makes the resolver pass over it.
 	 *
 	 * @param string[]                                $paths Normalized old paths.
-	 * @param array<string,array{live:int,held:bool}> $facts From ledger_facts(), for these paths.
+	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts From ledger_facts(), for these paths.
 	 * @return array<string,array{id:int,trashed:bool}> Holder by path; a path no live post holds is absent.
 	 */
 	public static function holders( array $paths, array $facts ): array {

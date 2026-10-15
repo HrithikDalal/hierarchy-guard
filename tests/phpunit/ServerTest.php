@@ -202,6 +202,32 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( user_trailingslashit( trailingslashit( get_permalink( $this->team ) ) . 'embed', 'embed' ), $this->server->target_for_current_request()['url'] );
 	}
 
+	public function test_preserves_comment_page_suffix(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+
+		$this->go_to( '/company/about/team/comment-page-2/' );
+		$this->assertTrue( is_404() );
+		$this->assertSame( user_trailingslashit( trailingslashit( get_permalink( $this->team ) ) . 'comment-page-2', 'commentpaged' ), $this->server->target_for_current_request()['url'] );
+	}
+
+	public function test_preserves_trackback_suffix(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+
+		$this->go_to( '/company/about/team/trackback/' );
+		$this->assertTrue( is_404() );
+		$this->assertSame( user_trailingslashit( trailingslashit( get_permalink( $this->team ) ) . 'trackback', 'single_trackback' ), $this->server->target_for_current_request()['url'] );
+	}
+
 	public function test_two_segment_old_url_redirects(): void {
 		// Two segments match core's post-attachment rule, so the 404 carries
 		// attachment=design rather than a pagename. The path must still resolve.

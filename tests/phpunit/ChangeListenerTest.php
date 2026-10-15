@@ -630,7 +630,9 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 
 	/**
 	 * Company › About, with About renamed to about-us and a newer page that
-	 * held company/about since renamed too: that page is the newest holder.
+	 * holds company/about too: that page is the newest holder. A page that
+	 * took the path would have dropped About's entry, so the newer entry is
+	 * written as the ledger would have it from before that rule.
 	 *
 	 * @return int The newer page.
 	 */
@@ -644,16 +646,11 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$other = self::factory()->post->create(
 			[
 				'post_type'   => 'page',
-				'post_name'   => 'about',
+				'post_name'   => 'x-now',
 				'post_parent' => $this->company,
 			]
 		);
-		wp_update_post(
-			[
-				'ID'        => $other,
-				'post_name' => 'x-now',
-			]
-		);
+		$this->ledger->record( $other, 'company/about' );
 		return $other;
 	}
 

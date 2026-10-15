@@ -163,6 +163,13 @@ final class OperationsReparentTest extends WP_UnitTestCase {
 		$this->assertSame( 2, $job['counts']['moved'] );
 	}
 
+	public function test_a_budget_that_ends_on_the_last_child_finishes_the_job(): void {
+		$job = $this->operations->step( $this->job(), 2, 0 );
+
+		$this->assertTrue( $job['finished'] );
+		$this->assertSame( 2, $job['counts']['moved'] );
+	}
+
 	public function test_a_budget_of_zero_does_nothing_yet(): void {
 		$job = $this->operations->step( $this->job(), 0, 25 );
 

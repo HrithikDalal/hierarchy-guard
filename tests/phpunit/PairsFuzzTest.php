@@ -54,6 +54,13 @@ use WP_UnitTestCase;
  * - Gone: at the end, the latest change's list is gone exactly when a page
  *   it lists redirects for was deleted for good: a save's page, or a trashed
  *   parent that moved subpages up.
+ * - Taken: right after a step in which a page took a URL with its own
+ *   save, creation, publish or restore, no other post outside the trash has
+ *   a ledger entry for that URL, and the root list lacks it. Later, while
+ *   that page showed the URL last and is live elsewhere, the newest live
+ *   entry for it is that page's own or there is none. A page that came to a
+ *   URL only because a page above it moved takes nothing, and where a
+ *   shorter prefix leads is not checked.
  *
  * The resolver runs only on a 404, so a URL a published page, a blog post or
  * an attachment uses now is served by it and is no redirect at all, on
@@ -100,6 +107,21 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	 * @var array<int,string[]>
 	 */
 	private array $history = [];
+
+	/**
+	 * The page that showed each path last, and whether it took the path with
+	 * its own save, creation, publish or restore.
+	 *
+	 * @var array<string,array{0:int,1:bool}>
+	 */
+	private array $last = [];
+
+	/**
+	 * Pages this step saved, created, published or restored.
+	 *
+	 * @var int[]
+	 */
+	private array $actors = [];
 
 	/**
 	 * What the history did, one line per step.
@@ -256,8 +278,9 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			if ( [] !== ( new Queue() )->roots() ) {
 				$this->fail( 'Everything runs inline. ' . $this->story( $seed ) );
 			}
+			$actors = $this->actors;
 			$this->remember();
-			$this->failures = array_merge( $this->failures, $this->check_change() );
+			$this->failures = array_merge( $this->failures, $this->check_change(), $this->check_taken( $actors ), $this->check_last_holders() );
 		}
 
 		$this->assertSame( [], array_merge( $this->failures, $this->violations() ), $this->story( $seed ) );
@@ -325,6 +348,10 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				'post_name' => $slug,
 			]
 		);
+		if ( $this->path( $id ) !== $from ) {
+			// A rename to the slug the page has already saves no new URL.
+			$this->actors[] = $id;
+		}
 		$this->saved( $id, $from, $tree );
 		return sprintf( 'rename %s %s to %s: %s', $this->made[ $id ], $from, $slug, $this->path( $id ) );
 	}
@@ -363,6 +390,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		}
 		$tree = $this->subtree( $id );
 		wp_update_post( $update );
+		$this->actors[] = $id;
 		$this->saved( $id, $from, $tree );
 		return sprintf( '%s %s %s under %s%s: %s', $rename ? 'move and rename' : 'move', $this->made[ $id ], $from, 0 === $parent ? 'the top level' : $this->made[ $parent ], $rename ? ' to ' . $update['post_name'] : '', $this->path( $id ) );
 	}
@@ -437,6 +465,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 		}
 		$id = $this->pick( $trashed );
 		wp_untrash_post( $id );
+		$this->actors[] = $id;
 		return sprintf( 'restore %s: %s', $this->made[ $id ], $this->path( $id ) );
 	}
 
@@ -507,6 +536,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				'post_status' => 'publish',
 			]
 		);
+		$this->actors[] = $id;
 		return sprintf( 'publish %s: %s', $this->made[ $id ], $this->path( $id ) );
 	}
 
@@ -918,6 +948,7 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 	private function make( string $label, string $slug, int $parent_id = 0 ): int {
 		$id                = $this->page( $slug, $parent_id );
 		$this->made[ $id ] = $label . '#' . $id;
+		$this->actors[]    = $id;
 		return $id;
 	}
 
@@ -931,7 +962,68 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			if ( end( $seen ) !== $path ) {
 				$this->history[ $id ][] = $path;
 			}
+			if ( ! isset( $this->last[ $path ] ) || $this->last[ $path ][0] !== $id || in_array( $id, $this->actors, true ) ) {
+				$this->last[ $path ] = [ $id, in_array( $id, $this->actors, true ) ];
+			}
 		}
+		$this->actors = [];
+	}
+
+	/**
+	 * Every URL a page of this step took with its own save, creation,
+	 * publish or restore that another post outside the trash still has a
+	 * ledger entry for, or that the root list still holds.
+	 *
+	 * @param int[] $actors Pages this step saved, created, published or restored.
+	 * @return string[] One line per such URL.
+	 */
+	private function check_taken( array $actors ): array {
+		global $wpdb;
+
+		$live  = $this->live();
+		$roots = get_option( Ledger::ROOT_OPTION, [] );
+		$roots = is_array( $roots ) ? (array) ( $roots['page'] ?? [] ) : [];
+		$out   = [];
+		foreach ( array_unique( $actors ) as $id ) {
+			if ( ! in_array( $id, $live, true ) ) {
+				continue;
+			}
+			$path = $this->path( $id );
+			$this->tally( 'taken URLs checked at once' );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A test oracle's point lookup on the meta_key index.
+			$others = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND pm.post_id <> %d AND p.post_status <> 'trash'", Ledger::key( 'page', $path ), $id ) ) );
+			foreach ( $others as $other ) {
+				$out[] = sprintf( 'L: step %d: %s took /%s/, and %s still holds it', $this->step, $this->name( $id ), $path, $this->name( $other ) );
+			}
+			if ( in_array( $path, $roots, true ) ) {
+				$out[] = sprintf( 'L: step %d: %s took /%s/, and the root list still holds it', $this->step, $this->name( $id ), $path );
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Every URL a page took with its own save and showed last whose own
+	 * ledger entry leads to another page.
+	 *
+	 * @return string[] One line per such URL.
+	 */
+	private function check_last_holders(): array {
+		$ledger = new Ledger();
+		$live   = $this->live();
+		$out    = [];
+		foreach ( $this->last as $path => [ $holder, $own ] ) {
+			$path = (string) $path;
+			if ( ! $own || ! in_array( $holder, $live, true ) || $this->path( $holder ) === $path ) {
+				continue;
+			}
+			$this->tally( 'taken URLs checked' );
+			$found = (int) $ledger->find( 'page', $path );
+			if ( $found > 0 && $holder !== $found ) {
+				$out[] = sprintf( 'L: step %d: /%s/ last showed %s, which took it itself, and the ledger gives it to %s [%s]', $this->step, $path, $this->name( $holder ), $this->name( $found ), $this->describe( $path ) );
+			}
+		}
+		return $out;
 	}
 
 	/**

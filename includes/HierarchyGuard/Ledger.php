@@ -141,6 +141,49 @@ final class Ledger {
 	}
 
 	/**
+	 * A published page took its path: the URL is its now. Other live posts'
+	 * entries for that exact path, and the root list's, are dropped; if the
+	 * page moves on later, it records the path itself. A post in the trash
+	 * keeps its entry, so a redirect stays temporary while a restore could
+	 * take the path back. One seek on the meta_key index, plus the root list's
+	 * option read: a query the first time a request reads it, as it is not autoloaded.
+	 *
+	 * @param WP_Post $post The page at its new path.
+	 * @return bool True when an entry was dropped.
+	 */
+	public function claim( WP_Post $post ): bool {
+		global $wpdb;
+
+		if ( ! Paths::is_recordable( $post ) ) {
+			return false;
+		}
+		$path = Paths::uri( $post );
+		if ( Paths::has_trashed_segment( $path ) ) {
+			return false;
+		}
+
+		$type = (string) $post->post_type;
+		$key  = self::key( $type, $path );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; once per page published, moved or renamed.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND pm.post_id <> %d AND p.post_status <> 'trash'", $key, (int) $post->ID ) );
+
+		$dropped = false;
+		foreach ( array_unique( array_map( 'intval', $ids ) ) as $id ) {
+			$dropped = delete_post_meta( $id, $key ) || $dropped;
+		}
+		if ( $dropped ) {
+			$this->bump();
+		}
+
+		$roots = $this->roots();
+		if ( in_array( $path, $roots[ $type ] ?? [], true ) ) {
+			$dropped = $this->forget_root( $type, $path ) || $dropped;
+		}
+
+		return $dropped;
+	}
+
+	/**
 	 * Removes an entry from a post.
 	 *
 	 * @param int    $post_id  Post the entry is on.
@@ -342,6 +385,62 @@ final class Ledger {
 		return null !== $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT 1 FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash' LIMIT 1",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
+	}
+
+	/**
+	 * The posts in the trash that hold a path: one seek on the meta_key
+	 * index, as many rows as posts hold that one path.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return int[]
+	 */
+	public static function trashed_holders( string $post_type, string $path ): array {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return [];
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Seek on the meta_key index, bounded by the holders of one path; only for a 404.
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash'",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
+
+		return array_values( array_unique( array_map( 'intval', $ids ) ) );
+	}
+
+	/**
+	 * Whether the newest entry for a path is held by a post in the trash. A
+	 * newer entry on a live post that is not an ancestor of that post is
+	 * another page's that held the path since; an alias on an ancestor can be
+	 * newer too, and Rules tells it apart by the parent chain.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return bool
+	 */
+	public static function newest_in_trash( string $post_type, string $path ): bool {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Seek on the meta_key index that stops at the newest entry; only for a 404.
+		return 'trash' === $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT p.post_status FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT 1",
 				self::key( $post_type, $path ),
 				$post_type
 			)

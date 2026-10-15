@@ -394,6 +394,76 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertFalse( $root['job'] );
 	}
 
+	/**
+	 * Adds numbered subpages under about until it has this many descendants.
+	 *
+	 * @param int $descendants Descendants about ends up with.
+	 */
+	private function fill_about( int $descendants ): void {
+		for ( $i = 3; $i < $descendants; $i++ ) {
+			$this->page( "kid-{$i}", $this->ids['about'] );
+		}
+	}
+
+	/**
+	 * Asserts the trash or restore of about finished inline: no queued job and no work said to be left.
+	 *
+	 * @param string $message What was done.
+	 */
+	private function assert_finished_inline( string $message ): void {
+		$this->assertNull( $this->queue->load( $this->ids['about'] ), $message );
+		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ), $message );
+		$this->assertFalse( $this->change()['roots'][ $this->ids['about'] ]['job'], $message );
+	}
+
+	public function test_a_subtree_of_exactly_the_core_budget_is_trashed_and_restored_inline(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$this->fill_about( Operations::DEFAULT_CORE_THRESHOLD );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 0, Subtree::count_live_descendants( $this->ids['about'], 'page', 100 ) );
+		$this->assert_finished_inline( 'Trash.' );
+
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_untrash_post( $this->ids['about'] );
+
+		$this->assertSame( Operations::DEFAULT_CORE_THRESHOLD, Subtree::count_live_descendants( $this->ids['about'], 'page', 100 ) );
+		$this->assert_finished_inline( 'Restore.' );
+	}
+
+	public function test_a_subtree_one_past_the_core_budget_queues_the_rest(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$this->fill_about( Operations::DEFAULT_CORE_THRESHOLD + 1 );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'The last subpage is left for the queue.' );
+		$this->assertSame( Operations::DEFAULT_CORE_THRESHOLD, $this->queue->load( $this->ids['about'] )['counts']['trashed'] );
+		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
+	}
+
+	public function test_exactly_the_move_budget_of_subpages_moves_up_inline(): void {
+		$this->fill_about( Operations::DEFAULT_THRESHOLD + 1 );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 0, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assert_finished_inline( 'Trash.' );
+	}
+
+	public function test_one_past_the_move_budget_of_subpages_queues_the_rest(): void {
+		$this->fill_about( Operations::DEFAULT_THRESHOLD + 2 );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertSame( 1, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
+	}
+
 	public function test_a_bulk_trash_shares_one_budget_and_one_summary(): void {
 		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 3 );
 		$services = $this->page( 'services' );
@@ -739,6 +809,233 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'trash', get_post_status( $this->ids['history'] ), 'Trashed on purpose since.' );
 		$this->assertSame( 'publish', get_post_status( $this->ids['team'] ) );
+	}
+
+	public function test_a_subpage_deleted_out_of_the_trash_before_its_parent_s_restore_leaves_its_subpage_its_old_url(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		wp_trash_post( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['team'], true );
+		wp_untrash_post( $this->ids['about'] );
+
+		$this->assertSame( $this->ids['about'], (int) get_post( $this->ids['leadership'] )->post_parent, 'Precondition: core moved leadership up under about.' );
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ) );
+		$this->assertSame( $this->ids['leadership'], $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertSame( [ 'company/about/team/leadership' ], $this->ledger->paths_for( $this->ids['leadership'] ), 'Recorded on the subpage itself.' );
+		$this->assertSame( [], $this->ledger->paths_for( $this->ids['about'] ), 'Not on the parent.' );
+		$this->assertFalse( get_option( Ledger::ROOT_OPTION ), 'Not in the root list.' );
+	}
+
+	public function test_a_subpage_deleted_out_of_the_trash_records_only_the_urls_its_subpages_showed(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$draft = $this->page( 'draft-kid', $this->ids['team'], 'draft' );
+		$older = $this->page( 'older-kid', $this->ids['team'] );
+		wp_trash_post( $older );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['team'], true );
+
+		$this->assertSame( [ 'company/about/team/leadership' ], $this->ledger->paths_for( $this->ids['leadership'] ) );
+		$this->assertSame( [], $this->ledger->paths_for( $draft ), 'A draft never had a public URL.' );
+		$this->assertSame( [ 'company/about/team/older-kid' ], $this->ledger->paths_for( $older ), 'Published until its own trash: that URL was public.' );
+	}
+
+	/**
+	 * Trashes about under the trash-the-subpages policy while the user may not delete leadership.
+	 */
+	private function trash_about_keeping_leadership(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$locked = $this->ids['leadership'];
+		$deny   = static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+			return 'delete_post' === $cap && isset( $args[0] ) && (int) $args[0] === $locked ? [ 'do_not_allow' ] : $caps;
+		};
+		add_filter( 'map_meta_cap', $deny, 10, 4 );
+		wp_trash_post( $this->ids['about'] );
+		remove_filter( 'map_meta_cap', $deny, 10 );
+
+		$this->assertSame( 'trash', get_post_status( $this->ids['team'] ), 'Precondition: team went with about.' );
+		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'Precondition: leadership stayed live.' );
+	}
+
+	public function test_empty_trash_keeps_the_url_of_a_subpage_the_user_could_not_trash(): void {
+		$this->trash_about_keeping_leadership();
+
+		// Child first: team, then about.
+		wp_delete_post( $this->ids['team'], true );
+		wp_delete_post( $this->ids['about'], true );
+
+		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['leadership'] )->post_parent );
+		$this->assertSame( $this->ids['leadership'], $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertSame( [ 'company/about/team/leadership' ], $this->ledger->paths_for( $this->ids['leadership'] ) );
+	}
+
+	public function test_empty_trash_parent_first_keeps_the_url_of_a_subpage_the_user_could_not_trash(): void {
+		$this->trash_about_keeping_leadership();
+
+		wp_delete_post( $this->ids['about'], true );
+		wp_delete_post( $this->ids['team'], true );
+
+		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['leadership'] )->post_parent );
+		$this->assertSame( $this->ids['leadership'], $this->resolver->resolve( 'page', 'company/about/team/leadership' )->ID );
+		$this->assertSame( [ 'company/about' ], $this->ledger->paths_for( $this->ids['company'] ), 'Only the URL of about itself is on its parent.' );
+		$this->assertFalse( get_option( Ledger::ROOT_OPTION ), 'Nothing in the root list.' );
+	}
+
+	public function test_an_older_url_of_a_trashed_page_is_not_redirected_to_its_parent(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about-us',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'        => $this->ids['about'],
+				'post_name' => 'about',
+			]
+		);
+		$this->assertSame( [ 'company/about-us' ], $this->ledger->paths_for( $this->ids['about'] ), 'Precondition: about holds its older URL.' );
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ), 'A restore would give the page its URLs back.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ) );
+		$this->assertSame( $this->ids['team'], $this->resolver->resolve( 'page', 'company/about-us/team' )->ID );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_parent_after_the_parent_is_trashed_and_restored(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		wp_trash_post( $this->ids['about'] );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['company'] );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+
+		wp_untrash_post( $this->ids['company'] );
+		wp_publish_post( $this->ids['company'] );
+
+		$this->assertSame( 'trash', get_post_status( $this->ids['about'] ), 'Precondition: about is still in the trash.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about' ) );
+		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'company/about/history' )->ID );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_parent_after_a_page_above_is_deleted(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$org = $this->page( 'org' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['company'],
+				'post_parent' => $org,
+			]
+		);
+		wp_trash_post( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['company'], true );
+
+		$this->assertSame( $org, (int) get_post( $this->ids['about'] )->post_parent, 'Precondition: core moved about up under org.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'org/company/about' ) );
+		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'org/company/about/history' )->ID );
+	}
+
+	/**
+	 * Moves company under a new top-level org: org › company › about › { team › leadership, history }.
+	 *
+	 * @return int Org.
+	 */
+	private function company_under_org(): int {
+		$org = $this->page( 'org' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['company'],
+				'post_parent' => $org,
+			]
+		);
+		return $org;
+	}
+
+	/**
+	 * Gives about an older URL of its own: company/about-us.
+	 */
+	private function about_was_about_us(): void {
+		foreach ( [ 'about-us', 'about' ] as $slug ) {
+			wp_update_post(
+				[
+					'ID'        => $this->ids['about'],
+					'post_name' => $slug,
+				]
+			);
+		}
+	}
+
+	/**
+	 * Renames a page.
+	 *
+	 * @param int    $id   Page.
+	 * @param string $slug New slug.
+	 */
+	private function rename_page( int $id, string $slug ): void {
+		wp_update_post(
+			[
+				'ID'        => $id,
+				'post_name' => $slug,
+			]
+		);
+	}
+
+	public function test_a_trashed_page_s_older_url_is_not_redirected_to_its_parent_once_the_parent_is_renamed(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$this->about_was_about_us();
+		wp_trash_post( $this->ids['about'] );
+
+		$this->rename_page( $this->ids['company'], 'corp' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ) );
+		$this->assertSame( $this->ids['team'], $this->resolver->resolve( 'page', 'company/about-us/team' )->ID );
+	}
+
+	public function test_a_trashed_page_s_older_url_is_not_redirected_to_its_parent_once_the_parent_is_moved(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$this->about_was_about_us();
+		wp_trash_post( $this->ids['about'] );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['company'],
+				'post_parent' => $this->page( 'org' ),
+			]
+		);
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ) );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_new_parent_once_that_is_renamed(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$org = $this->company_under_org();
+		wp_trash_post( $this->ids['about'] );
+		wp_delete_post( $this->ids['company'], true );
+
+		$this->rename_page( $org, 'group' );
+
+		$this->assertSame( $org, (int) get_post( $this->ids['about'] )->post_parent, 'Precondition: core moved about up under org.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'org/company/about' ) );
+		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'org/company/about/history' )->ID );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_grandparent_once_that_is_renamed(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$org = $this->company_under_org();
+		wp_trash_post( $this->ids['about'] );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['company'] );
+
+		$this->rename_page( $org, 'group' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'org/company/about' ) );
 	}
 
 	public function test_too_many_subpages_to_trash_move_up_instead(): void {
