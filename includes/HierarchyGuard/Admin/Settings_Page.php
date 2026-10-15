@@ -147,14 +147,15 @@ final class Settings_Page {
 	}
 
 	/**
-	 * The browser title of the Redirects tab: the view's name first.
+	 * The browser title of the Redirects tab and the Edit view: the view's name first.
 	 *
 	 * @param string $admin_title The admin page's title, as core builds it.
 	 * @return string
 	 */
 	public function admin_title( $admin_title ): string {
+		$view = $this->edit->is_editing() ? __( 'Edit redirect', 'hierarchy-guard' ) : __( 'Redirects', 'hierarchy-guard' );
 		/* translators: 1: the view of the page, such as Redirects; 2: the page's title, as the browser shows it. */
-		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), __( 'Redirects', 'hierarchy-guard' ), (string) $admin_title );
+		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), $view, (string) $admin_title );
 	}
 
 	/**
@@ -214,10 +215,14 @@ final class Settings_Page {
 	}
 
 	/**
-	 * The Redirects tab: its notices, the search box and the table, in a GET
-	 * form back to this tab, as core's list screens have it.
+	 * The Redirects tab: the Edit view when it is asked for; otherwise its
+	 * notices, the search box and the table, in a GET form back to this tab,
+	 * as core's list screens have it.
 	 */
 	private function render_redirects(): void {
+		if ( $this->edit->render() ) {
+			return;
+		}
 		$table = new Redirects_Table( $this->records );
 		$table->prepare_items();
 

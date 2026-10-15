@@ -24,9 +24,10 @@ if ( ! class_exists( WP_List_Table::class ) ) {
  * Core's list table of the redirects the plugin recorded: Old URL,
  * Redirects to, Code and Status, 20 rows a page sorted by old URL, a search
  * on the old URL, a post type filter when more than one type is supported,
- * and Delete. There is nothing to add. The filter's request argument is
- * TYPE_ARG, never `post_type`: wp-admin/admin.php reads that one before the
- * page loads and, for a plugin page under Settings, refuses to load it.
+ * and Edit and Delete. There is nothing to add. The filter's request
+ * argument is TYPE_ARG, never `post_type`: wp-admin/admin.php reads that one
+ * before the page loads and, for a plugin page under Settings, refuses to
+ * load it.
  */
 final class Redirects_Table extends WP_List_Table {
 
@@ -305,7 +306,7 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * Delete, under the old URL.
+	 * Edit and Delete, under the old URL.
 	 *
 	 * @param array<string,mixed> $item        Record.
 	 * @param string              $column_name Column.
@@ -322,6 +323,13 @@ final class Redirects_Table extends WP_List_Table {
 		$delete = sprintf( __( 'Delete the redirect from %s', 'hierarchy-guard' ), $old );
 		return $this->row_actions(
 			[
+				'edit'   => sprintf(
+					'<a href="%1$s" aria-label="%2$s">%3$s</a>',
+					esc_url( Redirect_Edit::edit_url( $id ) ),
+					/* translators: %s: an old URL, such as /about/team/. */
+					esc_attr( sprintf( __( 'Edit the redirect from %s', 'hierarchy-guard' ), $old ) ),
+					esc_html__( 'Edit', 'hierarchy-guard' )
+				),
 				'delete' => sprintf(
 					'<a href="%1$s" class="submitdelete" aria-label="%2$s" data-hierarchy-guard-confirm="%3$s">%4$s</a>',
 					esc_url( Redirect_Edit::delete_url( $id ) ),
