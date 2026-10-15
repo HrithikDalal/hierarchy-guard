@@ -38,6 +38,15 @@ interface Ledger_View {
 	public function held_in_trash( string $post_type, string $prefix ): bool;
 
 	/**
+	 * The posts in the trash that hold a path, as Ledger::trashed_holders() answers it.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
+	 * @return int[]
+	 */
+	public function trashed_holders( string $post_type, string $prefix ): array;
+
+	/**
 	 * Whether the newest entry for a path is held by a post in the trash, as Ledger::newest_in_trash() answers it.
 	 *
 	 * @param string $post_type Post type name.

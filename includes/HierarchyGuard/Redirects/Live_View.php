@@ -67,6 +67,16 @@ final class Live_View implements Ledger_View {
 	/**
 	 * {@inheritDoc}
 	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
+	 */
+	public function trashed_holders( string $post_type, string $prefix ): array {
+		return Ledger::trashed_holders( $post_type, $prefix );
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
 	 * @param int $id Post ID.
 	 */
 	public function post( int $id ): ?WP_Post {

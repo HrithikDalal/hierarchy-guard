@@ -941,6 +941,103 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'org/company/about/history' )->ID );
 	}
 
+	/**
+	 * Moves company under a new top-level org: org › company › about › { team › leadership, history }.
+	 *
+	 * @return int Org.
+	 */
+	private function company_under_org(): int {
+		$org = $this->page( 'org' );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['company'],
+				'post_parent' => $org,
+			]
+		);
+		return $org;
+	}
+
+	/**
+	 * Gives about an older URL of its own: company/about-us.
+	 */
+	private function about_was_about_us(): void {
+		foreach ( [ 'about-us', 'about' ] as $slug ) {
+			wp_update_post(
+				[
+					'ID'        => $this->ids['about'],
+					'post_name' => $slug,
+				]
+			);
+		}
+	}
+
+	/**
+	 * Renames a page.
+	 *
+	 * @param int    $id   Page.
+	 * @param string $slug New slug.
+	 */
+	private function rename_page( int $id, string $slug ): void {
+		wp_update_post(
+			[
+				'ID'        => $id,
+				'post_name' => $slug,
+			]
+		);
+	}
+
+	public function test_a_trashed_page_s_older_url_is_not_redirected_to_its_parent_once_the_parent_is_renamed(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$this->about_was_about_us();
+		wp_trash_post( $this->ids['about'] );
+
+		$this->rename_page( $this->ids['company'], 'corp' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ) );
+		$this->assertSame( $this->ids['team'], $this->resolver->resolve( 'page', 'company/about-us/team' )->ID );
+	}
+
+	public function test_a_trashed_page_s_older_url_is_not_redirected_to_its_parent_once_the_parent_is_moved(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$this->about_was_about_us();
+		wp_trash_post( $this->ids['about'] );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['company'],
+				'post_parent' => $this->page( 'org' ),
+			]
+		);
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'company/about-us' ) );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_new_parent_once_that_is_renamed(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$org = $this->company_under_org();
+		wp_trash_post( $this->ids['about'] );
+		wp_delete_post( $this->ids['company'], true );
+
+		$this->rename_page( $org, 'group' );
+
+		$this->assertSame( $org, (int) get_post( $this->ids['about'] )->post_parent, 'Precondition: core moved about up under org.' );
+		$this->assertNull( $this->resolver->resolve( 'page', 'org/company/about' ) );
+		$this->assertSame( $this->ids['history'], $this->resolver->resolve( 'page', 'org/company/about/history' )->ID );
+	}
+
+	public function test_a_trashed_page_is_not_redirected_to_its_grandparent_once_that_is_renamed(): void {
+		$this->policy( Settings::POLICY_REPARENT );
+		$org = $this->company_under_org();
+		wp_trash_post( $this->ids['about'] );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['company'] );
+
+		$this->rename_page( $org, 'group' );
+
+		$this->assertNull( $this->resolver->resolve( 'page', 'org/company/about' ) );
+	}
+
 	public function test_too_many_subpages_to_trash_move_up_instead(): void {
 		$this->policy( Settings::POLICY_TRASH_CHILDREN );
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );

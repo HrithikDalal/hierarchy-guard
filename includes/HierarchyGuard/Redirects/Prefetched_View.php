@@ -36,7 +36,7 @@ final class Prefetched_View implements Ledger_View {
 	/**
 	 * Ledger facts by path, shared with the batch.
 	 *
-	 * @var array<string,array{live:int,held:bool,newest:bool}>
+	 * @var array<string,array{live:int,held:bool,newest:bool,trashed:int[]}>
 	 */
 	private array $facts;
 
@@ -105,7 +105,7 @@ final class Prefetched_View implements Ledger_View {
 	 * Constructor.
 	 *
 	 * @param string                                  $post_type Post type name.
-	 * @param array<string,array{live:int,held:bool,newest:bool}> $facts     Ledger facts read so far, by path; the batch adds more.
+	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts     Ledger facts read so far, by path; the batch adds more.
 	 */
 	public function __construct( string $post_type, array &$facts ) {
 		$this->post_type = $post_type;
@@ -151,6 +151,17 @@ final class Prefetched_View implements Ledger_View {
 	public function newest_in_trash( string $post_type, string $prefix ): bool {
 		$this->own( $post_type );
 		return $this->fact( $prefix )['newest'] ?? false;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
+	 */
+	public function trashed_holders( string $post_type, string $prefix ): array {
+		$this->own( $post_type );
+		return $this->fact( $prefix )['trashed'] ?? [];
 	}
 
 	/**
@@ -311,7 +322,7 @@ final class Prefetched_View implements Ledger_View {
 	 * prefixes, which the rules ask for next.
 	 *
 	 * @param string $prefix Normalized path.
-	 * @return array{live:int,held:bool,newest:bool}
+	 * @return array{live:int,held:bool,newest:bool,trashed:int[]}
 	 * @throws OutOfBoundsException When the path was not read yet.
 	 */
 	private function fact( string $prefix ): array {

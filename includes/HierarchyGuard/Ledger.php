@@ -392,10 +392,38 @@ final class Ledger {
 	}
 
 	/**
+	 * The posts in the trash that hold a path: one seek on the meta_key
+	 * index, as many rows as posts hold that one path.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return int[]
+	 */
+	public static function trashed_holders( string $post_type, string $path ): array {
+		global $wpdb;
+
+		$path = Paths::normalize( $path );
+		if ( '' === $path ) {
+			return [];
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Seek on the meta_key index, bounded by the holders of one path; only for a 404.
+		$ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s AND p.post_status = 'trash'",
+				self::key( $post_type, $path ),
+				$post_type
+			)
+		);
+
+		return array_values( array_unique( array_map( 'intval', $ids ) ) );
+	}
+
+	/**
 	 * Whether the newest entry for a path is held by a post in the trash. A
-	 * newer entry on a live post that is not above the path is another
-	 * page's that held the path since; an alias on a page above can be newer
-	 * too, and Rules tells it apart by where that page is.
+	 * newer entry on a live post that is not an ancestor of that post is
+	 * another page's that held the path since; an alias on an ancestor can be
+	 * newer too, and Rules tells it apart by the parent chain.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Path, any form; normalized here.

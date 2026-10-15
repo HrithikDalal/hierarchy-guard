@@ -547,7 +547,7 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->assertFalse( $temporary );
 	}
 
-	public function test_an_older_entry_of_a_page_not_above_the_path_does_not_beat_a_page_in_the_trash(): void {
+	public function test_an_older_entry_of_a_page_not_its_ancestor_does_not_beat_a_page_in_the_trash(): void {
 		$elsewhere = self::factory()->post->create(
 			[
 				'post_type'   => 'page',

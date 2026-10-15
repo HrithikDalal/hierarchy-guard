@@ -71,8 +71,8 @@ final class Rules {
 	 * skipped so a shorter prefix can match. An exact old parent path whose page
 	 * is only in the trash resolves to nothing: a 301 to the grandparent would
 	 * stay in browsers after the page is restored. A live page that is not
-	 * above the path and recorded it after that page did held it since, and
-	 * is redirected to.
+	 * an ancestor of that page and recorded the path after it did held it
+	 * since, and is redirected to.
 	 *
 	 * @param Ledger_View                                 $view      Facts.
 	 * @param string                                      $post_type Post type name.
@@ -101,7 +101,7 @@ final class Rules {
 				if ( Paths::has_trashed_segment( $base ) ) {
 					continue;
 				}
-				if ( count( $segments ) === $length && self::held_for_trash( $view, $post_type, $prefix, $base ) ) {
+				if ( count( $segments ) === $length && self::held_for_trash( $view, $post_type, $prefix, $hit ) ) {
 					return null;
 				}
 			}
@@ -122,20 +122,31 @@ final class Rules {
 
 	/**
 	 * Whether an exact old path a post in the trash holds is left alone: the
-	 * newest entry for it is that post's, or the live hit sits above the path,
-	 * as an alias on a parent does whenever it was written.
+	 * newest entry for it is that post's, or the live hit is an ancestor of
+	 * it, as an alias on a parent is, whenever it was written and wherever
+	 * that parent is now.
 	 *
 	 * @param Ledger_View $view      Facts.
 	 * @param string      $post_type Post type name.
 	 * @param string      $path      Normalized path.
-	 * @param string      $base      The live hit's current path.
+	 * @param int         $hit       The live post that holds the path.
 	 * @return bool
 	 */
-	private static function held_for_trash( Ledger_View $view, string $post_type, string $path, string $base ): bool {
-		if ( ! $view->held_in_trash( $post_type, $path ) ) {
+	private static function held_for_trash( Ledger_View $view, string $post_type, string $path, int $hit ): bool {
+		$holders = $view->trashed_holders( $post_type, $path );
+		if ( [] === $holders ) {
 			return false;
 		}
-		return str_starts_with( $path, $base . '/' ) || $view->newest_in_trash( $post_type, $path );
+		if ( $view->newest_in_trash( $post_type, $path ) ) {
+			return true;
+		}
+		foreach ( $holders as $holder ) {
+			$post = $view->post( $holder );
+			if ( $post instanceof WP_Post && in_array( $hit, array_map( 'intval', get_post_ancestors( $post ) ), true ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
