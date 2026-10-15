@@ -664,9 +664,101 @@ final class ResolverTest extends WP_UnitTestCase {
 			$chosen
 		);
 		foreach ( [ 'old/about', 'old/about/team', 'archive', 'archive/company' ] as $path ) {
-			$live = $this->resolver->resolve( 'page', $path, $live_temporary, $live_code );
-			$this->assertSame( is_string( $live ) ? $live : ( null === $live ? 0 : $live->ID ), is_string( $live ) ? $chosen[ $path ]['url'] : $served[ $path ], $path );
-			$this->assertSame( $live_code, $chosen[ $path ]['code'] ?? 0, $path );
+			$this->assert_batch_agrees( $path, $served, $chosen, $temporary );
 		}
+	}
+
+	/**
+	 * The live resolver's answer for a path, and the batch's for the same
+	 * path: the same post, or URL with the same URL; the same chosen code;
+	 * and the same temporary flag where no code was chosen.
+	 *
+	 * @param string                                   $path      Normalized path.
+	 * @param array<string,int>                        $served    From Batch_Resolver::served().
+	 * @param array<string,array{url:string,code:int}> $chosen    From Batch_Resolver::served().
+	 * @param array<string,true>                       $temporary From Batch_Resolver::served().
+	 */
+	private function assert_batch_agrees( string $path, array $served, array $chosen, array $temporary ): void {
+		$live_temporary = false;
+		$live           = $this->resolver->resolve( 'page', $path, $live_temporary, $live_code );
+		if ( is_string( $live ) ) {
+			$this->assertSame( Batch_Resolver::URL, $served[ $path ] ?? null, $path . ': a URL target, in the batch too.' );
+			$this->assertSame( $live, $chosen[ $path ]['url'] ?? null, $path . ': the same URL.' );
+		} else {
+			$this->assertSame( null === $live ? 0 : $live->ID, $served[ $path ] ?? null, $path );
+			$this->assertSame( '', $chosen[ $path ]['url'] ?? '', $path . ': no URL target.' );
+		}
+		$this->assertSame( $live_code, $chosen[ $path ]['code'] ?? 0, $path );
+		if ( null !== $live && 0 === $live_code ) {
+			$this->assertSame( $live_temporary, isset( $temporary[ $path ] ), $path . ': the same automatic code.' );
+		}
+	}
+
+	public function test_a_chain_that_ends_at_a_url_target_is_served_that_url_live_and_in_batch(): void {
+		$this->ledger->record( $this->company, 'legacy' );
+		$this->ledger->record( $this->about, 'company/old-about' );
+		$this->ledger->set_target( 'page', 'company/old-about', $this->about, 'https://example.org/about/', 0 );
+
+		// Round 1: legacy → company, so company/old-about; round 2: company/old-about answers with its URL.
+		$this->assertSame( 'https://example.org/about/', $this->resolver->resolve( 'page', 'legacy/old-about', $temporary, $code ) );
+		$this->assertSame( 0, $code );
+		$this->assertNull( $this->resolver->resolve( 'page', 'legacy/old-about/team' ), 'A URL target answers its exact path only, at the end of a chain too.' );
+
+		$facts     = [];
+		$temporary = [];
+		$chosen    = [];
+		$served    = Batch_Resolver::served( [ 'legacy/old-about', 'legacy/old-about/team' ], 'page', $facts, $temporary, $chosen );
+		$this->assertSame( Batch_Resolver::URL, $served['legacy/old-about'] );
+		$this->assertSame( 0, $served['legacy/old-about/team'] );
+		foreach ( [ 'legacy/old-about', 'legacy/old-about/team' ] as $path ) {
+			$this->assert_batch_agrees( $path, $served, $chosen, $temporary );
+		}
+	}
+
+	public function test_a_url_answer_through_a_prefix_a_page_in_the_trash_holds_is_temporary_live_and_in_batch(): void {
+		$old = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'old-company',
+			]
+		);
+		$this->ledger->record( $old, 'legacy' );
+		$this->ledger->record( $this->company, 'legacy' );
+		wp_trash_post( $old );
+		$this->ledger->record( $this->about, 'company/old-about' );
+		$this->ledger->set_target( 'page', 'company/old-about', $this->about, 'https://example.org/about/', 0 );
+
+		$temporary = false;
+		$this->assertSame( 'https://example.org/about/', $this->resolver->resolve( 'page', 'legacy/old-about', $temporary, $code ) );
+		$this->assertTrue( $temporary, 'A restore of the page in the Trash could take legacy back.' );
+
+		$facts  = [];
+		$flags  = [];
+		$chosen = [];
+		$served = Batch_Resolver::served( [ 'legacy/old-about' ], 'page', $facts, $flags, $chosen );
+		$this->assertSame( Batch_Resolver::URL, $served['legacy/old-about'] );
+		$this->assertSame( [ 'legacy/old-about' => true ], $flags );
+	}
+
+	public function test_a_page_target_under_a_trashed_page_is_passed_over_and_a_url_target_there_is_not(): void {
+		$this->ledger->record( $this->company, 'firm' );
+		$this->ledger->record( $this->team, 'firm/crew' );
+		wp_trash_post( $this->about );
+		wp_cache_flush();
+
+		// firm/crew's holder sits under the Trash: the shorter prefix answers, firm → company, and company/crew is no page.
+		$this->assertNull( $this->resolver->resolve( 'page', 'firm/crew' ) );
+		$this->ledger->record( $this->company, 'firm/crew' );
+		$this->assertSame( $this->company, $this->resolver->resolve( 'page', 'firm/crew' )->ID, 'A newer live holder outside the Trash answers.' );
+		$this->ledger->forget( $this->company, 'firm/crew' );
+
+		$this->ledger->set_target( 'page', 'firm/crew', $this->team, 'https://example.org/crew/', 0 );
+		$this->assertSame( 'https://example.org/crew/', $this->resolver->resolve( 'page', 'firm/crew' ), 'A URL target does not lead to its page, so where the page sits does not matter.' );
+
+		$facts     = [];
+		$temporary = [];
+		$chosen    = [];
+		$served    = Batch_Resolver::served( [ 'firm/crew' ], 'page', $facts, $temporary, $chosen );
+		$this->assert_batch_agrees( 'firm/crew', $served, $chosen, $temporary );
 	}
 }
