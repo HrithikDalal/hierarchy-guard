@@ -360,6 +360,26 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_a_record_deleted_by_someone_else_after_it_was_found_says_it_no_longer_exists(): void {
+		$id  = $this->recorded( $this->ids['about'], 'old-about' );
+		$key = Ledger::key( 'page', 'old-about' );
+		// Another tab deletes it between find() and delete(): the ledger finds no entry to forget.
+		$gone = static fn( $value, int $object_id, string $meta_key ) => $key === $meta_key ? false : $value;
+		add_filter( 'get_post_metadata', $gone, 10, 3 );
+		$this->follow( Redirect_Edit::delete_url( $id ) );
+
+		( new Redirect_Edit( $this->records ) )->handle();
+		remove_filter( 'get_post_metadata', $gone, 10 );
+
+		$this->assertSame(
+			[
+				'message' => 'This redirect no longer exists.',
+				'type'    => 'error',
+			],
+			$this->kept_notice()
+		);
+	}
+
 	public function test_a_search_drops_the_table_form_s_nonce_from_the_address_and_keeps_the_rest(): void {
 		$_REQUEST['_wp_http_referer'] = '/wp-admin/options-general.php';
 		$_REQUEST['_wpnonce']         = 'x';

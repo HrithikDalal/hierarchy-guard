@@ -290,7 +290,10 @@ final class Redirect_Edit {
 		if ( null === $record ) {
 			return $this->gone();
 		}
-		$this->records->delete( $record );
+		// Deleted since it was found, by another tab or another administrator.
+		if ( ! $this->records->delete( $record ) ) {
+			return $this->gone();
+		}
 		$deleted = esc_html__( 'Redirect deleted.', 'hierarchy-guard' );
 		/* translators: %s: the old URL, such as /about/team/. */
 		$through = sprintf( esc_html__( '%s no longer redirects through it.', 'hierarchy-guard' ), '<code>' . esc_html( $record['old'] ) . '</code>' );
