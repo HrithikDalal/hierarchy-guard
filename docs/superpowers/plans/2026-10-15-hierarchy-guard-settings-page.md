@@ -4,13 +4,13 @@
 
 **Goal:** Give the plugin one admin page, Settings › Hierarchy Guard, whose Settings tab holds the three settings and whose Redirects tab lists, edits and deletes the redirects the plugin recorded, with the resolver, the server and every change's redirect list honouring those edits.
 
-**Architecture:** The ledger also keeps a capped, non-autoloaded list of the newest records' meta IDs per post type, which the Redirects tab reads instead of every record. An edit lives next to the record it changes: `_hierarchy_guard_target_{md5}` = `{ url, code }` beside a post's `_hierarchy_guard_path_{md5}` entry, or `hierarchy_guard_root_targets[ type ][ path ]` for a root-list entry, read and written only by `Ledger`. `Ledger_View::target()` gives the shared `Rules` the override for the record each round uses, so the live `Resolver`, the `Server` and the `Batch_Resolver` behind `Pairs` answer alike: a URL target answers its exact old path only, and a chosen code replaces the automatic one. `Redirects\Records` turns the ledger into a bounded list of records with IDs, statuses and the save and delete operations; `Admin\Settings_Page` (the former Writing section) adds the page and its tabs, `Admin\Redirects_Table` is a core `WP_List_Table`, and `Admin\Redirect_Edit` prints the Edit view and runs every action on the page's load hook behind `manage_options` and a nonce. Delete asks first through a few lines added to core's `common` script; without JavaScript it deletes directly, as core does.
+**Architecture:** The ledger also keeps a capped, non-autoloaded list of the newest records' meta IDs per post type, which the Redirects tab reads instead of every record. An edit lives next to the record it changes: `_hierarchy_guard_target_{md5}` = `{ url, code }` beside a post's `_hierarchy_guard_path_{md5}` entry, or `hierarchy_guard_root_targets[ type ][ path ]` for a root-list entry, read and written only by `Ledger`. `Ledger_View::target()` gives the shared `Rules` the override for the record each round uses, so the live `Resolver`, the `Server` and the `Batch_Resolver` behind `Pairs` answer alike: a URL target answers its exact old path only, and a chosen code replaces the automatic one. `Redirects\Records` turns the ledger into a bounded list of records with IDs, statuses and the save and delete operations; `Admin\Settings_Page` (the former Writing section) adds the page and its tabs, `Admin\Redirects_Table` is a core `WP_List_Table`, and `Admin\Redirect_Edit` prints the Edit view and runs every action on the page's load hook behind `manage_options` and a nonce. Delete asks first through a small `redirects` bundle built with `@wordpress/scripts`; without JavaScript it deletes directly, as core does. Records made before the newest list existed reach it once, from a WP-Cron backfill.
 
-**Tech Stack:** PHP 8.0+, WordPress 6.6+, the plugin's engine, trash flow and admin UI (plans 1 to 3), PHPUnit 9.6 in wp-env, PHPCS (WordPress-Extra, WordPress-VIP-Go, PHPCompatibilityWP), `@wordpress/scripts` 36.1.0 for the existing bundles (this plan adds no JavaScript and no CSS).
+**Tech Stack:** PHP 8.0+, WordPress 6.6+, the plugin's engine, trash flow and admin UI (plans 1 to 3), PHPUnit 9.6 in wp-env, PHPCS (WordPress-Extra, WordPress-VIP-Go, PHPCompatibilityWP), `@wordpress/scripts` 36.1.0 (webpack, ESLint, Vitest 5) for one new bundle without dependencies; this plan adds no CSS.
 
-**Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html`, the approved spec for this plan, as corrected at `a76048c` and updated with this plan for the owner's audit rulings (the newest-records option, the Delete confirmation, the top-level Edit copy and the path input). Read Decisions, "Settings › Hierarchy Guard", "Redirects tab", "Editing a redirect", "Editing a recorded redirect", "Serving a redirect", Data model, Architecture, Testing, Build order step 8, and Out of scope. This plan is build-order step 8. The Tree view is plan 5; the DataViews track, readme.txt, uninstall and the release zip are plan 6.
+**Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html`, the approved spec for this plan, as corrected at `a76048c` and updated with this plan for the owner's audit rulings (the newest-records option and its backfill, the Delete confirmation, the top-level Edit copy and the path input). Read Decisions, "Settings › Hierarchy Guard", "Redirects tab", "Editing a redirect", "Editing a recorded redirect", "Serving a redirect", Data model, Architecture, Testing, Build order step 8, and Out of scope. This plan is build-order step 8. The Tree view is plan 5; the DataViews track, readme.txt, uninstall and the release zip are plan 6.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3, PHP 8.2) before it was written down, and the plan was then replayed from `settings-page` on a scratch branch, task by task, reproducing the prototype exactly. After every task the PHP suite passes (762 tests at the end, also as multisite) and `composer lint` exits 0; the pairs fuzz test passes 400 seeds; `npm run lint:js`, `npm run lint:style`, `npm run test:js` (73 tests) and `npm run build` pass throughout. Both tabs, the Edit view (a page, a URL with a fragment, a path, a top-level entry), Save, and Delete and bulk Delete with their confirmation, accepted and cancelled, were checked in the browser and over HTTP. Three audits (core, scale, UI) were folded in. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3, PHP 8.2) before it was written down, and the plan was then replayed from `settings-page` on a scratch branch, task by task, reproducing the prototype exactly. After every task the PHP suite passes (769 tests at the end, also as multisite) and `composer lint` exits 0; the pairs fuzz test passes 400 seeds; `npm run lint:js`, `npm run lint:style`, `npm run test:js` (81 tests at the end) and `npm run build` pass throughout. Both tabs, the Edit view (a page, a URL with a fragment, a path, a top-level entry), Save, Delete and bulk Delete with their confirmation, accepted and cancelled, and the backfill of the dev site's older records were checked in the browser and over HTTP. Three audits (core, scale, UI) were folded in. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -20,9 +20,9 @@
 - Hierarchy Guard is not a redirect plugin. The Redirects tab manages only the redirects the plugin recorded: edit a record's target and code, or delete it. No Add button, no adding by hand, no import or export, no regex, no hit counts.
 - UI: core admin classes only (`wrap`, `nav-tab-wrapper`, `nav-tab`, `nav-tab-active`, `wp-list-table`, `form-table`, `notice … inline`, `description`, `regular-text code`, `button`, `button-primary`, `submitdelete`, `screen-reader-text`). No colours, radii, shadows or type sizes of the plugin's own; this plan adds no CSS. Status is text, not a pill.
 - Copy: sentence case, no exclamation marks. One translatable string per sentence, `_n()` on a counted noun, a translator comment directly above the one call whose string has the placeholder (never above a string without one), curly quotes and apostrophes. "Trash" is capitalised on PHP screens ("301, or 302 while restoring a page from the Trash could undo the move."). Text domain `hierarchy-guard`. The spec's sentences are used as written, including "Hierarchy Guard" in the Redirects tab's provider notice.
-- Scale: nothing in a web request grows with the total number of recorded redirects beyond one page of 20 rows plus bounded counts. A listing reads the newest `Subtree::count_cap()` (default 1,000) post entries from `hierarchy_guard_recent_records` (one option read, then one `meta_id IN (…)` query on primary keys with `STRAIGHT_JOIN` to posts, no derived or temporary table), filtered by type through each type's own list, plus the root list (at most 200 paths per type), and sorts, searches and counts only those; past the cap the count shows as "1,000+". Overrides, statuses and holders are read for the page's 20 rows only; an exact search past the cap is one hashed seek per type. A bulk delete takes at most 20 IDs. There is no backfill of the newest list.
+- Scale: nothing in a web request grows with the total number of recorded redirects beyond one page of 20 rows plus bounded counts. A listing reads the newest `Subtree::count_cap()` (default 1,000) post entries from `hierarchy_guard_recent_records` (one option read, then one `meta_id IN (…)` query on primary keys with `STRAIGHT_JOIN` to posts, no derived or temporary table), filtered by type through each type's own list, plus the root list (at most 200 paths per type), and sorts, searches and counts only those; past the cap the count shows as "1,000+". Overrides, statuses and holders are read for the page's 20 rows only; a search adds one hashed seek per type, which finds any record at that exact old URL. A bulk delete takes at most 20 IDs. Records made before the list existed reach it once, from the WP-Cron event `hierarchy_guard_backfill_recent` (one query per type ordered by `meta_id DESC`, `LIMIT` 1,001): a one-time cost, never in a web request; afterwards a page load only reads the autoloaded `hierarchy_guard_recent_state`.
 - Request arguments: no argument of the Redirects tab is named `post_type` or `taxonomy`; wp-admin/admin.php reads them before the page loads and, for a plugin page under Settings, refuses to load it. The type filter is `redirect_type`.
-- Delete asks first, from a row, the Edit view or in bulk (once for the selection), with `window.confirm()` added to core's `common` script: "Delete the redirect from %s?" and "This can’t be undone.", or "Delete the selected redirects?" and "This can’t be undone.". Without JavaScript it deletes directly, as core does for terms and media.
+- Delete asks first, from a row, the Edit view or in bulk (once for the selection), with `window.confirm()` from the `redirects` bundle (`src/redirects/`, under ESLint and Vitest), enqueued on the Redirects tab only; the questions come from data attributes the page prints: "Delete the redirect from %s?" and "This can’t be undone.", or "Delete the selected redirects?" and "This can’t be undone.". Without JavaScript it deletes directly, as core does for terms and media.
 - Right-to-left: an old URL prints in `<code>` and every other URL in `<span dir="ltr">` (an attribute, not CSS), so it reads left to right in a right-to-left admin.
 - Every query goes through `$wpdb->prepare()`; `IN` lists are built only from `%s` or `%d` placeholders or integer-cast IDs.
 - The ledger, `Resolver` and `Server` behave exactly as before, except for honouring overrides; with no override stored every answer, pair and CSV row is unchanged.
@@ -47,7 +47,7 @@
 
 Settled for this plan, by the spec or the owner; reviewers should not re-raise them.
 
-- The newest 1,000 records (owner ruling): the ledger keeps `hierarchy_guard_recent_records`, the newest record meta IDs per post type, at most 1,000, updated in `record()` and whenever a ledger row is deleted. The Redirects tab sorts that window by old URL, filters by type through the type's own list, and shows "1,000+" past the cap; a search for a full old URL still finds any record by its key. There is no backfill: records made before this plan are not listed until they are recorded again, and no live site has any yet.
+- The newest 1,000 records (owner ruling): the ledger keeps `hierarchy_guard_recent_records`, the newest record meta IDs per post type, at most 1,000, updated in `record()` and whenever a ledger row is deleted. The Redirects tab sorts that window by old URL, filters by type through the type's own list, and shows "1,000+" past the cap; a search for a full old URL or path finds any record by its key, whatever the list holds. Records made before the list existed reach it once, from a WP-Cron backfill scheduled on activation or the first admin load after an update; until it has run, the tab says the list is still being built. On hosts without cron, `wp cron event run hierarchy_guard_backfill_recent` runs it.
 - Delete asks first (owner ruling), as core does for terms and media; without JavaScript it deletes directly. The notice says the old URL "no longer redirects through it": a shorter recorded URL, or core's own 404 guess, may still send it somewhere.
 - A top-level root-list entry (owner ruling): its Edit view says where it leads, its field starts empty, and empty keeps it. A root-list entry given a URL target cannot be turned back into "Top level" except by deleting it.
 - A record lives with its holder. A URL target on a page that is in the Trash is not served (the ledger never answers from a holder in the Trash), and its row reads "the page it points to isn’t published". When a page is deleted for good its records go with it; the old paths `before_delete_post` moves to the grandparent or the root list arrive there without their overrides.
@@ -63,9 +63,9 @@ Settled for this plan, by the spec or the owner; reviewers should not re-raise t
 
 ```
 includes/HierarchyGuard/
-├── Ledger.php                         MOD  overrides: target_key(), target(), set_target(), clean_target(), root_paths(); records drop them; the newest-records list: recent(), on_deleted_meta()
+├── Ledger.php                         MOD  overrides: target_key(), target(), set_target(), clean_target(), root_paths(); records drop them; the newest-records list: recent(), on_deleted_meta(), its one-time backfill
 ├── Settings.php                       MOD  GROUP, register_option()
-├── Plugin.php                         MOD  wiring, deleted_post_meta → Ledger::on_deleted_meta
+├── Plugin.php                         MOD  wiring, deleted_post_meta → Ledger::on_deleted_meta, the backfill's hooks
 ├── Redirects/Ledger_View.php          MOD  target()
 ├── Redirects/Live_View.php            MOD  target() from the ledger
 ├── Redirects/Prefetched_View.php      MOD  target() from facts read ahead
@@ -76,10 +76,13 @@ includes/HierarchyGuard/
 ├── Redirects/Pairs.php                MOD  URL targets and chosen codes in a change's list; ledger key in the cache key
 ├── Redirects/Records.php              NEW  records: bounded listing, IDs, statuses, save, delete
 └── Admin/
-    ├── Settings_Section.php → Settings_Page.php   MOV  menu, nav tabs, Settings tab, Plugins link, load hook, titles, the Delete confirmation script
+    ├── Settings_Section.php → Settings_Page.php   MOV  menu, nav tabs, Settings tab, Plugins link, load hook, titles
     ├── Redirects_Table.php            NEW  WP_List_Table of records
     ├── Redirect_Edit.php              NEW  Edit view; save, delete and bulk delete behind manage_options and nonces
-    ├── Notices.php · Assets.php       MOD  links to the new page
+    ├── Notices.php · Assets.php       MOD  links to the new page; Assets enqueues the redirects bundle on the tab
+hierarchy-guard.php                    MOD  the backfill on activation and deactivation
+src/redirects/  confirm.js · index.js · test/confirm.test.js   NEW  Delete asks first
+webpack.config.js                      MOD  the redirects entry
 README.md                              MOD
 src/common/test/change-notice.test.js  MOD  the settings URL it sets
 tests/phpunit/
@@ -96,7 +99,8 @@ tests/phpunit/
 
 **Files:**
 - Modify: `includes/HierarchyGuard/Ledger.php` (three constants, `target_key()`, `target()`, `set_target()`, `clean_target()`, `root_paths()`, `recent()`, `on_deleted_meta()`, private helpers; `record()` lists each new entry; `record_root()`, `claim()`, `forget()`, `forget_root()` and `prune()` drop the override with the record; `deferred()` writes the list once)
-- Modify: `includes/HierarchyGuard/Plugin.php` (hooks `Ledger::on_deleted_meta` on `deleted_post_meta`)
+- Modify: `includes/HierarchyGuard/Plugin.php` (hooks `Ledger::on_deleted_meta` on `deleted_post_meta`, `Ledger::schedule_backfill` on `admin_init`, `Ledger::backfill` on its cron event)
+- Modify: `hierarchy-guard.php` (activation schedules the backfill, deactivation clears it)
 - Test: `tests/phpunit/LedgerTest.php`
 
 **Interfaces:**
@@ -108,7 +112,8 @@ tests/phpunit/
 - Produces: `Ledger::root_paths(): array<string,string[]>`: the root list option as read today.
 - Produces: `Ledger::RECENT = 'hierarchy_guard_recent_records'`, a non-autoloaded option `[ type => [ 'ids' => int[] newest first, 'more' => bool ] ]`. `record()` puts each new entry's meta ID at the front of its type's list, keeping at most `Subtree::count_cap()` and setting `more` when one falls off; inside `Ledger::deferred()` the IDs wait and are written once at its end.
 - Produces: `Ledger::recent( string[] $types ): array{ids:int[],more:bool}`: the listed types' IDs merged newest first, at most `Subtree::count_cap()`; `more` when older entries exist. One option read.
-- Produces: `Ledger::on_deleted_meta( $meta_ids, $object_id, $meta_key ): void`, hooked on `deleted_post_meta` (3 arguments) by `Plugin`: a deleted `_hierarchy_guard_path_` row leaves the list, however it was deleted (`forget()`, `prune()`, `claim()`, core deleting the post). There is no backfill: entries recorded before this plan are not on the list.
+- Produces: `Ledger::on_deleted_meta( $meta_ids, $object_id, $meta_key ): void`, hooked on `deleted_post_meta` (3 arguments) by `Plugin`: a deleted `_hierarchy_guard_path_` row leaves the list, however it was deleted (`forget()`, `prune()`, `claim()`, core deleting the post).
+- Produces: the one-time backfill, for entries recorded before the list existed. `Ledger::RECENT_STATE = 'hierarchy_guard_recent_state'` (autoloaded: `building` or `done`) and `Ledger::BACKFILL_HOOK = 'hierarchy_guard_backfill_recent'`. `Ledger::schedule_backfill(): void` (activation and `admin_init`) returns at once when the state is `done`; otherwise sets `building` and schedules the single WP-Cron event if it isn't scheduled. `Ledger::backfill(): void` (the event only, never a web request) reads each supported type's newest `count_cap() + 1` entry IDs in one query ordered by `meta_id DESC`, merges them with the list (entries recorded meanwhile are kept), and sets `done`; running it again changes nothing. `Ledger::backfilling(): bool` and `Ledger::unschedule_backfill(): void` (deactivation; an unfinished backfill is scheduled again on the next activation).
 - Behaviour kept: `record()`, `find()`, `claim()` and the trash lookups answer as before; the only new writes are the newest-records list and the override deletions that go with a record.
 
 - [ ] **Step 1: Write the failing tests**
@@ -123,6 +128,8 @@ with:
 		delete_option( Ledger::ROOT_OPTION );
 		delete_option( Ledger::ROOT_TARGETS );
 		delete_option( Ledger::RECENT );
+		delete_option( Ledger::RECENT_STATE );
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
 		Post_Types::reset();
 ```
 
@@ -399,6 +406,101 @@ Append to the class in `tests/phpunit/LedgerTest.php`:
 		$this->assertFalse( $inside, 'Nothing is written while deferred.' );
 		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
 	}
+
+	/**
+	 * An entry written straight into post meta, as records made before the
+	 * newest-records list existed are: not on the list.
+	 *
+	 * @param int    $post_id Post.
+	 * @param string $path    Normalized path.
+	 * @return int Meta ID.
+	 */
+	private function old_entry( int $post_id, string $path ): int {
+		return (int) add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true );
+	}
+
+	public function test_records_made_before_the_list_reach_it_once_the_backfill_runs(): void {
+		$first  = $this->old_entry( $this->about, 'first' );
+		$second = $this->old_entry( $this->about, 'second' );
+		$this->assertSame( [], $this->ledger->recent( [ 'page' ] )['ids'], 'Precondition: not on the list.' );
+
+		Ledger::schedule_backfill();
+		$this->assertTrue( Ledger::backfilling() );
+		$this->assertNotFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'It runs from WP-Cron.' );
+
+		$this->assertSame( 'hierarchy_guard_backfill_recent', Ledger::BACKFILL_HOOK );
+		do_action( 'hierarchy_guard_backfill_recent' );
+
+		$this->assertSame( [ $second, $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
+		$this->assertFalse( Ledger::backfilling() );
+		$this->assertSame( 'done', get_option( Ledger::RECENT_STATE ) );
+	}
+
+	public function test_the_backfill_is_idempotent_keeps_what_was_recorded_meanwhile_and_stops_at_the_cap(): void {
+		$old = [];
+		foreach ( [ 'a', 'b', 'c' ] as $path ) {
+			$old[] = $this->old_entry( $this->about, $path );
+		}
+		$this->ledger->record( $this->about, 'meanwhile' );
+		$meanwhile = $this->meta_id( $this->about, 'meanwhile' );
+
+		Ledger::backfill();
+		$once = get_option( Ledger::RECENT );
+		Ledger::backfill();
+
+		$this->assertSame( $once, get_option( Ledger::RECENT ), 'Running it again changes nothing.' );
+		$this->assertSame( [ $meanwhile, $old[2], $old[1], $old[0] ], $this->ledger->recent( [ 'page' ] )['ids'] );
+
+		delete_option( Ledger::RECENT );
+		$cap = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		Ledger::backfill();
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+		$this->assertSame(
+			[
+				'ids'  => [ $meanwhile, $old[2] ],
+				'more' => true,
+			],
+			$this->ledger->recent( [ 'page' ] ),
+			'One bounded query per type: the newest, and whether there are older ones.'
+		);
+	}
+
+	public function test_once_built_a_normal_load_runs_nothing(): void {
+		global $wp_filter;
+
+		Ledger::schedule_backfill();
+		Ledger::backfill();
+		wp_clear_scheduled_hook( Ledger::BACKFILL_HOOK );
+
+		$queries = get_num_queries();
+		Ledger::schedule_backfill();
+		$this->assertSame( $queries, get_num_queries(), 'One read of an autoloaded option.' );
+		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ), 'Nothing is scheduled again.' );
+
+		$hooked = static function ( string $hook, string $method ) use ( $wp_filter ): bool {
+			foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
+				if ( [ Ledger::class, $method ] === $callback['function'] ) {
+					return true;
+				}
+			}
+			return false;
+		};
+		$this->assertTrue( $hooked( 'admin_init', 'schedule_backfill' ) );
+		$this->assertTrue( $hooked( Ledger::BACKFILL_HOOK, 'backfill' ) );
+		foreach ( [ 'init', 'wp', 'template_redirect', 'admin_init' ] as $hook ) {
+			$this->assertFalse( $hooked( $hook, 'backfill' ), "The backfill never runs on $hook." );
+		}
+	}
+
+	public function test_deactivation_clears_an_unfinished_backfill(): void {
+		Ledger::schedule_backfill();
+
+		Ledger::unschedule_backfill();
+
+		$this->assertFalse( wp_next_scheduled( Ledger::BACKFILL_HOOK ) );
+		$this->assertFalse( get_option( Ledger::RECENT_STATE ), 'The next activation schedules it again.' );
+	}
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -427,6 +529,8 @@ with:
 	public const ROOT_OPTION   = 'hierarchy_guard_root_paths';
 	public const ROOT_TARGETS  = 'hierarchy_guard_root_targets';
 	public const RECENT        = 'hierarchy_guard_recent_records';
+	public const RECENT_STATE  = 'hierarchy_guard_recent_state';
+	public const BACKFILL_HOOK = 'hierarchy_guard_backfill_recent';
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
 
@@ -750,6 +854,78 @@ with:
 	}
 
 	/**
+	 * Schedules the one-time backfill of the newest-records list, on
+	 * activation and on admin_init, while the list was never built: records
+	 * made before the list existed reach it from WP-Cron, never in a web
+	 * request. Once built, this is one read of an autoloaded option.
+	 */
+	public static function schedule_backfill(): void {
+		$state = get_option( self::RECENT_STATE );
+		if ( 'done' === $state ) {
+			return;
+		}
+		if ( 'building' !== $state ) {
+			update_option( self::RECENT_STATE, 'building', true );
+		}
+		if ( false === wp_next_scheduled( self::BACKFILL_HOOK ) ) {
+			wp_schedule_single_event( time(), self::BACKFILL_HOOK );
+		}
+	}
+
+	/**
+	 * Clears the backfill on deactivation; one not finished is scheduled
+	 * again on the next activation.
+	 */
+	public static function unschedule_backfill(): void {
+		wp_clear_scheduled_hook( self::BACKFILL_HOOK );
+		if ( 'building' === get_option( self::RECENT_STATE ) ) {
+			delete_option( self::RECENT_STATE );
+		}
+	}
+
+	/**
+	 * Whether the newest-records list is still being built.
+	 *
+	 * @return bool
+	 */
+	public static function backfilling(): bool {
+		return 'building' === get_option( self::RECENT_STATE );
+	}
+
+	/**
+	 * The one-time backfill, on its WP-Cron event: each supported type's list
+	 * gets the newest Subtree::count_cap() entries of that type, in one query
+	 * per type ordered by meta ID, merged with what the list already holds,
+	 * so running it again changes nothing. Then it marks itself done.
+	 */
+	public static function backfill(): void {
+		global $wpdb;
+
+		$cap   = Subtree::count_cap();
+		$found = [];
+		foreach ( Post_Types::supported() as $type ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Once per site, from WP-Cron: the newest entries of one type, LIMIT the cap plus one.
+			$found[ $type ] = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT pm.meta_id FROM {$wpdb->postmeta} pm STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key LIKE %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT %d", $wpdb->esc_like( self::KEY_PREFIX ) . '%', $type, $cap + 1 ) ) );
+		}
+
+		// Entries recorded while the queries ran are kept.
+		$all = get_option( self::RECENT, [] );
+		$all = is_array( $all ) ? $all : [];
+		foreach ( $found as $type => $ids ) {
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+			$ids  = array_values( array_unique( array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
+			rsort( $ids );
+
+			$all[ $type ] = [
+				'ids'  => array_slice( $ids, 0, $cap ),
+				'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
+			];
+		}
+		update_option( self::RECENT, $all, false );
+		update_option( self::RECENT_STATE, 'done', true );
+	}
+
+	/**
 	 * Takes entries out of the newest-records list when their rows are
 	 * deleted, by forget(), prune(), claim() or core deleting their post:
 	 * hooked on deleted_post_meta. Other keys cost a prefix check.
@@ -891,14 +1067,32 @@ with:
 
 		// The newest-records list drops an entry whenever its row goes, however it goes.
 		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
+		// Records made before the list existed reach it once, from WP-Cron.
+		add_action( 'admin_init', [ Ledger::class, 'schedule_backfill' ] );
+		add_action( Ledger::BACKFILL_HOOK, [ Ledger::class, 'backfill' ] );
 
 		$ledger    = new Ledger();
+```
+
+In `hierarchy-guard.php`, replace:
+```php
+register_activation_hook( __FILE__, [ Batch\Processor::class, 'activate' ] );
+register_deactivation_hook( __FILE__, [ Batch\Processor::class, 'deactivate' ] );
+
+```
+with:
+```php
+register_activation_hook( __FILE__, [ Batch\Processor::class, 'activate' ] );
+register_activation_hook( __FILE__, [ Ledger::class, 'schedule_backfill' ] );
+register_deactivation_hook( __FILE__, [ Batch\Processor::class, 'deactivate' ] );
+register_deactivation_hook( __FILE__, [ Ledger::class, 'unschedule_backfill' ] );
+
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter LedgerTest`
-Expected: PASS (34 tests).
+Expected: PASS (38 tests).
 
 Run: `npm run test:php` then `composer lint`
 Expected: the whole suite passes, with the new tests counted; lint exits 0. Run `composer lint:fix` first if it reports alignment; formatting-only changes are not deviations.
@@ -906,7 +1100,7 @@ Expected: the whole suite passes, with the new tests counted; lint exits 0. Run 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add includes/HierarchyGuard/Ledger.php includes/HierarchyGuard/Plugin.php tests/phpunit/LedgerTest.php
+git add hierarchy-guard.php includes/HierarchyGuard/Ledger.php includes/HierarchyGuard/Plugin.php tests/phpunit/LedgerTest.php
 git commit -m "feat: keep a recorded redirect's override beside its record"
 ```
 
@@ -2318,11 +2512,11 @@ git commit -m "feat: list a change's redirects with the overrides the server hon
 - Consumes: `Ledger::record()`, `forget()`, `forget_root()`, `target()`, `set_target()`, `clean_target()`, `root_paths()`, `key()`, `target_key()`, `KEY_PREFIX`; `Batch_Resolver::owners()`, `prime_with_ancestors()`; `Server::prefix()`; `Subtree::count_cap()`; `Paths::url()`, `relative()`, `normalize()`, `uri()`, `has_trashed_segment()`.
 - Produces: a record, `array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}`. `holder` is the post holding the `_hierarchy_guard_path_{md5}` row, 0 for a root-list entry; `path` is the stored, normalized path; `old` is the old URL relative to the home URL, percent-decoded for reading (`/café/`); `target` is the override or null.
 - Produces: `Records::id( int $holder, string $post_type, string $path ): string` = `"{holder}.{md5(type:path)}"`; `Records::find( string $id ): ?array` accepts only `^\d{1,20}\.[0-9a-f]{32}$` naming an existing record of a supported type whose hash is of its holder's own type.
-- Produces: `Records::page( string $post_type, string $search, int $page ): array{rows:array,total:int,page:int,capped:bool}`: `PER_PAGE` (20) rows sorted by old URL (then type, then holder) across the newest `Subtree::count_cap()` post entries of the listed types (`Ledger::recent()`) plus the root list; search is a case-insensitive substring of the old URL, and a full URL is matched as its path; `page` is the page shown, the last one when the request asks for one past it; `capped` when older post entries exist, in which case an exact old URL is still found by its hashed key.
+- Produces: `Records::page( string $post_type, string $search, int $page ): array{rows:array,total:int,page:int,capped:bool}`: `PER_PAGE` (20) rows sorted by old URL (then type, then holder) across the newest `Subtree::count_cap()` post entries of the listed types (`Ledger::recent()`) plus the root list; search is a case-insensitive substring of the old URL, and a full URL is matched as its path; `page` is the page shown, the last one when the request asks for one past it; `capped` when older post entries exist. A search also finds, by its hashed key, any entry at the exact old URL or path it names, whatever the newest list holds.
 - Produces: `Records::statuses( array $rows ): array<string,string>` by ID, one of `STATUS_IN_USE`, `STATUS_UNPUBLISHED`, `STATUS_OFF`, `STATUS_ACTIVE`, the first that applies.
 - Produces: `Records::target_url( array $record ): string`, the URL the Edit view offers ('' for a top-level root-list entry); `Records::is_top_level( array $record ): bool` (a root-list entry with no URL target); `Records::save( array $record, string $url, int $code ): true|WP_Error` with codes `hierarchy_guard_no_url`, `hierarchy_guard_not_http`, `hierarchy_guard_same_path`, `hierarchy_guard_not_saved`; `Records::delete( array $record ): bool`.
 - Save reads a value starting with one `/` as a path on this site (`home_url( $path )`); `//host` and a value with no typed `http(s)` scheme are refused. An empty field saves only the code for a top-level entry and is refused otherwise.
-- Bounds: one option read for the newest list, then one query of `meta_id IN (…)` (at most `count_cap()` primary-key lookups) with `STRAIGHT_JOIN` to posts on their primary key, no derived or temporary table; one query for a page's overrides; one per type for the pages at the old URLs; one hashed seek for an exact search past the cap. Nothing reads every record.
+- Bounds: one option read for the newest list, then one query of `meta_id IN (…)` (at most `count_cap()` primary-key lookups) with `STRAIGHT_JOIN` to posts on their primary key, no derived or temporary table; one query for a page's overrides; one per type for the pages at the old URLs; one hashed seek per search. Nothing reads every record.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2885,6 +3079,18 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['company'], $this->ledger->find( 'page', 'old-about' ) );
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['company'] ), 'A page target, with no URL kept.' );
 	}
+
+	public function test_a_full_url_search_finds_any_record_at_that_exact_url_whatever_the_newest_list_holds(): void {
+		// Written straight into post meta: not on the newest list, and the list does not say there are older ones.
+		add_post_meta( $this->ids['about'], Ledger::key( 'page', 'not-listed' ), 'not-listed', true );
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->assertSame( [ '/archive/' ], array_values( self::olds( $this->records->page( '', '', 1 ) ) ), 'Precondition: only the root list is listed.' );
+		$this->assertFalse( $this->records->page( '', '', 1 )['capped'] );
+
+		$this->assertSame( [ '/not-listed/' ], array_values( self::olds( $this->records->page( '', home_url( '/not-listed/' ), 1 ) ) ) );
+		$this->assertSame( [ '/not-listed/' ], array_values( self::olds( $this->records->page( '', '/not-listed/', 1 ) ) ), 'A path works as well.' );
+		$this->assertSame( [ '/archive/' ], array_values( self::olds( $this->records->page( '', home_url( '/archive/' ), 1 ) ) ), 'A root-list entry by its full URL.' );
+	}
 }
 ```
 
@@ -2978,7 +3184,8 @@ final class Records {
 	/**
 	 * One page of records sorted by old URL, how many match, the page shown,
 	 * which is the last one when the page asked for is past it, and whether
-	 * older post entries exist than the newest ones listed.
+	 * older post entries exist than the newest ones listed. A search also
+	 * finds, by its hashed key, any entry at the exact old URL it names.
 	 *
 	 * @param string $post_type A supported type to list alone, or '' for every supported type.
 	 * @param string $search    Text the old URL contains, or ''.
@@ -3006,10 +3213,8 @@ final class Records {
 			// A full URL is matched as the path the Old URL column shows.
 			$needle = '' !== (string) wp_parse_url( $search, PHP_URL_HOST ) ? rawurldecode( Paths::relative( $search ) ) : $search;
 			$rows   = array_filter( $rows, static fn( array $row ): bool => false !== stripos( $row['old'], $needle ) );
-			if ( $capped ) {
-				// An entry past the cap is still found by its exact old URL.
-				$rows += $this->exact( $types, $search );
-			}
+			// Any entry is found by its exact old URL, whether the newest list holds it or not.
+			$rows += $this->exact( $types, $search );
 		}
 
 		uasort( $rows, [ self::class, 'compare' ] );
@@ -3405,7 +3610,7 @@ final class Records {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter RecordsTest`
-Expected: PASS (24 tests).
+Expected: PASS (25 tests).
 
 Run: `npm run test:php` then `composer lint`
 Expected: the whole suite passes, with the new tests counted; lint exits 0. Run `composer lint:fix` first if it reports alignment; formatting-only changes are not deviations.
@@ -4216,15 +4421,16 @@ git commit -m "feat: move the settings to Settings › Hierarchy Guard"
 ### Task 7: The Redirects tab: table, notices, Delete and bulk Delete
 
 **Files:**
-- Create: `includes/HierarchyGuard/Admin/Redirects_Table.php`, `includes/HierarchyGuard/Admin/Redirect_Edit.php`
-- Modify: `includes/HierarchyGuard/Admin/Settings_Page.php` (records, load hook, the Redirects tab), `includes/HierarchyGuard/Plugin.php`
-- Test: `tests/phpunit/RedirectsTabTest.php` (new), `tests/phpunit/SettingsPageTest.php`
+- Create: `includes/HierarchyGuard/Admin/Redirects_Table.php`, `includes/HierarchyGuard/Admin/Redirect_Edit.php`, `src/redirects/confirm.js`, `src/redirects/index.js`
+- Modify: `includes/HierarchyGuard/Admin/Settings_Page.php` (records, load hook, the Redirects tab), `includes/HierarchyGuard/Plugin.php`, `includes/HierarchyGuard/Admin/Assets.php` (the `redirects` bundle on the tab), `webpack.config.js` (its entry)
+- Test: `tests/phpunit/RedirectsTabTest.php` (new), `tests/phpunit/SettingsPageTest.php`, `tests/phpunit/AssetsTest.php`, `src/redirects/test/confirm.test.js` (new)
 
 **Interfaces:**
 - Consumes: `Records` (Task 5), `Settings_Page::url()` (Task 6), `Providers::detect()`, `Settings::serve_redirects()`, `Subtree::count_cap()`.
 - Produces: `Admin\Redirects_Table extends WP_List_Table` (`singular` redirect, `plural` redirects, screen `settings_page_hierarchy-guard`): columns `cb`, `old` (primary), `target`, `http_code` (not `code`: a cell carries its key as a class, and core's admin CSS sets `.code` in a monospace font), `status`; bulk action `delete`; row action Delete; a post type filter when two or more types are supported, whose argument is `TYPE_ARG = 'redirect_type'` (wp-admin/admin.php reads `post_type` before the page loads and then refuses to load a plugin page under Settings); static `search()` (percent-decoded before `sanitize_text_field()`, which strips octets), `post_type()`, `old_label( array $item ): string` (escaped HTML, the old URL in `<code>`), `status_label( string $status ): string`; `is_capped(): bool`; `get_pagenum()` returns the page `Records::page()` showed; `pagination()` shows the count as "1,000+ items" past the cap. URLs in the Redirects to column sit in `<span dir="ltr">`. Empty states: "No redirects found." under a type filter, "No redirects match your search.", "No redirects have been recorded yet."
 - Produces: `Admin\Redirect_Edit::__construct( Records $records )`, `NONCE_DELETE = 'hierarchy_guard_delete_'` (plus the record ID), `NONCE_BULK = 'bulk-redirects'` (the table's own `bulk-{plural}` nonce), `delete_url( string $id ): string`, `confirm_one( string $old ): string` ("Delete the redirect from %s?" and "This can’t be undone.", two strings), `handle(): ?string` (where to redirect, or null to print the page). It runs nothing when `filter_action` is set, as core's `current_action()` does, then reads `action`, then `action2`, so the bottom bulk selector works without JavaScript; it checks `manage_options` (else `wp_die()` 403) and the nonce (`check_admin_referer()`) before it changes anything. A request carrying the bulk nonce is a bulk request: with no rows ticked it returns to the list, and it deletes at most `Records::PER_PAGE` string IDs. Notices, in the spec's words ("Redirect deleted. `<code>/about/team/</code>` no longer redirects through it."), go through `add_settings_error()` and the `settings_errors` transient with `settings-updated=true`, as `options.php` does, so core's options header prints them.
-- Produces: `Settings_Page::__construct( Providers $providers, Records $records )`, `current_tab(): string` (`redirects` or `settings`), `load()` on the page's `load-{hook}`: runs `Redirect_Edit::handle()` on the Redirects tab, then `wp_safe_redirect()` and `exit`; otherwise sets the screen's list headings for screen readers, filters `admin_title` ("Redirects ‹ …"), and adds `Settings_Page::confirm_script()` to core's `common` script: a click on an `a[data-hierarchy-guard-confirm]` and a bulk Delete (asked once, from `data-hierarchy-guard-confirm` on the form or, for one ticked row, its box's `data-hierarchy-guard-confirm-one`) ask with `window.confirm()`. The Redirects tab prints "Search results for:" beside the heading while searching, and the redirects-off notice links to the Settings tab's Redirects field.
+- Produces: `Settings_Page::__construct( Providers $providers, Records $records )`, `current_tab(): string` (`redirects` or `settings`), `load()` on the page's `load-{hook}`: runs `Redirect_Edit::handle()` on the Redirects tab, then `wp_safe_redirect()` and `exit`; otherwise sets the screen's list headings for screen readers and filters `admin_title` ("Redirects ‹ …"). The Redirects tab prints "Search results for:" beside the heading while searching, a notice while `Ledger::backfilling()` ("The list of recorded redirects is still being built. Older redirects appear here once it’s done."), and the redirects-off notice with a link to the Settings tab's Redirects field.
+- Produces: the `redirects` bundle (`src/redirects/`, built to `build/redirects.js`), which `Assets::enqueue_admin()` enqueues on `settings_page_hierarchy-guard` when the tab is Redirects. `confirm.js` exports `linkQuestion( target )` (the `data-hierarchy-guard-confirm` of the Delete link clicked, or null), `bulkQuestion( form, submitter )` (for `#doaction` or `#doaction2` with Delete chosen in that selector and rows ticked: the form's `data-hierarchy-guard-confirm`, or the one ticked box's `data-hierarchy-guard-confirm-one`; null for Filter, the search or anything else) and `guard( event, question, ask )` (asks, and calls `preventDefault()` on Cancel). `index.js` binds them to `click` and `submit` with `window.confirm()`. The questions come from the page, so the bundle needs no translations. Without JavaScript the Delete runs directly, as in core.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4281,6 +4487,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		delete_option( Ledger::ROOT_OPTION );
 		delete_option( Ledger::ROOT_TARGETS );
 		delete_option( Ledger::RECENT );
+		delete_option( Ledger::RECENT_STATE );
 		delete_transient( 'settings_errors' );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
@@ -4690,11 +4897,8 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( "#id='current-page-selector' type='text'\\s+name='paged' value='1'#", $html, 'The pager agrees with the rows.' );
 	}
 
-	public function test_the_list_is_named_for_screen_readers_and_in_the_title_and_asks_before_a_delete(): void {
+	public function test_the_list_is_named_for_screen_readers_and_in_the_title(): void {
 		$this->recorded( $this->ids['about'], 'old-about' );
-		$scripts                                       = wp_scripts();
-		$before                                        = $scripts->registered['common']->extra['after'] ?? null;
-		$scripts->registered['common']->extra['after'] = [];
 
 		$this->page->load();
 		$html = $this->rendered();
@@ -4702,10 +4906,19 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '#<h2 class=[\'"]screen-reader-text[\'"]>Redirects list</h2>#', $html );
 		$this->assertSame( 10, has_filter( 'admin_title', [ $this->page, 'admin_title' ] ) );
 		$this->assertSame( 'Redirects ‹ Hierarchy Guard ‹ Site — WordPress', $this->page->admin_title( 'Hierarchy Guard ‹ Site — WordPress' ) );
-		$this->assertStringContainsString( 'window.confirm', implode( '', (array) $scripts->registered['common']->extra['after'] ) );
 		$this->assertStringContainsString( '<hr class="wp-header-end">', $html );
 		remove_filter( 'admin_title', [ $this->page, 'admin_title' ] );
-		$scripts->registered['common']->extra['after'] = $before;
+	}
+
+	public function test_while_the_newest_list_is_built_the_tab_says_so(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+		$this->assertStringNotContainsString( 'still being built', $this->rendered() );
+
+		update_option( Ledger::RECENT_STATE, 'building' );
+		$this->assertStringContainsString( '<div class="notice notice-info inline"><p>The list of recorded redirects is still being built. Older redirects appear here once it’s done.</p></div>', $this->rendered() );
+
+		update_option( Ledger::RECENT_STATE, 'done' );
+		$this->assertStringNotContainsString( 'still being built', $this->rendered() );
 	}
 }
 ```
@@ -4742,10 +4955,186 @@ with:
 	}
 ```
 
+In `tests/phpunit/AssetsTest.php`, replace:
+```php
+		rmdir( $this->dir );
+		wp_dequeue_script( 'hierarchy-guard-list-table' );
+		wp_deregister_script( 'hierarchy-guard-list-table' );
+		wp_dequeue_style( 'wp-components' );
+```
+with:
+```php
+		rmdir( $this->dir );
+		foreach ( [ 'list-table', 'redirects' ] as $bundle ) {
+			wp_dequeue_script( 'hierarchy-guard-' . $bundle );
+			wp_deregister_script( 'hierarchy-guard-' . $bundle );
+		}
+		unset( $_GET['tab'] );
+		wp_dequeue_style( 'wp-components' );
+```
+
+Append to the class in `tests/phpunit/AssetsTest.php`:
+```php
+	public function test_the_redirects_tab_gets_the_bundle_that_asks_before_a_delete(): void {
+		$this->build( 'redirects', [ 'wp-dom-ready' ] );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ), 'Not on the Settings tab.' );
+
+		$_GET['tab'] = 'redirects';
+		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ) );
+
+		wp_dequeue_script( 'hierarchy-guard-redirects' );
+		$assets->enqueue_admin( 'options-general.php' );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ), 'Not on another settings page.' );
+	}
+```
+
+Create `src/redirects/test/confirm.test.js`:
+```js
+/**
+ * What a Delete on the Redirects tab asks, and what Cancel does.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import { bulkQuestion, guard, linkQuestion } from '../confirm';
+
+const ONE = 'Delete the redirect from /about/team/? This can’t be undone.';
+const MANY = 'Delete the selected redirects? This can’t be undone.';
+
+/**
+ * A stand-in element with attributes.
+ *
+ * @param {Object} attrs Attributes.
+ * @return {Object} Element.
+ */
+const element = ( attrs ) => ( {
+	hasAttribute: ( key ) => key in attrs,
+	getAttribute: ( key ) => ( key in attrs ? attrs[ key ] : null ),
+} );
+
+/**
+ * A stand-in of the table's form.
+ *
+ * @param {Object} options          The form's state.
+ * @param {string} options.action   The top selector's value.
+ * @param {string} options.action2  The bottom selector's value.
+ * @param {number} options.ticked   How many rows are ticked.
+ * @param {string} options.question The form's own question.
+ * @return {Object} Form.
+ */
+const form = ( {
+	action = '-1',
+	action2 = '-1',
+	ticked = 0,
+	question = MANY,
+} ) => {
+	const boxes = Array.from( { length: ticked }, ( _, i ) =>
+		element( {
+			'data-hierarchy-guard-confirm-one': `Delete the redirect from /row-${ i }/? This can’t be undone.`,
+		} )
+	);
+	return {
+		...element( { 'data-hierarchy-guard-confirm': question } ),
+		querySelector: ( selector ) =>
+			( {
+				'select[name="action"]': { value: action },
+				'select[name="action2"]': { value: action2 },
+			} )[ selector ] || null,
+		querySelectorAll: () => boxes,
+	};
+};
+
+describe( 'a Delete link', () => {
+	it( 'asks the question it carries', () => {
+		const link = element( { 'data-hierarchy-guard-confirm': ONE } );
+		const target = { closest: () => link };
+		expect( linkQuestion( target ) ).toBe( ONE );
+	} );
+
+	it( 'asks nothing for any other click', () => {
+		expect( linkQuestion( { closest: () => null } ) ).toBe( null );
+		expect( linkQuestion( null ) ).toBe( null );
+		expect( linkQuestion( {} ) ).toBe( null );
+	} );
+} );
+
+describe( 'a bulk Delete', () => {
+	it( 'asks once for the selection, from either selector', () => {
+		expect(
+			bulkQuestion( form( { action: 'delete', ticked: 3 } ), {
+				id: 'doaction',
+			} )
+		).toBe( MANY );
+		expect(
+			bulkQuestion( form( { action2: 'delete', ticked: 2 } ), {
+				id: 'doaction2',
+			} )
+		).toBe( MANY );
+	} );
+
+	it( 'asks about the row when one is ticked', () => {
+		expect(
+			bulkQuestion( form( { action: 'delete', ticked: 1 } ), {
+				id: 'doaction',
+			} )
+		).toBe( 'Delete the redirect from /row-0/? This can’t be undone.' );
+	} );
+
+	it( 'asks nothing for Filter, the search, another action or no rows', () => {
+		const ticked = form( { action: 'delete', ticked: 2 } );
+		expect( bulkQuestion( ticked, { id: 'post-query-submit' } ) ).toBe(
+			null
+		);
+		expect( bulkQuestion( ticked, { id: 'search-submit' } ) ).toBe( null );
+		expect( bulkQuestion( ticked, null ) ).toBe( null );
+		expect(
+			bulkQuestion( form( { action: 'delete' } ), { id: 'doaction' } )
+		).toBe( null );
+		expect(
+			bulkQuestion( form( { action2: 'delete', ticked: 2 } ), {
+				id: 'doaction',
+			} )
+		).toBe( null );
+		expect( bulkQuestion( element( {} ), { id: 'doaction' } ) ).toBe(
+			null
+		);
+	} );
+} );
+
+describe( 'the answer', () => {
+	it( 'cancels the Delete on Cancel', () => {
+		const event = { preventDefault: vi.fn() };
+		const ask = vi.fn( () => false );
+		expect( guard( event, ONE, ask ) ).toBe( false );
+		expect( ask ).toHaveBeenCalledWith( ONE );
+		expect( event.preventDefault ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'lets the Delete go on on OK', () => {
+		const event = { preventDefault: vi.fn() };
+		expect( guard( event, ONE, () => true ) ).toBe( true );
+		expect( event.preventDefault ).not.toHaveBeenCalled();
+	} );
+
+	it( 'asks nothing and stops nothing without a question', () => {
+		const event = { preventDefault: vi.fn() };
+		const ask = vi.fn();
+		expect( guard( event, null, ask ) ).toBe( true );
+		expect( ask ).not.toHaveBeenCalled();
+		expect( event.preventDefault ).not.toHaveBeenCalled();
+	} );
+} );
+```
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npm run test:php -- --filter 'RedirectsTabTest|SettingsPageTest'`
-Expected: FAIL. The Redirects tab tests error with `Error: Class "HierarchyGuard\Admin\Redirect_Edit" not found` or fail because the page prints the Settings tab.
+Run: `npm run test:php -- --filter 'RedirectsTabTest|SettingsPageTest|AssetsTest'`
+Expected: FAIL. The Redirects tab tests error with `Error: Class "HierarchyGuard\Admin\Redirect_Edit" not found` or fail because the page prints the Settings tab, and the Assets test fails because nothing is enqueued.
+
+Run: `npm run test:js`
+Expected: FAIL. `src/redirects/test/confirm.test.js` cannot import `../confirm`.
 
 - [ ] **Step 3: Write the table**
 
@@ -5343,12 +5732,15 @@ In `includes/HierarchyGuard/Admin/Settings_Page.php`, make these replacements.
 
 Replace:
 ```php
+
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
 
 ```
 with:
 ```php
+
+use HierarchyGuard\Ledger;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Redirects\Records;
 use HierarchyGuard\Settings;
@@ -5449,7 +5841,7 @@ with:
 	/**
 	 * Before the page prints: runs the Redirects tab's action and sends the
 	 * browser on; otherwise names the tab's list for screen readers and in the
-	 * browser title, and adds the Delete confirmation to core's common script.
+	 * browser title. Assets enqueues the tab's script, which asks before a Delete.
 	 */
 	public function load(): void {
 		if ( 'redirects' !== self::current_tab() ) {
@@ -5470,7 +5862,6 @@ with:
 			);
 		}
 		add_filter( 'admin_title', [ $this, 'admin_title' ] );
-		wp_add_inline_script( 'common', self::confirm_script() );
 	}
 
 	/**
@@ -5482,40 +5873,6 @@ with:
 	public function admin_title( $admin_title ): string {
 		/* translators: 1: the view of the page, such as Redirects; 2: the page's title, as the browser shows it. */
 		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), __( 'Redirects', 'hierarchy-guard' ), (string) $admin_title );
-	}
-
-	/**
-	 * Asks before a Delete, as core does before deleting a term: a link that
-	 * carries data-hierarchy-guard-confirm, and the table's bulk Delete, asked
-	 * once for the selection. Without JavaScript the Delete runs, as in core.
-	 *
-	 * @return string
-	 */
-	public static function confirm_script(): string {
-		return <<<'JS'
-( function () {
-	document.addEventListener( 'click', function ( event ) {
-		var link = event.target.closest ? event.target.closest( 'a[data-hierarchy-guard-confirm]' ) : null;
-		if ( link && ! window.confirm( link.getAttribute( 'data-hierarchy-guard-confirm' ) ) ) {
-			event.preventDefault();
-		}
-	} );
-	document.addEventListener( 'submit', function ( event ) {
-		var form = event.target, button = event.submitter, select, checked;
-		if ( ! form.hasAttribute || ! form.hasAttribute( 'data-hierarchy-guard-confirm' ) || ! button || ( 'doaction' !== button.id && 'doaction2' !== button.id ) ) {
-			return;
-		}
-		select = form.querySelector( 'doaction2' === button.id ? 'select[name="action2"]' : 'select[name="action"]' );
-		checked = form.querySelectorAll( 'input[name="redirect[]"]:checked' );
-		if ( ! select || 'delete' !== select.value || 0 === checked.length ) {
-			return;
-		}
-		if ( ! window.confirm( 1 === checked.length ? checked[ 0 ].getAttribute( 'data-hierarchy-guard-confirm-one' ) : form.getAttribute( 'data-hierarchy-guard-confirm' ) ) ) {
-			event.preventDefault();
-		}
-	} );
-}() );
-JS;
 	}
 ```
 
@@ -5571,6 +5928,11 @@ with:
 		$table = new Redirects_Table( $this->records );
 		$table->prepare_items();
 
+		if ( Ledger::backfilling() ) {
+			$building = __( 'The list of recorded redirects is still being built.', 'hierarchy-guard' );
+			$older    = __( 'Older redirects appear here once it’s done.', 'hierarchy-guard' );
+			$this->inline_notice( esc_html( $building . ' ' . $older ), 'info' );
+		}
 		if ( ! Settings::serve_redirects() ) {
 			$off = esc_html__( 'Built-in redirects are off, so these redirects aren’t served.', 'hierarchy-guard' );
 			/* translators: %s: URL of the Redirects field on the Settings tab. */
@@ -5658,18 +6020,174 @@ with:
 		( new Trash\Markers() )->register();
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 6: Write the bundle that asks before a Delete, and enqueue it on the tab**
 
-Run: `npm run test:php -- --filter 'RedirectsTabTest|SettingsPageTest'`
-Expected: PASS.
+Create `src/redirects/confirm.js`:
+```js
+/**
+ * What a Delete on the Redirects tab asks first. The questions come from the
+ * page: a link's data-hierarchy-guard-confirm, and for a bulk Delete the
+ * form's, or the one ticked row's data-hierarchy-guard-confirm-one.
+ */
 
-Run: `npm run test:php` then `composer lint`
+/**
+ * The question a click asks, or null: a Delete link carries it.
+ *
+ * @param {Object|null} target What was clicked.
+ * @return {string|null} Question.
+ */
+export function linkQuestion( target ) {
+	const link =
+		target && target.closest
+			? target.closest( 'a[data-hierarchy-guard-confirm]' )
+			: null;
+	return link ? link.getAttribute( 'data-hierarchy-guard-confirm' ) : null;
+}
+
+/**
+ * The question a bulk Delete asks, once for the selection, or null for any
+ * other submit: another action, Filter, the search, or nothing ticked.
+ *
+ * @param {Object|null} form      The form submitted.
+ * @param {Object|null} submitter The button that submitted it.
+ * @return {string|null} Question.
+ */
+export function bulkQuestion( form, submitter ) {
+	if (
+		! form ||
+		! form.hasAttribute ||
+		! form.hasAttribute( 'data-hierarchy-guard-confirm' ) ||
+		! submitter ||
+		( 'doaction' !== submitter.id && 'doaction2' !== submitter.id )
+	) {
+		return null;
+	}
+	const select = form.querySelector(
+		'doaction2' === submitter.id
+			? 'select[name="action2"]'
+			: 'select[name="action"]'
+	);
+	const checked = form.querySelectorAll( 'input[name="redirect[]"]:checked' );
+	if ( ! select || 'delete' !== select.value || 0 === checked.length ) {
+		return null;
+	}
+	return 1 === checked.length
+		? checked[ 0 ].getAttribute( 'data-hierarchy-guard-confirm-one' )
+		: form.getAttribute( 'data-hierarchy-guard-confirm' );
+}
+
+/**
+ * Asks a question, and cancels the event when the answer is no.
+ *
+ * @param {Object}                        event    The click or submit.
+ * @param {string|null}                   question What to ask; nothing is asked without one.
+ * @param {(question: string) => boolean} ask      Asks and answers true or false.
+ * @return {boolean} Whether the event goes on.
+ */
+export function guard( event, question, ask ) {
+	if ( ! question || ask( question ) ) {
+		return true;
+	}
+	event.preventDefault();
+	return false;
+}
+```
+
+Create `src/redirects/index.js`:
+```js
+/**
+ * Settings › Hierarchy Guard › Redirects: Delete asks first, from a row, the
+ * Edit view or in bulk, as core asks before deleting a term. Without
+ * JavaScript the Delete runs, as in core.
+ */
+import { bulkQuestion, guard, linkQuestion } from './confirm';
+
+// eslint-disable-next-line no-alert
+const ask = ( question ) => window.confirm( question );
+
+window.document.addEventListener( 'click', ( event ) => {
+	guard( event, linkQuestion( event.target ), ask );
+} );
+
+window.document.addEventListener( 'submit', ( event ) => {
+	guard( event, bulkQuestion( event.target, event.submitter ), ask );
+} );
+```
+
+In `webpack.config.js`, make these replacements.
+
+Replace:
+```js
+/**
+ * One bundle per screen: the block editor panel, the list screen, the classic editor.
+ */
+```
+with:
+```js
+/**
+ * One bundle per screen: the block editor panel, the list screen, the
+ * classic editor, and the Redirects tab of Settings › Hierarchy Guard.
+ */
+```
+
+Replace:
+```js
+		classic: './src/classic/index.js',
+	},
+```
+with:
+```js
+		classic: './src/classic/index.js',
+		redirects: './src/redirects/index.js',
+	},
+```
+
+In `includes/HierarchyGuard/Admin/Assets.php`, make these replacements.
+
+Replace:
+```php
+	/**
+	 * The classic-editor script where the block editor is off.
+	 *
+```
+with:
+```php
+	/**
+	 * The classic-editor script where the block editor is off, and the
+	 * Redirects tab's script, which asks before a Delete.
+	 *
+```
+
+Replace:
+```php
+	public function enqueue_admin( $hook_suffix ): void {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+```
+with:
+```php
+	public function enqueue_admin( $hook_suffix ): void {
+		if ( 'settings_page_' . Settings_Page::SLUG === $hook_suffix && 'redirects' === Settings_Page::current_tab() ) {
+			$this->enqueue( 'redirects' );
+			return;
+		}
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+```
+
+Run: `npm run build`
+Expected: webpack compiles `build/redirects.js` and `build/redirects.asset.php`.
+
+- [ ] **Step 7: Run the tests to verify they pass**
+
+Run: `npm run test:php -- --filter 'RedirectsTabTest|SettingsPageTest|AssetsTest'` and `npm run test:js`
+Expected: PASS (Vitest: 81 tests).
+
+Run: `npm run test:php` then `composer lint`, `npm run lint:js`
 Expected: the whole suite passes, with the new tests counted; lint exits 0. Run `composer lint:fix` first if it reports alignment; formatting-only changes are not deviations.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add includes/HierarchyGuard/Admin includes/HierarchyGuard/Plugin.php tests/phpunit/RedirectsTabTest.php tests/phpunit/SettingsPageTest.php
+git add includes/HierarchyGuard/Admin includes/HierarchyGuard/Plugin.php src/redirects webpack.config.js tests/phpunit/RedirectsTabTest.php tests/phpunit/SettingsPageTest.php tests/phpunit/AssetsTest.php
 git commit -m "feat: list the recorded redirects on a Redirects tab, with Delete"
 ```
 
@@ -6353,7 +6871,9 @@ git commit -m "feat: edit a recorded redirect's target and code"
 
 - [ ] **Step 1: Describe the page**
 
-In `README.md`, replace:
+In `README.md`, make these replacements.
+
+Replace:
 ```markdown
   On the Pages list and in the block editor, "View redirects" opens a list of each old URL of that change and its new one, which links to the detected redirect plugin, downloads a CSV in its import layout, or copies the list as text. Without JavaScript the link downloads the CSV. A CSV row's code is the one the plugin's own redirect rule chooses (before filters): 302 while restoring a page from the trash could still undo the move its redirect follows, and 301 otherwise. The list stays available for 30 minutes, until the user's next change replaces it, or until the page a save moved, or a trashed parent whose subpages moved up, is deleted for good, and a trash's list covers only its pages still in the Trash. If another user then trashes a subpage that trash moved, that subpage's own subpages are left out of the first trash's list, though with Redirects on they keep redirecting. Old URLs from earlier changes, or from pages deleted for good, are not listed again, and with Redirects on they keep redirecting.
 - **Editor.** The block editor warns under the page's Summary before a save changes subpage URLs. Its Hierarchy panel shows the parent pages and the subpages, where the page is now. The classic editor shows the same in a box, and asks before saving such a change.
@@ -6365,24 +6885,41 @@ with:
 - **Editor.** The block editor warns under the page's Summary before a save changes subpage URLs. Its Hierarchy panel shows the parent pages and the subpages, where the page is now. The classic editor shows the same in a box, and asks before saving such a change.
 ```
 
+Replace:
+````markdown
+wp hierarchy-guard process-jobs
+```
+````
+with:
+````markdown
+wp hierarchy-guard process-jobs
+```
+
+The Redirects tab lists the newest 1,000 records from a list the plugin keeps. Records made before that list existed are added to it once, by a WP-Cron event scheduled on activation or the first admin page load after an update; until it has run, the tab says the list is still being built. Without cron, run it with:
+
+```bash
+wp cron event run hierarchy_guard_backfill_recent
+```
+````
+
 - [ ] **Step 2: Run every check**
 
 Run: `npm run test:php`, `npx wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard bash -c 'WP_MULTISITE=1 vendor/bin/phpunit'`, `composer lint`, `npm run lint:js`, `npm run lint:style`, `npm run test:js`, `npm run build`
-Expected: 762 PHPUnit tests pass (3 skipped), the same suite passes as multisite, both lints and Stylelint exit 0, 73 Vitest tests pass, and the build compiles. Run the pairs fuzz test with `HG_FUZZ_SEEDS=300` or more too: every seed passes.
+Expected: 769 PHPUnit tests pass (3 skipped), the same suite passes as multisite, both lints and Stylelint exit 0, 81 Vitest tests pass, and the build compiles. Run the pairs fuzz test with `HG_FUZZ_SEEDS=300` or more too: every seed passes.
 
 - [ ] **Step 3: Live check**
 
-With the build done and the dev site at http://localhost:8898 (admin / password), take a snapshot of the `_hierarchy_guard_%` meta rows, the `hierarchy_guard_*` options and the transients. Records made before this plan are not on the newest-records list, so create test pages over WP-CLI as the admin, so the saves are recorded: a published top-level page with slug `hgp4-studio`, a published subpage `hgp4-team` under it and `hgp4-ada` under that, and a published top-level page `hgp4-events`. Rename `hgp4-studio` to `hgp4-studio-new` and `hgp4-events` to `hgp4-whats-on`, then make `hgp4-whats-on` a draft. Report what you see:
+With the build done and the dev site at http://localhost:8898 (admin / password), take a snapshot of the `_hierarchy_guard_%` meta rows, the `hierarchy_guard_*` options and the transients. First the backfill, if the dev site has records from before this plan: the first admin load (an admin screen's heartbeat is enough) sets `hierarchy_guard_recent_state` to `building` and schedules `hierarchy_guard_backfill_recent`; the Redirects tab then says "The list of recorded redirects is still being built. Older redirects appear here once it’s done." and lists only the root list, though a search for one old record's full URL already finds it. Run `wp cron event run hierarchy_guard_backfill_recent`: the state is `done`, the old records are listed, the notice is gone, and loading the front page schedules nothing again. Then create test pages over WP-CLI as the admin, so the saves are recorded: a published top-level page with slug `hgp4-studio`, a published subpage `hgp4-team` under it and `hgp4-ada` under that, and a published top-level page `hgp4-events`. Rename `hgp4-studio` to `hgp4-studio-new` and `hgp4-events` to `hgp4-whats-on`, then make `hgp4-whats-on` a draft. Report what you see:
 
 1. Settings › Hierarchy Guard opens on the Settings tab with core nav tabs Settings | Redirects and the three fields; Save Changes says "Settings saved." below the tabs and stays on the page. Settings › Writing has no Hierarchy Guard section. The Plugins screen row reads "Settings | Deactivate", and Settings opens the page.
 2. The Redirects tab at `&tab=redirects&s=hgp4&redirect_type=page` loads (with `post_type=page` instead, core would refuse it). The browser title starts "Redirects ‹ Hierarchy Guard", "Search results for: hgp4" sits beside the heading, and the table lists "/hgp4-events/ and the URLs under it → HGP4-Events — Draft, /?page_id=…, Automatic, Not active: the page it points to isn’t published" and "/hgp4-studio/ and the URLs under it → HGP4-Studio, /hgp4-studio-new/, Automatic, Active". Old URLs are in code, and the Code column is in the admin's normal font.
-3. Delete on /hgp4-events/ asks "Delete the redirect from /hgp4-events/? This can’t be undone."; Cancel keeps the row.
+3. The page loads `build/redirects.js`. Delete on /hgp4-events/ asks "Delete the redirect from /hgp4-events/? This can’t be undone."; Cancel keeps the row.
 4. Edit on /hgp4-studio/: the title starts "Edit redirect ‹", the field is a text field, and Delete is core's red link. Enter `https://jobs.example.org/studio/#open`, choose 302 and Save: "Redirect updated.". `curl -sI 'http://localhost:8898/hgp4-studio/?utm=a'` answers 302 to `https://jobs.example.org/studio/?utm=a#open` with `X-Redirect-By: Hierarchy Guard`; `/hgp4-studio/hgp4-team/` is not redirected by Hierarchy Guard (core's own guess may still redirect it, with `X-Redirect-By: WordPress`).
 5. Edit on /hgp4-events/: enter the path `/hgp4-studio-new/hgp4-team/` and Save: the record moves onto that page, and `/hgp4-events/hgp4-ada/` redirects 301 to `/hgp4-studio-new/hgp4-team/hgp4-ada/`.
 6. Edit on one of the dev site's "Top level" rows: it says "Now redirects to the same page at the top level, for example /about/team/ to /team/.", the field is empty and its help begins "Leave empty to keep this.". Save with the field empty and Automatic chosen: "Redirect updated.", and the row still reads "Top level".
 7. Delete on /hgp4-events/ again, and accept: "Redirect deleted. /hgp4-events/ no longer redirects through it." Rename `hgp4-team` and `hgp4-studio-new` once more over WP-CLI so two rows match `hgp4`, tick both, choose Delete in a Bulk actions selector and Apply: it asks once, "Delete the selected redirects? This can’t be undone."; Cancel keeps them, and accepting says "2 redirects deleted. Their old URLs no longer redirect through them."
 
-Afterwards delete the test pages, subpages first (`wp post delete <ids> --force`), so deleting a parent records nothing new; the newest-records list is then empty, so delete the `hierarchy_guard_recent_records` option, which didn't exist before, and the `hierarchy_guard_change_*` and `settings_errors` transients the check left. The meta rows, options and transients must match the snapshot.
+Afterwards delete the test pages, subpages first (`wp post delete <ids> --force`), so deleting a parent records nothing new, and the `hierarchy_guard_change_*` and `settings_errors` transients the check left. The meta rows and transients must match the snapshot. `hierarchy_guard_recent_records` and `hierarchy_guard_recent_state` stay: they are the plugin's own state from now on (deleting them while an admin screen is open only starts the backfill again).
 
 - [ ] **Step 4: Commit**
 
@@ -6393,7 +6930,7 @@ git commit -m "docs: describe Settings › Hierarchy Guard and its Redirects tab
 
 ## Self-Review
 
-**Spec coverage.** Settings › Hierarchy Guard at `options-general.php?page=hierarchy-guard` for `manage_options`, core nav tabs Settings | Redirects, the three fields saving `hierarchy_guard_settings` through the Settings API, nothing on Settings › Writing, every settings link (the "Set up redirects" notice action and nudge, the panel's "Change this in Settings", the readme) and the Plugins row's "Settings" link: Task 6. Redirects tab as a core `WP_List_Table` of every recorded redirect and only those, one row per `_hierarchy_guard_path_{md5}` entry and per root-list entry, Old URL with "and the URLs under it" for a page target, Redirects to as the page's title linked to its edit screen with its current URL, the URL, or "Top level", Code as Automatic or the chosen code, Status with the first reason that applies, search on the old URL, a post type filter only with two or more types, 20 rows a page sorted by old URL, Edit and Delete row actions, bulk Delete, no Add button, the built-in-redirects-off notice and the provider notice: Tasks 5 and 7. Editing a redirect at `&action=edit&redirect=<id>` behind a nonce, the read-only Old URL, one "Redirect to" field resolved through `url_to_postid()`, a page of another type counting as any other URL, no page picker, no JavaScript needed, Code as Automatic, 301 or 302, Save, Cancel and Delete, "Redirect updated." and the deleted notice from the view, a row or in bulk: Tasks 5 and 8. Editing a recorded redirect's storage (the record moves on retarget, `_hierarchy_guard_target_{md5}` and `hierarchy_guard_root_targets`, deleted with the record, the ledger cache key bumped, `manage_options` and a nonce on every action, http(s) only): Tasks 1, 5, 7 and 8. Serving a redirect with overrides (a URL target on its exact old path only, matching going on past it, a root-list entry's override from its option, `wp_redirect()` after `esc_url_raw()`, the chosen code replacing the automatic one, the batch resolver and the modal and CSV honouring the same): Tasks 2, 3 and 4. Data model rows for the two override stores: Task 1. Architecture's `Ledger` overrides and records list (the records list lives in `Redirects\Records`), `Settings` registration, `Settings_Page`, `Redirects_Table`, `Redirect_Edit`, and the `admin_menu`, `plugin_action_links_{basename}` and `load-settings_page_hierarchy-guard` hooks: Tasks 1 and 5 to 8. Every Testing bullet for plan 4 (sources, search and paging, edits to a page and to a URL, each code, delete, capability and nonce checks, a non-http URL, status labels, resolver and batch parity, settings links): Tasks 1 to 8. The owner's audit rulings: the newest-records option (Task 1, read in Task 5), Delete asking first (Tasks 7 and 8), the top-level Edit copy and the path input (Tasks 5 and 8). Out of scope kept out: adding by hand, import and export, regex, hit counts.
+**Spec coverage.** Settings › Hierarchy Guard at `options-general.php?page=hierarchy-guard` for `manage_options`, core nav tabs Settings | Redirects, the three fields saving `hierarchy_guard_settings` through the Settings API, nothing on Settings › Writing, every settings link (the "Set up redirects" notice action and nudge, the panel's "Change this in Settings", the readme) and the Plugins row's "Settings" link: Task 6. Redirects tab as a core `WP_List_Table` of every recorded redirect and only those, one row per `_hierarchy_guard_path_{md5}` entry and per root-list entry, Old URL with "and the URLs under it" for a page target, Redirects to as the page's title linked to its edit screen with its current URL, the URL, or "Top level", Code as Automatic or the chosen code, Status with the first reason that applies, search on the old URL, a post type filter only with two or more types, 20 rows a page sorted by old URL, Edit and Delete row actions, bulk Delete, no Add button, the built-in-redirects-off notice and the provider notice: Tasks 5 and 7. Editing a redirect at `&action=edit&redirect=<id>` behind a nonce, the read-only Old URL, one "Redirect to" field resolved through `url_to_postid()`, a page of another type counting as any other URL, no page picker, no JavaScript needed, Code as Automatic, 301 or 302, Save, Cancel and Delete, "Redirect updated." and the deleted notice from the view, a row or in bulk: Tasks 5 and 8. Editing a recorded redirect's storage (the record moves on retarget, `_hierarchy_guard_target_{md5}` and `hierarchy_guard_root_targets`, deleted with the record, the ledger cache key bumped, `manage_options` and a nonce on every action, http(s) only): Tasks 1, 5, 7 and 8. Serving a redirect with overrides (a URL target on its exact old path only, matching going on past it, a root-list entry's override from its option, `wp_redirect()` after `esc_url_raw()`, the chosen code replacing the automatic one, the batch resolver and the modal and CSV honouring the same): Tasks 2, 3 and 4. Data model rows for the two override stores: Task 1. Architecture's `Ledger` overrides and records list (the records list lives in `Redirects\Records`), `Settings` registration, `Settings_Page`, `Redirects_Table`, `Redirect_Edit`, and the `admin_menu`, `plugin_action_links_{basename}` and `load-settings_page_hierarchy-guard` hooks: Tasks 1 and 5 to 8. Every Testing bullet for plan 4 (sources, search and paging, edits to a page and to a URL, each code, delete, capability and nonce checks, a non-http URL, status labels, resolver and batch parity, settings links): Tasks 1 to 8. The owner's audit rulings: the newest-records option and its backfill (Task 1, read in Task 5, its notice in Task 7), the exact-key search whatever the list holds (Task 5), Delete asking first through the `redirects` bundle (Tasks 7 and 8), the top-level Edit copy and the path input (Tasks 5 and 8). Out of scope kept out: adding by hand, import and export, regex, hit counts.
 
 **Placeholder scan.** No TBD or TODO. Every code step carries complete code taken from the verified prototype; every command names its expected result.
 
@@ -6405,4 +6942,4 @@ git commit -m "docs: describe Settings › Hierarchy Guard and its Redirects tab
 
 - Plan 6's uninstall removes `hierarchy_guard_root_targets` and `hierarchy_guard_recent_records` with the other options and the `_hierarchy_guard_target_` meta rows with the `_hierarchy_guard_path_` rows, in batches of a thousand, per site on multisite.
 - Plan 6's readme.txt describes Settings › Hierarchy Guard from the README section Task 9 adds, and its copy pass revisits the Redirects help text that still says "Turn this on" while the switch is on.
-- Plan 6's release zip needs nothing new: this plan adds no bundle.
+- Plan 6's release zip builds the new `redirects` bundle with the others (`npm ci && npm run build`); uninstall also clears the `hierarchy_guard_backfill_recent` event and removes `hierarchy_guard_recent_state`.
