@@ -481,6 +481,44 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
 	}
 
+	public function test_a_url_target_at_its_own_old_url_is_refused_and_nothing_is_written(): void {
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+
+		foreach ( [ home_url( '/old-about/' ), home_url( '/old-about' ), '/old-about/', home_url( '/old-about/?from=edit#top' ) ] as $value ) {
+			$result = $this->records->save( $record, $value, 302 );
+			$this->assertInstanceOf( WP_Error::class, $result, $value );
+			$this->assertSame( 'hierarchy_guard_own_url', $result->get_error_code(), $value );
+			$this->assertSame( 'That URL is the old URL itself.', $result->get_error_message(), $value );
+		}
+
+		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ), 'No override written.' );
+		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+		$this->assertTrue( $this->records->save( $record, 'https://example.org/old-about/', 0 ), 'The same path on another host is no loop.' );
+	}
+
+	public function test_an_http_url_with_no_host_is_refused(): void {
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+
+		foreach ( [ 'http:/path', 'https:path', 'http:///path' ] as $value ) {
+			$result = $this->records->save( $record, $value, 0 );
+			$this->assertInstanceOf( WP_Error::class, $result, $value );
+			$this->assertSame( 'hierarchy_guard_not_http', $result->get_error_code(), $value );
+		}
+		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ) );
+		$this->assertNull(
+			Ledger::clean_target(
+				[
+					'url'  => 'http:/path',
+					'code' => 0,
+				]
+			),
+			'A stored URL with no host is no target.'
+		);
+	}
+
 	public function test_a_page_at_the_old_url_is_refused(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
 		$draft  = $this->page( 'old-about', 0, 'draft' );

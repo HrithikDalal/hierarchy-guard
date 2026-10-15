@@ -562,8 +562,8 @@ final class Ledger {
 	}
 
 	/**
-	 * An override as stored, checked: an http(s) URL or none, and 301, 302
-	 * or 0. Null when nothing is left.
+	 * An override as stored, checked: an http(s) URL with a host or none,
+	 * and 301, 302 or 0. Null when nothing is left.
 	 *
 	 * @param mixed $value Stored value.
 	 * @return array{url:string,code:int}|null
@@ -575,7 +575,7 @@ final class Ledger {
 		$url    = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
 		$code   = isset( $value['code'] ) && is_numeric( $value['code'] ) ? (int) $value['code'] : 0;
 		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
-		if ( '' !== $url && ! in_array( $scheme, [ 'http', 'https' ], true ) ) {
+		if ( '' !== $url && ( ! in_array( $scheme, [ 'http', 'https' ], true ) || '' === (string) wp_parse_url( $url, PHP_URL_HOST ) ) ) {
 			$url = '';
 		}
 		if ( ! in_array( $code, [ 301, 302 ], true ) ) {

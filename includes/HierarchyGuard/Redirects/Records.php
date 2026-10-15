@@ -288,8 +288,10 @@ final class Records {
 	 * url_to_postid() resolves to a page of the record's own type makes a page
 	 * target: the record moves onto that page, out of the root list or off
 	 * its old holder, and its code goes with it. The holder's own URL makes it
-	 * a page target again. Any other http(s) URL makes a URL target, stored
-	 * beside the record. Anything else is refused and nothing is written.
+	 * a page target again. Any other http(s) URL with a host makes a URL
+	 * target, stored beside the record, unless it is the old URL itself,
+	 * which the server would refuse as a loop. Anything else is refused and
+	 * nothing is written.
 	 *
 	 * @param array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null} $record Record from find().
 	 * @param string $url  The URL or path entered.
@@ -323,7 +325,8 @@ final class Records {
 		// esc_url_raw() would read `company/about` as http://company/about: the scheme must be typed.
 		$typed = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
 		$clean = esc_url_raw( $url, [ 'http', 'https' ] );
-		if ( '' === $clean || ! in_array( $typed, [ 'http', 'https' ], true ) || ! in_array( strtolower( (string) wp_parse_url( $clean, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ) {
+		// A URL with no host, such as http:/path, would be sent as it is.
+		if ( '' === $clean || ! in_array( $typed, [ 'http', 'https' ], true ) || ! in_array( strtolower( (string) wp_parse_url( $clean, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) || '' === (string) wp_parse_url( $clean, PHP_URL_HOST ) ) {
 			return new WP_Error( 'hierarchy_guard_not_http', __( 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.', 'hierarchy-guard' ) );
 		}
 
@@ -331,6 +334,10 @@ final class Records {
 		$id   = url_to_postid( $clean );
 		$page = $id > 0 ? get_post( $id ) : null;
 		if ( ! $page instanceof WP_Post || $page->post_type !== $type ) {
+			// The server refuses a redirect to the URL being requested, as a loop.
+			if ( self::loops( $type, $path, $clean ) ) {
+				return new WP_Error( 'hierarchy_guard_own_url', __( 'That URL is the old URL itself.', 'hierarchy-guard' ) );
+			}
 			// Another type's page, or any other URL: the record stays where it is.
 			$this->ledger->set_target( $type, $path, $record['holder'], $clean, $code );
 			return true;
