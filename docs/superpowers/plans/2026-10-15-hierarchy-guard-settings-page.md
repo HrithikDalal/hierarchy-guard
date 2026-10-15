@@ -4,13 +4,13 @@
 
 **Goal:** Give the plugin one admin page, Settings › Hierarchy Guard, whose Settings tab holds the three settings and whose Redirects tab lists, edits and deletes the redirects the plugin recorded, with the resolver, the server and every change's redirect list honouring those edits.
 
-**Architecture:** An edit lives next to the record it changes: `_hierarchy_guard_target_{md5}` = `{ url, code }` beside a post's `_hierarchy_guard_path_{md5}` entry, or `hierarchy_guard_root_targets[ type ][ path ]` for a root-list entry, read and written only by `Ledger`. `Ledger_View::target()` gives the shared `Rules` the override for the record each round uses, so the live `Resolver`, the `Server` and the `Batch_Resolver` behind `Pairs` answer alike: a URL target answers its exact old path only, and a chosen code replaces the automatic one. `Redirects\Records` turns the ledger into a bounded list of records with IDs, statuses and the save and delete operations; `Admin\Settings_Page` (the former Writing section) adds the page and its tabs, `Admin\Redirects_Table` is a core `WP_List_Table`, and `Admin\Redirect_Edit` prints the Edit view and runs every action on the page's load hook behind `manage_options` and a nonce.
+**Architecture:** The ledger also keeps a capped, non-autoloaded list of the newest records' meta IDs per post type, which the Redirects tab reads instead of every record. An edit lives next to the record it changes: `_hierarchy_guard_target_{md5}` = `{ url, code }` beside a post's `_hierarchy_guard_path_{md5}` entry, or `hierarchy_guard_root_targets[ type ][ path ]` for a root-list entry, read and written only by `Ledger`. `Ledger_View::target()` gives the shared `Rules` the override for the record each round uses, so the live `Resolver`, the `Server` and the `Batch_Resolver` behind `Pairs` answer alike: a URL target answers its exact old path only, and a chosen code replaces the automatic one. `Redirects\Records` turns the ledger into a bounded list of records with IDs, statuses and the save and delete operations; `Admin\Settings_Page` (the former Writing section) adds the page and its tabs, `Admin\Redirects_Table` is a core `WP_List_Table`, and `Admin\Redirect_Edit` prints the Edit view and runs every action on the page's load hook behind `manage_options` and a nonce. Delete asks first through a few lines added to core's `common` script; without JavaScript it deletes directly, as core does.
 
 **Tech Stack:** PHP 8.0+, WordPress 6.6+, the plugin's engine, trash flow and admin UI (plans 1 to 3), PHPUnit 9.6 in wp-env, PHPCS (WordPress-Extra, WordPress-VIP-Go, PHPCompatibilityWP), `@wordpress/scripts` 36.1.0 for the existing bundles (this plan adds no JavaScript and no CSS).
 
-**Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html`, the approved spec for this plan. Read Decisions, "Settings › Hierarchy Guard", "Redirects tab", "Editing a redirect", "Editing a recorded redirect", "Serving a redirect", Data model, Architecture, Testing, Build order step 8, and Out of scope. This plan is build-order step 8. The Tree view is plan 5; the DataViews track, readme.txt, uninstall and the release zip are plan 6.
+**Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html`, the approved spec for this plan, as corrected at `a76048c` and updated with this plan for the owner's audit rulings (the newest-records option, the Delete confirmation, the top-level Edit copy and the path input). Read Decisions, "Settings › Hierarchy Guard", "Redirects tab", "Editing a redirect", "Editing a recorded redirect", "Serving a redirect", Data model, Architecture, Testing, Build order step 8, and Out of scope. This plan is build-order step 8. The Tree view is plan 5; the DataViews track, readme.txt, uninstall and the release zip are plan 6.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3, PHP 8.2) before it was written down, and the plan was then replayed from `settings-page` on a scratch branch, task by task, reproducing the prototype exactly. After every task the PHP suite passes (744 tests at the end, also as multisite) and `composer lint` exits 0; `npm run lint:js`, `npm run lint:style`, `npm run test:js` (73 tests) and `npm run build` pass throughout. The Redirects tab, the Edit view, Save, Delete and bulk Delete were checked in the browser and over HTTP. Transcribe it exactly; deviations need a reason in the report.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3, PHP 8.2) before it was written down, and the plan was then replayed from `settings-page` on a scratch branch, task by task, reproducing the prototype exactly. After every task the PHP suite passes (762 tests at the end, also as multisite) and `composer lint` exits 0; the pairs fuzz test passes 400 seeds; `npm run lint:js`, `npm run lint:style`, `npm run test:js` (73 tests) and `npm run build` pass throughout. Both tabs, the Edit view (a page, a URL with a fragment, a path, a top-level entry), Save, and Delete and bulk Delete with their confirmation, accepted and cancelled, were checked in the browser and over HTTP. Three audits (core, scale, UI) were folded in. Transcribe it exactly; deviations need a reason in the report.
 
 ## Global Constraints
 
@@ -19,11 +19,15 @@
 - `composer lint` must exit 0, warnings included. Run `composer lint:fix` (phpcbf) first; formatting-only changes it makes are not deviations. Resolve any remaining warning with a behaviour-neutral change or a targeted `// phpcs:ignore Sniff.Name.Code -- reason`.
 - Hierarchy Guard is not a redirect plugin. The Redirects tab manages only the redirects the plugin recorded: edit a record's target and code, or delete it. No Add button, no adding by hand, no import or export, no regex, no hit counts.
 - UI: core admin classes only (`wrap`, `nav-tab-wrapper`, `nav-tab`, `nav-tab-active`, `wp-list-table`, `form-table`, `notice … inline`, `description`, `regular-text code`, `button`, `button-primary`, `submitdelete`, `screen-reader-text`). No colours, radii, shadows or type sizes of the plugin's own; this plan adds no CSS. Status is text, not a pill.
-- Copy: sentence case, no exclamation marks. One translatable string per sentence, `_n()` on a counted noun, a translator comment for every placeholder, curly quotes and apostrophes. "Trash" is capitalised on PHP screens ("301, or 302 while restoring a page from the Trash could undo the move."). Text domain `hierarchy-guard`. The spec's sentences are used as written, including "Hierarchy Guard" in the Redirects tab's provider notice.
-- Scale: nothing in a web request grows with the total number of recorded redirects beyond one page of 20 rows plus bounded counts. A listing reads at most `Subtree::count_cap()` (default 1,000) post entries, in the `meta_key` index's own order, plus the root list (at most 200 paths per type), and sorts, searches and counts only those; overrides, statuses and holders are read for the page's 20 rows only; an exact search past the cap is one hashed seek per type. A bulk delete takes at most 20 IDs.
+- Copy: sentence case, no exclamation marks. One translatable string per sentence, `_n()` on a counted noun, a translator comment directly above the one call whose string has the placeholder (never above a string without one), curly quotes and apostrophes. "Trash" is capitalised on PHP screens ("301, or 302 while restoring a page from the Trash could undo the move."). Text domain `hierarchy-guard`. The spec's sentences are used as written, including "Hierarchy Guard" in the Redirects tab's provider notice.
+- Scale: nothing in a web request grows with the total number of recorded redirects beyond one page of 20 rows plus bounded counts. A listing reads the newest `Subtree::count_cap()` (default 1,000) post entries from `hierarchy_guard_recent_records` (one option read, then one `meta_id IN (…)` query on primary keys with `STRAIGHT_JOIN` to posts, no derived or temporary table), filtered by type through each type's own list, plus the root list (at most 200 paths per type), and sorts, searches and counts only those; past the cap the count shows as "1,000+". Overrides, statuses and holders are read for the page's 20 rows only; an exact search past the cap is one hashed seek per type. A bulk delete takes at most 20 IDs. There is no backfill of the newest list.
+- Request arguments: no argument of the Redirects tab is named `post_type` or `taxonomy`; wp-admin/admin.php reads them before the page loads and, for a plugin page under Settings, refuses to load it. The type filter is `redirect_type`.
+- Delete asks first, from a row, the Edit view or in bulk (once for the selection), with `window.confirm()` added to core's `common` script: "Delete the redirect from %s?" and "This can’t be undone.", or "Delete the selected redirects?" and "This can’t be undone.". Without JavaScript it deletes directly, as core does for terms and media.
+- Right-to-left: an old URL prints in `<code>` and every other URL in `<span dir="ltr">` (an attribute, not CSS), so it reads left to right in a right-to-left admin.
 - Every query goes through `$wpdb->prepare()`; `IN` lists are built only from `%s` or `%d` placeholders or integer-cast IDs.
 - The ledger, `Resolver` and `Server` behave exactly as before, except for honouring overrides; with no override stored every answer, pair and CSV row is unchanged.
 - Overrides: `_hierarchy_guard_target_{md5}` = `{ url, code }`, the same hash as the record's `_hierarchy_guard_path_{md5}`, as sibling post meta on the holder; `hierarchy_guard_root_targets`, not autoloaded, keyed by post type then path. `url` is an http(s) URL or ''; `code` is 301, 302 or 0 (automatic). An override with neither is not stored. Deleting a record deletes its override, wherever the ledger deletes a record (forget, prune, claim, the root list's cap). Every edit bumps the ledger's cache key (`hierarchy_guard` group).
+- The Redirect to field is `type="text"` and takes a URL or a path on this site: a value starting with one `/` is read as `home_url( $value )`; `//host` and a value with no typed http(s) scheme are refused. A top-level root-list entry's field starts empty, and saving it empty keeps the entry and saves only the code.
 - Targets: a URL that `url_to_postid()` resolves to a page of the record's own post type is a page target, and the record moves onto that page (out of the root list, or off its old holder), taking its code with it. The holder's own URL makes a page target again. Any other http(s) URL, a page of another post type included, is a URL target on the same holder. Anything that isn't http(s) is refused. A URL target answers its exact old path only; for a longer path, matching continues as if the record weren't there. A URL target is sent with `wp_redirect()` after `esc_url_raw()`, http(s) only; a page target still passes `wp_validate_redirect()`.
 - Security: the page is added with `manage_options`; `Redirect_Edit::handle()` checks `manage_options` and the action's nonce before it changes anything: `hierarchy_guard_edit_{id}` to open the Edit view, `hierarchy_guard_save_{id}` to save, `hierarchy_guard_delete_{id}` to delete one, `bulk-redirects` (the table's own) to bulk delete.
 - Record IDs: `{holder}.{md5(type:path)}`, holder 0 for the root list. An ID is accepted only when it matches `^\d{1,20}\.[0-9a-f]{32}$` and names an existing record of a supported type whose hash is of its holder's own type.
@@ -33,23 +37,24 @@
 
 ## Review Focus
 
-1. An old URL in another script (`/café/équipe/`): the ledger stores it percent-encoded, and a person reads and searches it as they type it, a full URL pasted from the browser included, past the cap too. Pinned in Task 5 (`test_an_old_url_with_other_scripts_reads_and_searches_as_people_type_it`).
+1. An old URL in another script (`/café/équipe/`): the ledger stores it percent-encoded, and a person reads and searches it as they type it, a full URL pasted from the browser (percent-encoded) included, past the cap too. Pinned in Task 5 (`test_an_old_url_with_other_scripts_reads_and_searches_as_people_type_it`) and Task 7 (`test_a_percent_encoded_search_finds_the_old_url_it_names`).
 2. A site switched to plain permalinks, where the server serves nothing: no row may read "Active". Pinned in Task 5 (`test_under_plain_permalinks_no_row_reads_active`).
 3. A page URL pasted the way people paste it, without its trailing slash, with a query string or with a `#fragment`: still a page target, and the record moves. Pinned in Task 5 (`test_a_page_url_pasted_without_its_slash_or_with_a_query_or_fragment_still_moves_the_record`).
 4. A record deleted, by another administrator or another tab, between opening Edit and pressing Save: Save says it no longer exists and writes nothing, no orphan override included. Pinned in Task 8 (`test_a_record_deleted_between_edit_and_save_is_not_written_back`).
-5. A crafted bulk request naming more than a page of IDs, or an ID nested in an array: at most 20 deleted, no PHP warning. Pinned in Task 7 (`test_a_crafted_bulk_request_deletes_at_most_one_page_and_ignores_nested_values`).
+5. A crafted bulk request naming more than a page of IDs, or an ID nested in an array: at most 20 deleted, no PHP warning; and Filter, or Delete with nothing ticked, deletes nothing. Pinned in Task 7 (`test_a_crafted_bulk_request_deletes_at_most_one_page_and_ignores_nested_values`, `test_filter_never_runs_a_bulk_delete_and_an_empty_selection_returns_to_the_list`).
 
 ## Spec rulings and known limitations
 
-Settled for this plan; reviewers should not re-raise them.
+Settled for this plan, by the spec or the owner; reviewers should not re-raise them.
 
-- More than 1,000 recorded post entries: sorting every record by old URL cannot be bounded with core's indexes (`meta_value` has none). The tab reads 1,000 entries in the `meta_key` index's order, plus the root list, and sorts, searches and pages those; a notice says only 1,000 are listed and that a search for a full old URL finds another, which a hashed seek does.
+- The newest 1,000 records (owner ruling): the ledger keeps `hierarchy_guard_recent_records`, the newest record meta IDs per post type, at most 1,000, updated in `record()` and whenever a ledger row is deleted. The Redirects tab sorts that window by old URL, filters by type through the type's own list, and shows "1,000+" past the cap; a search for a full old URL still finds any record by its key. There is no backfill: records made before this plan are not listed until they are recorded again, and no live site has any yet.
+- Delete asks first (owner ruling), as core does for terms and media; without JavaScript it deletes directly. The notice says the old URL "no longer redirects through it": a shorter recorded URL, or core's own 404 guess, may still send it somewhere.
+- A top-level root-list entry (owner ruling): its Edit view says where it leads, its field starts empty, and empty keeps it. A root-list entry given a URL target cannot be turned back into "Top level" except by deleting it.
 - A record lives with its holder. A URL target on a page that is in the Trash is not served (the ledger never answers from a holder in the Trash), and its row reads "the page it points to isn’t published". When a page is deleted for good its records go with it; the old paths `before_delete_post` moves to the grandparent or the root list arrive there without their overrides.
 - A chosen code along a chain of records: the first record the resolver's rounds use that has a chosen code decides.
-- A URL target is sent as it was set: pagination, feed, comment-page, trackback and embed suffixes are not re-applied to it. The request's query string is carried over, as for pages.
+- A URL target is sent as it was set: pagination, feed, comment-page, trackback and embed suffixes are not re-applied to it. The request's query string is carried over, before any `#fragment`.
 - Under plain permalinks every row that would be active reads "Not active: built-in redirects are off", the nearest of the spec's three reasons.
 - Two live posts can hold the same old path (rare: an alias and a page's own entry). Both are rows; only the newer is served, and deleting it lets the older one answer.
-- A root-list entry given a URL target cannot be turned back into "Top level" except by deleting it: the home URL, entered again, is an ordinary URL.
 - The Settings tab's Redirects help still says "Turn this on so old URLs reach their new pages." while the switch is on, as it did on Settings › Writing; plan 6's copy pass owns it.
 
 ---
@@ -58,9 +63,9 @@ Settled for this plan; reviewers should not re-raise them.
 
 ```
 includes/HierarchyGuard/
-├── Ledger.php                         MOD  overrides: target_key(), target(), set_target(), clean_target(), root_paths(); records drop them
+├── Ledger.php                         MOD  overrides: target_key(), target(), set_target(), clean_target(), root_paths(); records drop them; the newest-records list: recent(), on_deleted_meta()
 ├── Settings.php                       MOD  GROUP, register_option()
-├── Plugin.php                         MOD  wiring
+├── Plugin.php                         MOD  wiring, deleted_post_meta → Ledger::on_deleted_meta
 ├── Redirects/Ledger_View.php          MOD  target()
 ├── Redirects/Live_View.php            MOD  target() from the ledger
 ├── Redirects/Prefetched_View.php      MOD  target() from facts read ahead
@@ -71,7 +76,7 @@ includes/HierarchyGuard/
 ├── Redirects/Pairs.php                MOD  URL targets and chosen codes in a change's list; ledger key in the cache key
 ├── Redirects/Records.php              NEW  records: bounded listing, IDs, statuses, save, delete
 └── Admin/
-    ├── Settings_Section.php → Settings_Page.php   MOV  menu, nav tabs, Settings tab, Plugins link, load hook
+    ├── Settings_Section.php → Settings_Page.php   MOV  menu, nav tabs, Settings tab, Plugins link, load hook, titles, the Delete confirmation script
     ├── Redirects_Table.php            NEW  WP_List_Table of records
     ├── Redirect_Edit.php              NEW  Edit view; save, delete and bulk delete behind manage_options and nonces
     ├── Notices.php · Assets.php       MOD  links to the new page
@@ -83,14 +88,15 @@ tests/phpunit/
 └── SettingsSectionTest                                                          DEL
 ```
 
-`Ledger` is the only class that reads or writes overrides; `Rules` is the only place that decides what an override does to an answer, so the live and the batch resolvers cannot drift. `Records` is the only class that decides which records a listing shows, what a row's ID is, and what a save does; the admin classes check permissions and nonces, read the request, and print.
+`Ledger` is the only class that reads or writes overrides and the newest-records list; `Rules` is the only place that decides what an override does to an answer, so the live and the batch resolvers cannot drift. `Records` is the only class that decides which records a listing shows, what a row's ID is, and what a save does; the admin classes check permissions and nonces, read the request, and print.
 
 ---
 
-### Task 1: Overrides beside their records in the ledger
+### Task 1: Overrides beside their records, and the newest-records list, in the ledger
 
 **Files:**
-- Modify: `includes/HierarchyGuard/Ledger.php` (two constants, `target_key()`, `target()`, `set_target()`, `clean_target()`, `root_paths()`, three private helpers; `record_root()`, `claim()`, `forget()`, `forget_root()` and `prune()` drop the override with the record)
+- Modify: `includes/HierarchyGuard/Ledger.php` (three constants, `target_key()`, `target()`, `set_target()`, `clean_target()`, `root_paths()`, `recent()`, `on_deleted_meta()`, private helpers; `record()` lists each new entry; `record_root()`, `claim()`, `forget()`, `forget_root()` and `prune()` drop the override with the record; `deferred()` writes the list once)
+- Modify: `includes/HierarchyGuard/Plugin.php` (hooks `Ledger::on_deleted_meta` on `deleted_post_meta`)
 - Test: `tests/phpunit/LedgerTest.php`
 
 **Interfaces:**
@@ -100,7 +106,10 @@ tests/phpunit/
 - Produces: `Ledger::set_target( string $post_type, string $path, int $holder, string $url, int $code ): void`: stores `{ url, code }`, or removes it when both are empty; always bumps the ledger cache key. The option is written with autoload off and deleted once empty.
 - Produces: `Ledger::clean_target( mixed $value ): ?array{url:string,code:int}`: keeps an http(s) `url` (any case of scheme, trimmed) or '', and a `code` of 301 or 302 or 0; null when nothing is left.
 - Produces: `Ledger::root_paths(): array<string,string[]>`: the root list option as read today.
-- Behaviour kept: `record()`, `find()`, `claim()` and the trash lookups answer as before; the only new writes are the override deletions that go with a record.
+- Produces: `Ledger::RECENT = 'hierarchy_guard_recent_records'`, a non-autoloaded option `[ type => [ 'ids' => int[] newest first, 'more' => bool ] ]`. `record()` puts each new entry's meta ID at the front of its type's list, keeping at most `Subtree::count_cap()` and setting `more` when one falls off; inside `Ledger::deferred()` the IDs wait and are written once at its end.
+- Produces: `Ledger::recent( string[] $types ): array{ids:int[],more:bool}`: the listed types' IDs merged newest first, at most `Subtree::count_cap()`; `more` when older entries exist. One option read.
+- Produces: `Ledger::on_deleted_meta( $meta_ids, $object_id, $meta_key ): void`, hooked on `deleted_post_meta` (3 arguments) by `Plugin`: a deleted `_hierarchy_guard_path_` row leaves the list, however it was deleted (`forget()`, `prune()`, `claim()`, core deleting the post). There is no backfill: entries recorded before this plan are not on the list.
+- Behaviour kept: `record()`, `find()`, `claim()` and the trash lookups answer as before; the only new writes are the newest-records list and the override deletions that go with a record.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -113,6 +122,7 @@ with:
 ```php
 		delete_option( Ledger::ROOT_OPTION );
 		delete_option( Ledger::ROOT_TARGETS );
+		delete_option( Ledger::RECENT );
 		Post_Types::reset();
 ```
 
@@ -286,6 +296,109 @@ Append to the class in `tests/phpunit/LedgerTest.php`:
 		$this->assertNotSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ), 'An edit bumps the ledger cache key.' );
 		$this->assertSame( 302, $this->ledger->target( 'page', 'about-us', $this->about )['code'] );
 	}
+
+	/**
+	 * The meta ID of a post's entry for a path.
+	 *
+	 * @param int    $post_id Post.
+	 * @param string $path    Normalized path.
+	 * @param string $type    Post type.
+	 * @return int
+	 */
+	private function meta_id( int $post_id, string $path, string $type = 'page' ): int {
+		global $wpdb;
+		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s", $post_id, Ledger::key( $type, $path ) ) );
+	}
+
+	public function test_each_entry_recorded_goes_first_on_its_type_s_newest_list(): void {
+		global $wpdb;
+
+		$doc = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$this->ledger->record( $this->about, 'one' );
+		$this->ledger->record( $doc, 'manual' );
+		$this->ledger->record( $this->about, 'two' );
+
+		$one    = $this->meta_id( $this->about, 'one' );
+		$two    = $this->meta_id( $this->about, 'two' );
+		$manual = $this->meta_id( $doc, 'manual', 'hg_docs' );
+		$this->assertSame(
+			[
+				'ids'  => [ $two, $one ],
+				'more' => false,
+			],
+			$this->ledger->recent( [ 'page' ] )
+		);
+		$this->assertSame( [ $two, $manual, $one ], $this->ledger->recent( [ 'page', 'hg_docs' ] )['ids'], 'Types merge newest first.' );
+		$this->assertSame( [], $this->ledger->recent( [ 'post' ] )['ids'] );
+		$autoload = $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", Ledger::RECENT ) );
+		$this->assertContains( $autoload, [ 'no', 'off' ], 'The list is not autoloaded.' );
+	}
+
+	public function test_the_newest_list_keeps_the_cap_and_says_older_entries_exist(): void {
+		$cap = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		foreach ( [ 'one', 'two', 'three' ] as $path ) {
+			$this->ledger->record( $this->about, $path );
+		}
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+
+		$this->assertSame(
+			[
+				'ids'  => [ $this->meta_id( $this->about, 'three' ), $this->meta_id( $this->about, 'two' ) ],
+				'more' => true,
+			],
+			$this->ledger->recent( [ 'page' ] )
+		);
+	}
+
+	public function test_an_entry_leaves_the_newest_list_however_its_row_goes(): void {
+		global $wpdb;
+
+		$other = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'other',
+			]
+		);
+		foreach ( [ 'forgotten', 'pruned', 'taken', 'kept' ] as $path ) {
+			$this->ledger->record( $this->about, $path );
+		}
+		$this->ledger->record( $other, 'deleted-with-its-page' );
+		$kept = $this->meta_id( $this->about, 'kept' );
+
+		$this->ledger->forget( $this->about, 'forgotten' );
+		$wpdb->update( $wpdb->posts, [ 'post_name' => 'pruned' ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+		$this->ledger->prune( $this->about );
+		self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'taken',
+			]
+		);
+		wp_delete_post( $other, true );
+
+		$this->assertSame( [ $kept ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
+	public function test_entries_recorded_in_a_batch_join_the_newest_list_at_its_end(): void {
+		$inside = null;
+		Ledger::deferred(
+			function () use ( &$inside ): void {
+				$this->ledger->record( $this->about, 'one' );
+				$this->ledger->record( $this->about, 'two' );
+				$inside = get_option( Ledger::RECENT );
+			}
+		);
+
+		$this->assertFalse( $inside, 'Nothing is written while deferred.' );
+		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -293,7 +406,7 @@ Append to the class in `tests/phpunit/LedgerTest.php`:
 Run: `npm run test:php -- --filter LedgerTest`
 Expected: FAIL. Every test errors in `set_up()` with `Error: Undefined constant HierarchyGuard\Ledger::ROOT_TARGETS`.
 
-- [ ] **Step 3: Store, read and drop overrides**
+- [ ] **Step 3: Store, read and drop overrides, and keep the newest-records list**
 
 In `includes/HierarchyGuard/Ledger.php`, make these replacements.
 
@@ -313,9 +426,28 @@ with:
 	public const TARGET_PREFIX = '_hierarchy_guard_target_';
 	public const ROOT_OPTION   = 'hierarchy_guard_root_paths';
 	public const ROOT_TARGETS  = 'hierarchy_guard_root_targets';
+	public const RECENT        = 'hierarchy_guard_recent_records';
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
 
+```
+
+Replace:
+```php
+	/**
+	 * Meta key for a (post type, path) pair.
+```
+with:
+```php
+	/**
+	 * Entries recorded inside deferred(), meta IDs by post type, oldest first.
+	 *
+	 * @var array<string,int[]>
+	 */
+	private static array $recent_pending = [];
+
+	/**
+	 * Meta key for a (post type, path) pair.
 ```
 
 Replace:
@@ -338,6 +470,22 @@ with:
 	public static function target_key( string $post_type, string $path ): string {
 		return self::TARGET_PREFIX . md5( $post_type . ':' . $path );
 	}
+```
+
+Replace:
+```php
+
+		add_post_meta( $post_id, $key, $old_path, true );
+		$this->bump();
+```
+with:
+```php
+
+		$meta_id = add_post_meta( $post_id, $key, $old_path, true );
+		if ( is_int( $meta_id ) ) {
+			self::remember( (string) $post->post_type, [ $meta_id ] );
+		}
+		$this->bump();
 ```
 
 Replace:
@@ -406,6 +554,24 @@ with:
 		update_option( self::ROOT_OPTION, $roots, false );
 		$this->drop_root_targets( $post_type, [ $old_path ] );
 		$this->bump();
+```
+
+Replace:
+```php
+			--self::$defer_depth;
+			if ( 0 === self::$defer_depth && self::$bump_pending ) {
+```
+with:
+```php
+			--self::$defer_depth;
+			if ( 0 === self::$defer_depth && [] !== self::$recent_pending ) {
+				$pending              = self::$recent_pending;
+				self::$recent_pending = [];
+				foreach ( $pending as $type => $ids ) {
+					self::remember( (string) $type, $ids );
+				}
+			}
+			if ( 0 === self::$defer_depth && self::$bump_pending ) {
 ```
 
 Replace:
@@ -556,6 +722,67 @@ with:
 	}
 
 	/**
+	 * The newest post entries of the given types, newest first: the meta IDs
+	 * the RECENT option keeps per type as entries are recorded, at most
+	 * Subtree::count_cap() in all. `more` says older entries exist that the
+	 * list no longer holds. One option read; an entry deleted since may
+	 * still be named, and a reader skips it.
+	 *
+	 * @param string[] $types Post type names.
+	 * @return array{ids:int[],more:bool}
+	 */
+	public function recent( array $types ): array {
+		$all  = get_option( self::RECENT, [] );
+		$all  = is_array( $all ) ? $all : [];
+		$ids  = [];
+		$more = false;
+		foreach ( $types as $type ) {
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+			$ids  = array_merge( $ids, array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
+			$more = $more || ! empty( $list['more'] );
+		}
+		rsort( $ids );
+		$cap = Subtree::count_cap();
+		return [
+			'ids'  => array_slice( $ids, 0, $cap ),
+			'more' => $more || count( $ids ) > $cap,
+		];
+	}
+
+	/**
+	 * Takes entries out of the newest-records list when their rows are
+	 * deleted, by forget(), prune(), claim() or core deleting their post:
+	 * hooked on deleted_post_meta. Other keys cost a prefix check.
+	 *
+	 * @param int[]  $meta_ids  Meta IDs deleted.
+	 * @param int    $object_id Post ID.
+	 * @param string $meta_key  Meta key.
+	 */
+	public static function on_deleted_meta( $meta_ids, $object_id, $meta_key ): void {
+		unset( $object_id );
+		if ( ! str_starts_with( (string) $meta_key, self::KEY_PREFIX ) ) {
+			return;
+		}
+		$gone = array_flip( array_map( 'intval', (array) $meta_ids ) );
+		$all  = get_option( self::RECENT, [] );
+		if ( ! is_array( $all ) ) {
+			return;
+		}
+		$changed = false;
+		foreach ( $all as $type => $list ) {
+			$ids  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
+			$left = array_values( array_filter( $ids, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
+			if ( count( $left ) !== count( $ids ) ) {
+				$all[ $type ]['ids'] = $left;
+				$changed             = true;
+			}
+		}
+		if ( $changed ) {
+			update_option( self::RECENT, $all, false );
+		}
+	}
+
+	/**
 	 * Single index seek on the hashed key: a live holder first, newest entry first.
 ```
 
@@ -566,6 +793,32 @@ Replace:
 ```
 with:
 ```php
+	/**
+	 * Puts entries just recorded at the front of their type's newest-records
+	 * list, keeping at most Subtree::count_cap(); inside deferred() they wait
+	 * and are written once at its end. The option is not autoloaded.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param int[]  $meta_ids  Meta IDs, oldest first.
+	 */
+	private static function remember( string $post_type, array $meta_ids ): void {
+		if ( self::$defer_depth > 0 ) {
+			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
+			return;
+		}
+		$all  = get_option( self::RECENT, [] );
+		$all  = is_array( $all ) ? $all : [];
+		$list = is_array( $all[ $post_type ] ?? null ) ? $all[ $post_type ] : [];
+		$ids  = array_merge( array_reverse( array_map( 'intval', $meta_ids ) ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) );
+		$cap  = Subtree::count_cap();
+
+		$all[ $post_type ] = [
+			'ids'  => array_slice( $ids, 0, $cap ),
+			'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
+		];
+		update_option( self::RECENT, $all, false );
+	}
+
 	/**
 	 * The root list's overrides, by post type then path.
 	 *
@@ -628,10 +881,24 @@ with:
 	 * Invalidates every cached lookup, or notes that it is due inside deferred().
 ```
 
+In `includes/HierarchyGuard/Plugin.php`, replace:
+```php
+
+		$ledger    = new Ledger();
+```
+with:
+```php
+
+		// The newest-records list drops an entry whenever its row goes, however it goes.
+		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
+
+		$ledger    = new Ledger();
+```
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter LedgerTest`
-Expected: PASS (30 tests).
+Expected: PASS (34 tests).
 
 Run: `npm run test:php` then `composer lint`
 Expected: the whole suite passes, with the new tests counted; lint exits 0. Run `composer lint:fix` first if it reports alignment; formatting-only changes are not deviations.
@@ -639,7 +906,7 @@ Expected: the whole suite passes, with the new tests counted; lint exits 0. Run 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add includes/HierarchyGuard/Ledger.php tests/phpunit/LedgerTest.php
+git add includes/HierarchyGuard/Ledger.php includes/HierarchyGuard/Plugin.php tests/phpunit/LedgerTest.php
 git commit -m "feat: keep a recorded redirect's override beside its record"
 ```
 
@@ -1425,12 +1692,12 @@ git commit -m "feat: resolve old paths through a record's URL target and chosen 
 ### Task 3: The server sends URL targets and chosen codes
 
 **Files:**
-- Modify: `includes/HierarchyGuard/Redirects/Server.php` (`maybe_redirect()` comment, `target_for_current_request()`, new private `external()`)
+- Modify: `includes/HierarchyGuard/Redirects/Server.php` (`maybe_redirect()` comment, `target_for_current_request()`, new private `external()`, `append_query_string()` puts the query before a `#fragment`)
 - Test: `tests/phpunit/ServerTest.php`
 
 **Interfaces:**
 - Consumes: `Resolver::resolve( $type, $path, $temporary, $code ): WP_Post|string|null` (Task 2).
-- Produces: `Server::target_for_current_request(): ?array{url:string,status:int}` as before, now also for URL targets: the URL as set (no suffixes re-applied), with the request's query string, through `esc_url_raw( $url, [ 'http', 'https' ] )` and sent only while http(s), never through `wp_validate_redirect()`. The status is the chosen code when there is one, else 301 or 302 as before; `hierarchy_guard_redirect_status` and `hierarchy_guard_redirect_url` get `null` for the post of a URL target. The loop guard compares paths only for a URL on this site's host.
+- Produces: `Server::target_for_current_request(): ?array{url:string,status:int}` as before, now also for URL targets: the URL as set (no suffixes re-applied), with the request's query string, through `esc_url_raw( $url, [ 'http', 'https' ] )` and sent only while http(s), never through `wp_validate_redirect()`. The status is the chosen code when there is one, else 301 or 302 as before; `hierarchy_guard_redirect_status` and `hierarchy_guard_redirect_url` get `null` for the post of a URL target. The loop guard compares paths only for a URL on this site's host. The request's query string goes before a URL target's `#fragment` (`…/landing/?utm_source=news#section`), so the browser still sends it.
 - Behaviour kept: GET and HEAD only, 404 only, serving switch, plain permalinks inert, segment cap, page targets through `wp_validate_redirect()`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1542,12 +1809,23 @@ Append to the class in `tests/phpunit/ServerTest.php`:
 		$this->assertFalse( is_404() );
 		$this->assertNull( $this->server->target_for_current_request() );
 	}
+
+	public function test_the_query_string_goes_before_a_url_target_s_fragment(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/landing/#section', 0 );
+		$this->go_to( '/old-about/?utm_source=news' );
+		$this->assertSame( 'https://example.org/landing/?utm_source=news#section', $this->server->target_for_current_request()['url'] );
+
+		$ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/landing/?ref=hg#section', 0 );
+		$this->assertSame( 'https://example.org/landing/?ref=hg&utm_source=news#section', $this->server->target_for_current_request()['url'] );
+	}
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npm run test:php -- --filter ServerTest`
-Expected: FAIL. Four new tests fail, with `Failed asserting that null is identical to Array` and `Trying to access array offset on value of type null`; the live-page test passes already.
+Expected: FAIL. The new tests fail, with `Failed asserting that null is identical to Array` and `Trying to access array offset on value of type null`; the live-page test passes already.
 
 - [ ] **Step 3: Send URL targets and chosen codes**
 
@@ -1699,10 +1977,44 @@ with:
 	}
 ```
 
+Replace:
+```php
+	/**
+	 * Carries the current request's query string over to the target URL. The
+	 * query is read from the request URI, as redirect_canonical() does, because
+	 * some servers rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
+	 *
+```
+with:
+```php
+	/**
+	 * Carries the current request's query string over to the target URL,
+	 * before any #fragment a URL target has. The query is read from the
+	 * request URI, as redirect_canonical() does, because some servers
+	 * rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
+	 *
+```
+
+Replace:
+```php
+		}
+		return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . $query;
+	}
+```
+with:
+```php
+		}
+		// A URL target may carry a #fragment: the query goes before it, or the browser never sends it.
+		$parts    = explode( '#', $url, 2 );
+		$parts[0] = $parts[0] . ( str_contains( $parts[0], '?' ) ? '&' : '?' ) . $query;
+		return implode( '#', $parts );
+	}
+```
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter ServerTest`
-Expected: PASS (26 tests).
+Expected: PASS (27 tests).
 
 Run: `npm run test:php` then `composer lint`
 Expected: the whole suite passes, with the new tests counted; lint exits 0. Run `composer lint:fix` first if it reports alignment; formatting-only changes are not deviations.
@@ -2006,10 +2318,11 @@ git commit -m "feat: list a change's redirects with the overrides the server hon
 - Consumes: `Ledger::record()`, `forget()`, `forget_root()`, `target()`, `set_target()`, `clean_target()`, `root_paths()`, `key()`, `target_key()`, `KEY_PREFIX`; `Batch_Resolver::owners()`, `prime_with_ancestors()`; `Server::prefix()`; `Subtree::count_cap()`; `Paths::url()`, `relative()`, `normalize()`, `uri()`, `has_trashed_segment()`.
 - Produces: a record, `array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}`. `holder` is the post holding the `_hierarchy_guard_path_{md5}` row, 0 for a root-list entry; `path` is the stored, normalized path; `old` is the old URL relative to the home URL, percent-decoded for reading (`/café/`); `target` is the override or null.
 - Produces: `Records::id( int $holder, string $post_type, string $path ): string` = `"{holder}.{md5(type:path)}"`; `Records::find( string $id ): ?array` accepts only `^\d{1,20}\.[0-9a-f]{32}$` naming an existing record of a supported type whose hash is of its holder's own type.
-- Produces: `Records::page( string $post_type, string $search, int $page ): array{rows:array,total:int,capped:bool}`: `PER_PAGE` (20) rows sorted by old URL (then type, then holder), root-list entries among them; search is a case-insensitive substring of the old URL, and a full URL is matched as its path; `capped` when more post entries exist than `Subtree::count_cap()`, in which case an exact old URL is still found by its hashed key.
+- Produces: `Records::page( string $post_type, string $search, int $page ): array{rows:array,total:int,page:int,capped:bool}`: `PER_PAGE` (20) rows sorted by old URL (then type, then holder) across the newest `Subtree::count_cap()` post entries of the listed types (`Ledger::recent()`) plus the root list; search is a case-insensitive substring of the old URL, and a full URL is matched as its path; `page` is the page shown, the last one when the request asks for one past it; `capped` when older post entries exist, in which case an exact old URL is still found by its hashed key.
 - Produces: `Records::statuses( array $rows ): array<string,string>` by ID, one of `STATUS_IN_USE`, `STATUS_UNPUBLISHED`, `STATUS_OFF`, `STATUS_ACTIVE`, the first that applies.
-- Produces: `Records::target_url( array $record ): string`, the URL the Edit view offers; `Records::save( array $record, string $url, int $code ): true|WP_Error` with codes `hierarchy_guard_no_url`, `hierarchy_guard_not_http`, `hierarchy_guard_same_path`, `hierarchy_guard_not_saved`; `Records::delete( array $record ): bool`.
-- Bounds: one query reads at most `count_cap() + 1` entries on the `meta_key` index (`LIMIT` inside a derived table, joined to posts after); one query for a page's overrides; one per type for the pages at the old URLs; one hashed seek for an exact search past the cap. Nothing reads every record.
+- Produces: `Records::target_url( array $record ): string`, the URL the Edit view offers ('' for a top-level root-list entry); `Records::is_top_level( array $record ): bool` (a root-list entry with no URL target); `Records::save( array $record, string $url, int $code ): true|WP_Error` with codes `hierarchy_guard_no_url`, `hierarchy_guard_not_http`, `hierarchy_guard_same_path`, `hierarchy_guard_not_saved`; `Records::delete( array $record ): bool`.
+- Save reads a value starting with one `/` as a path on this site (`home_url( $path )`); `//host` and a value with no typed `http(s)` scheme are refused. An empty field saves only the code for a top-level entry and is refused otherwise.
+- Bounds: one option read for the newest list, then one query of `meta_id IN (…)` (at most `count_cap()` primary-key lookups) with `STRAIGHT_JOIN` to posts on their primary key, no derived or temporary table; one query for a page's overrides; one per type for the pages at the old URLs; one hashed seek for an exact search past the cap. Nothing reads every record.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2058,6 +2371,7 @@ final class RecordsTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
 		delete_option( Ledger::ROOT_TARGETS );
+		delete_option( Ledger::RECENT );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
 		// Trashing a holder in these tests leaves its subpages alone.
@@ -2188,22 +2502,60 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( 0, $this->records->page( 'post', '', 1 )['total'], 'A type that is not supported lists nothing.' );
 	}
 
-	public function test_a_listing_reads_entries_up_to_the_cap_and_finds_one_past_it_by_its_exact_old_url(): void {
+	public function test_a_listing_reads_the_newest_entries_up_to_the_cap_and_finds_an_older_one_by_its_exact_old_url(): void {
 		for ( $i = 1; $i <= 5; $i++ ) {
 			$this->ledger->record( $this->ids['about'], 'old-' . $i );
 		}
+		$this->ledger->record_root( 'page', 'archive' );
 		$cap = static fn(): int => 3;
 		add_filter( 'hierarchy_guard_count_cap', $cap );
 
 		$page = $this->records->page( '', '', 1 );
-		$this->assertSame( 3, $page['total'] );
+		$this->assertSame( [ '/archive/', '/old-3/', '/old-4/', '/old-5/' ], array_values( self::olds( $page ) ), 'The newest three, and the root list.' );
 		$this->assertTrue( $page['capped'] );
-
-		$shown  = array_values( self::olds( $page ) );
-		$hidden = array_values( array_diff( [ '/old-1/', '/old-2/', '/old-3/', '/old-4/', '/old-5/' ], $shown ) );
-		$this->assertCount( 2, $hidden );
-		$this->assertSame( [ $hidden[0] ], array_values( self::olds( $this->records->page( '', home_url( $hidden[0] ), 1 ) ) ), 'Searching its full URL finds an entry the cap left out.' );
+		$this->assertSame( [ '/old-1/' ], array_values( self::olds( $this->records->page( '', home_url( '/old-1/' ), 1 ) ) ), 'Searching its full URL finds an older entry.' );
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
+	}
+
+	public function test_a_type_s_filter_lists_that_type_s_newest_entries_whatever_the_other_types_hold(): void {
+		$this->register_docs();
+		$guide = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$cap   = static fn(): int => 2;
+		add_filter( 'hierarchy_guard_count_cap', $cap );
+		foreach ( [ 'p-1', 'p-2', 'p-3' ] as $path ) {
+			$this->ledger->record( $this->ids['about'], $path );
+		}
+		$this->ledger->record( $guide, 'manual' );
+		$this->ledger->record( $this->ids['about'], 'p-4' );
+
+		$all  = $this->records->page( '', '', 1 );
+		$docs = $this->records->page( 'hg_docs', '', 1 );
+		remove_filter( 'hierarchy_guard_count_cap', $cap );
+
+		$this->assertSame( [ '/docs/manual/', '/p-4/' ], array_values( self::olds( $all ) ), 'The newest two of every type.' );
+		$this->assertTrue( $all['capped'] );
+		$this->assertSame( [ '/docs/manual/' ], array_values( self::olds( $docs ) ) );
+		$this->assertFalse( $docs['capped'], 'Nothing of that type is older.' );
+	}
+
+	public function test_a_page_past_the_last_one_shows_the_last_one(): void {
+		for ( $i = 1; $i <= 21; $i++ ) {
+			$this->ledger->record( $this->ids['about'], sprintf( 'old-%02d', $i ) );
+		}
+
+		$past = $this->records->page( '', '', 5 );
+		$this->assertSame( 2, $past['page'] );
+		$this->assertSame( [ '/old-21/' ], array_values( self::olds( $past ) ) );
+
+		$this->ledger->forget( $this->ids['about'], 'old-21' );
+		$after = $this->records->page( '', '', 2 );
+		$this->assertSame( 1, $after['page'], 'After the last row of page 2 is deleted.' );
+		$this->assertCount( 20, $after['rows'] );
 	}
 
 	public function test_a_listing_costs_the_same_queries_for_five_entries_or_fifty(): void {
@@ -2219,6 +2571,7 @@ final class RecordsTest extends WP_UnitTestCase {
 	private function queries_to_list( int $entries ): int {
 		global $wpdb;
 		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->postmeta} WHERE meta_key LIKE %s", $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%' ) );
+		delete_option( Ledger::RECENT );
 		for ( $i = 1; $i <= $entries; $i++ ) {
 			$this->ledger->record( $this->ids['about'], 'many-' . $i );
 		}
@@ -2337,12 +2690,13 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_the_url_the_form_offered_keeps_the_target_and_saves_the_code(): void {
+	public function test_a_top_level_entry_offers_an_empty_field_that_keeps_it_and_saves_the_code(): void {
 		$this->ledger->record_root( 'page', 'archive' );
 		$record = $this->records->find( Records::id( 0, 'page', 'archive' ) );
-		$this->assertSame( home_url( '/' ), Records::target_url( $record ), 'A root-list entry offers the home URL.' );
+		$this->assertTrue( Records::is_top_level( $record ) );
+		$this->assertSame( '', Records::target_url( $record ), 'A top-level entry offers nothing.' );
 
-		$this->assertTrue( $this->records->save( $record, untrailingslashit( home_url( '/' ) ), 302 ) );
+		$this->assertTrue( $this->records->save( $record, '  ', 302 ) );
 		$this->assertSame( [ 'page' => [ 'archive' ] ], $this->ledger->root_paths(), 'Still in the root list: subpages stay top level.' );
 		$this->assertSame(
 			[
@@ -2353,8 +2707,39 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 
 		$record = $this->records->find( Records::id( 0, 'page', 'archive' ) );
-		$this->assertTrue( $this->records->save( $record, home_url( '/' ), 0 ) );
+		$this->assertTrue( $this->records->save( $record, '', 0 ) );
 		$this->assertNull( $this->ledger->target( 'page', 'archive', 0 ), 'Automatic again, the override goes.' );
+	}
+
+	public function test_the_url_the_form_offered_keeps_the_target_and_saves_the_code(): void {
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->ids['about'], 'https://example.org/about/', 0 );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+
+		$this->assertTrue( $this->records->save( $record, 'https://example.org/about', 301 ) );
+
+		$this->assertSame(
+			[
+				'url'  => 'https://example.org/about/',
+				'code' => 301,
+			],
+			$this->ledger->target( 'page', 'old-about', $this->ids['about'] )
+		);
+	}
+
+	public function test_a_path_on_this_site_is_read_as_its_url(): void {
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$record = function (): array {
+			return $this->records->find( Records::id( (int) $this->ledger->find( 'page', 'old-about' ), 'page', 'old-about' ) );
+		};
+
+		$this->assertTrue( $this->records->save( $record(), '/company/about/history/', 0 ) );
+		$this->assertSame( $this->ids['history'], $this->ledger->find( 'page', 'old-about' ), 'A page’s path makes a page target.' );
+
+		$this->assertTrue( $this->records->save( $record(), '/careers/?team=web', 0 ) );
+		$this->assertSame( home_url( '/careers/?team=web' ), $this->ledger->target( 'page', 'old-about', $this->ids['history'] )['url'], 'Any other path is a URL on this site.' );
+
+		$this->assertSame( 'hierarchy_guard_not_http', $this->records->save( $record(), '//evil.example/x', 0 )->get_error_code(), 'Two slashes start another host, not a path.' );
 	}
 
 	public function test_a_url_that_is_not_http_or_is_empty_is_refused_and_nothing_is_written(): void {
@@ -2362,12 +2747,14 @@ final class RecordsTest extends WP_UnitTestCase {
 		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
 		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
 
-		foreach ( [ 'javascript:alert(1)', 'ftp://example.org/', 'mailto:a@example.org', '/company/', '' ] as $url ) {
+		foreach ( [ 'javascript:alert(1)', 'ftp://example.org/', 'mailto:a@example.org', 'company/about', '' ] as $url ) {
 			$result = $this->records->save( $record, $url, 302 );
 			$this->assertInstanceOf( WP_Error::class, $result, $url );
 		}
 		$this->assertSame( 'hierarchy_guard_no_url', $this->records->save( $record, '  ', 0 )->get_error_code() );
+		$this->assertSame( 'Enter the URL or path to redirect to.', $this->records->save( $record, '', 0 )->get_error_message() );
 		$this->assertSame( 'hierarchy_guard_not_http', $this->records->save( $record, 'ftp://example.org/', 0 )->get_error_code() );
+		$this->assertSame( 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.', $this->records->save( $record, 'ftp://example.org/', 0 )->get_error_message() );
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ) );
 		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
 	}
@@ -2531,11 +2918,12 @@ use WP_Post;
 
 /**
  * One record per ledger entry: a post's _hierarchy_guard_path_{md5} row, or
- * one root-list entry. A listing reads at most Subtree::count_cap() post
- * entries, in the meta_key index's own order, and the root list, which holds
- * at most Ledger::ROOT_CAP paths per type; it sorts and searches those, and
- * reads targets and statuses for one page of rows only. A record's ID is its
- * holder's post ID, 0 for the root list, then a dot and its hash.
+ * one root-list entry. A listing reads the newest Subtree::count_cap() post
+ * entries, which the ledger keeps a list of per type, and the root list,
+ * which holds at most Ledger::ROOT_CAP paths per type; it sorts and searches
+ * those, and reads targets and statuses for one page of rows only. A
+ * record's ID is its holder's post ID, 0 for the root list, then a dot and
+ * its hash.
  */
 final class Records {
 
@@ -2588,13 +2976,14 @@ final class Records {
 	}
 
 	/**
-	 * One page of records sorted by old URL, how many match, and whether the
-	 * post entries read stopped at the cap.
+	 * One page of records sorted by old URL, how many match, the page shown,
+	 * which is the last one when the page asked for is past it, and whether
+	 * older post entries exist than the newest ones listed.
 	 *
 	 * @param string $post_type A supported type to list alone, or '' for every supported type.
 	 * @param string $search    Text the old URL contains, or ''.
 	 * @param int    $page      Page number, from 1.
-	 * @return array{rows:array<int,array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}>,total:int,capped:bool}
+	 * @return array{rows:array<int,array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}>,total:int,page:int,capped:bool}
 	 */
 	public function page( string $post_type, string $search, int $page ): array {
 		$types = Post_Types::supported();
@@ -2605,6 +2994,7 @@ final class Records {
 			return [
 				'rows'   => [],
 				'total'  => 0,
+				'page'   => 1,
 				'capped' => false,
 			];
 		}
@@ -2623,11 +3013,13 @@ final class Records {
 		}
 
 		uasort( $rows, [ self::class, 'compare' ] );
-		$slice = array_slice( array_values( $rows ), ( max( 1, $page ) - 1 ) * self::PER_PAGE, self::PER_PAGE );
+		$page  = min( max( 1, $page ), max( 1, (int) ceil( count( $rows ) / self::PER_PAGE ) ) );
+		$slice = array_slice( array_values( $rows ), ( $page - 1 ) * self::PER_PAGE, self::PER_PAGE );
 
 		return [
 			'rows'   => $this->with_targets( $slice ),
 			'total'  => count( $rows ),
+			'page'   => $page,
 			'capped' => $capped,
 		];
 	}
@@ -2713,8 +3105,9 @@ final class Records {
 	}
 
 	/**
-	 * The URL the Edit view offers for a record: its URL target, its page's
-	 * URL, or the home URL for a root-list entry, whose subpages are top level.
+	 * The URL the Edit view offers for a record: its URL target, or its
+	 * page's URL. A root-list entry without a URL target, whose subpages are
+	 * top level, offers nothing: the field starts empty.
 	 *
 	 * @param array{holder:int,target:array{url:string,code:int}|null} $record Record.
 	 * @return string
@@ -2728,20 +3121,33 @@ final class Records {
 			$link = get_permalink( $record['holder'] );
 			return is_string( $link ) ? $link : '';
 		}
-		return home_url( '/' );
+		return '';
 	}
 
 	/**
-	 * Saves an edit. The URL the Edit view offered, unchanged, keeps the
-	 * target and saves the code. A URL that url_to_postid() resolves to a page
-	 * of the record's own type makes a page target: the record moves onto
-	 * that page, out of the root list or off its old holder, and its code goes
-	 * with it. The holder's own URL makes it a page target again. Any other
-	 * http(s) URL makes a URL target, stored beside the record. Anything else
-	 * is refused and nothing is written.
+	 * Whether a record is a root-list entry whose subpages are top level: no
+	 * holder, and no URL target.
+	 *
+	 * @param array{holder:int,target:array{url:string,code:int}|null} $record Record.
+	 * @return bool
+	 */
+	public static function is_top_level( array $record ): bool {
+		return 0 === $record['holder'] && ( null === $record['target'] || '' === $record['target']['url'] );
+	}
+
+	/**
+	 * Saves an edit. A path starting with one slash is a URL on this site,
+	 * resolved against the home URL. The URL the Edit view offered, unchanged,
+	 * keeps the target and saves the code; so does an empty field for a
+	 * top-level root-list entry, whose field starts empty. A URL that
+	 * url_to_postid() resolves to a page of the record's own type makes a page
+	 * target: the record moves onto that page, out of the root list or off
+	 * its old holder, and its code goes with it. The holder's own URL makes it
+	 * a page target again. Any other http(s) URL makes a URL target, stored
+	 * beside the record. Anything else is refused and nothing is written.
 	 *
 	 * @param array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null} $record Record from find().
-	 * @param string $url  The URL entered.
+	 * @param string $url  The URL or path entered.
 	 * @param int    $code 301, 302, or 0 for the automatic code.
 	 * @return true|WP_Error
 	 */
@@ -2750,8 +3156,15 @@ final class Records {
 		$code = in_array( $code, [ 301, 302 ], true ) ? $code : 0;
 		$type = $record['post_type'];
 		$path = $record['path'];
+		if ( '' === $url && self::is_top_level( $record ) ) {
+			$this->ledger->set_target( $type, $path, 0, '', $code );
+			return true;
+		}
 		if ( '' === $url ) {
-			return new WP_Error( 'hierarchy_guard_no_url', __( 'Enter the URL to redirect to.', 'hierarchy-guard' ) );
+			return new WP_Error( 'hierarchy_guard_no_url', __( 'Enter the URL or path to redirect to.', 'hierarchy-guard' ) );
+		}
+		if ( str_starts_with( $url, '/' ) && ! str_starts_with( $url, '//' ) ) {
+			$url = home_url( $url );
 		}
 
 		$kept = null !== $record['target'] ? $record['target']['url'] : '';
@@ -2760,9 +3173,11 @@ final class Records {
 			return true;
 		}
 
+		// esc_url_raw() would read `company/about` as http://company/about: the scheme must be typed.
+		$typed = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
 		$clean = esc_url_raw( $url, [ 'http', 'https' ] );
-		if ( '' === $clean || ! in_array( strtolower( (string) wp_parse_url( $clean, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ) {
-			return new WP_Error( 'hierarchy_guard_not_http', __( 'Enter a URL that starts with http:// or https://.', 'hierarchy-guard' ) );
+		if ( '' === $clean || ! in_array( $typed, [ 'http', 'https' ], true ) || ! in_array( strtolower( (string) wp_parse_url( $clean, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ) {
+			return new WP_Error( 'hierarchy_guard_not_http', __( 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.', 'hierarchy-guard' ) );
 		}
 
 		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.url_to_postid_url_to_postid -- Once per save on an admin screen, never on the front end.
@@ -2820,22 +3235,27 @@ final class Records {
 	}
 
 	/**
-	 * The post entries a listing reads: at most the count cap, in the
-	 * meta_key index's order, joined to their posts after the cap is applied.
-	 * Rows whose type is not listed, or whose key does not carry their own
-	 * type's hash, are left out.
+	 * The post entries a listing reads: the newest of the listed types, at
+	 * most the count cap, from the ledger's list, in one primary-key lookup
+	 * joined to their posts. An entry deleted since the list named it is
+	 * simply not found. Rows whose type is not listed, or whose key does not
+	 * carry their own type's hash, are left out.
 	 *
 	 * @param string[] $types Post types to list.
-	 * @return array{0:array<string,array<string,mixed>>,1:bool} Rows by ID, and whether more entries exist than were read.
+	 * @return array{0:array<string,array<string,mixed>>,1:bool} Rows by ID, and whether older entries exist than were read.
 	 */
 	private function window( array $types ): array {
 		global $wpdb;
 
-		$cap = Subtree::count_cap();
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A range on the meta_key index that stops at the cap; the join reads only those rows' posts.
-		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT w.post_id, w.meta_key, w.meta_value, p.post_type FROM ( SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE meta_key LIKE %s LIMIT %d ) w INNER JOIN {$wpdb->posts} p ON p.ID = w.post_id", $wpdb->esc_like( Ledger::KEY_PREFIX ) . '%', $cap + 1 ), ARRAY_A );
+		$recent = $this->ledger->recent( $types );
+		if ( [] === $recent['ids'] ) {
+			return [ [], $recent['more'] ];
+		}
+		$in = implode( ',', array_fill( 0, count( $recent['ids'] ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds only %d, one per meta ID the list names, at most the count cap; primary-key lookups, then each row's post by its primary key.
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT pm.post_id, pm.meta_key, pm.meta_value, p.post_type FROM {$wpdb->postmeta} pm STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_id IN ( {$in} )", $recent['ids'] ), ARRAY_A );
 
-		return [ self::rows( array_slice( $rows, 0, $cap ), $types ), count( $rows ) > $cap ];
+		return [ self::rows( $rows, $types ), $recent['more'] ];
 	}
 
 	/**
@@ -2985,7 +3405,7 @@ final class Records {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter RecordsTest`
-Expected: PASS (20 tests).
+Expected: PASS (24 tests).
 
 Run: `npm run test:php` then `composer lint`
 Expected: the whole suite passes, with the new tests counted; lint exits 0. Run `composer lint:fix` first if it reports alignment; formatting-only changes are not deviations.
@@ -3010,7 +3430,7 @@ git commit -m "feat: list, find, retarget and delete recorded redirects"
 - Produces: `Settings::GROUP = 'hierarchy_guard'` and `Settings::register_option(): void`, hooked on `init` by `Plugin`, registering `hierarchy_guard_settings` in that group with `Settings::sanitize()` and the defaults.
 - Produces: `Admin\Settings_Page::__construct( Providers $providers )`, `SLUG = 'hierarchy-guard'`, `SECTION = 'hierarchy_guard'`; `register()` hooks `admin_menu` → `add_page()`, `admin_init` → `add_fields()` and `plugin_action_links_hierarchy-guard/hierarchy-guard.php` → `action_links()`.
 - Produces: `Settings_Page::url( string $tab = '' ): string` (`options-general.php?page=hierarchy-guard[&tab=…]`), `redirects_url()` (`…#hierarchy-guard-redirects`), `policy_url()` (`…#hierarchy-guard-trash-policy`). Every link that pointed at Settings › Writing uses them: the notices' and the nudge's "Set up redirects", the block editor config's `settingsUrl` and `policyUrl` (the panel's "Change this in Settings").
-- Produces: `render()` prints `<h1>`, core nav tabs (`nav-tab-wrapper`, `nav-tab`, `nav-tab-active`, `aria-current="page"`) and the Settings tab: an `options.php` form with `settings_fields( Settings::GROUP )` and the three fields in a section without a heading. The field renderers move unchanged from `Settings_Section`. Task 7 adds the Redirects tab.
+- Produces: `render()` prints `<h1>`, core nav tabs (`nav-tab-wrapper`, `nav-tab`, `nav-tab-active`, `aria-current="page"`), `<hr class="wp-header-end">` (core's `common.js` puts admin notices there, below the tabs) and the Settings tab: an `options.php` form with `settings_fields( Settings::GROUP )` and the three fields in a section without a heading. The field renderers move from `Settings_Section` unchanged except "The Trash is turned off…", capitalised as on core's PHP screens. Task 7 adds the Redirects tab.
 - Removes: `Admin\Settings_Section` and everything it registered on Settings › Writing.
 
 - [ ] **Step 1: Write the failing tests**
@@ -3141,6 +3561,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( '<h1>Hierarchy Guard</h1>', $html );
 		$this->assertStringContainsString( '<nav class="nav-tab-wrapper wp-clearfix" aria-label="Secondary menu">', $html );
+		$this->assertMatchesRegularExpression( '#</nav><hr class="wp-header-end"><form#', $html, 'Core’s notices land below the tabs.' );
 		$this->assertMatchesRegularExpression( '#<a href="[^"]*options-general\.php\?page=hierarchy-guard" class="nav-tab nav-tab-active" aria-current="page">Settings</a>#', $html );
 		$this->assertStringContainsString( '<form action="options.php" method="post">', $html );
 		$this->assertStringContainsString( "name='option_page' value='hierarchy_guard'", $html );
@@ -3250,7 +3671,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Trash the subpages too', $html );
 		$this->assertStringContainsString( 'Leave subpages where they are', $html );
 		$this->assertStringContainsString( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.', $html );
-		$this->assertStringNotContainsString( 'The trash is turned off', $html, 'This test site keeps its trash.' );
+		$this->assertStringNotContainsString( 'The Trash is turned off', $html, 'This test site keeps its Trash.' );
 	}
 
 	public function test_a_provider_without_a_name_gets_a_generic_sentence(): void {
@@ -3557,6 +3978,8 @@ final class Settings_Page {
 		echo '<div class="wrap">';
 		echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';
 		$this->render_tabs( 'settings' );
+		// Core moves notices to just after this, below the tabs.
+		echo '<hr class="wp-header-end">';
 		echo '<form action="options.php" method="post">';
 		settings_fields( Settings::GROUP );
 		do_settings_sections( self::SLUG );
@@ -3651,7 +4074,7 @@ final class Settings_Page {
 
 		$help = __( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'The Pages list asks each time.', 'hierarchy-guard' );
 		if ( ! EMPTY_TRASH_DAYS ) {
-			$help .= ' ' . __( 'The trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
+			$help .= ' ' . __( 'The Trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
 		}
 		echo '<p class="description">' . esc_html( $help ) . '</p>';
 		echo '</fieldset>';
@@ -3799,9 +4222,9 @@ git commit -m "feat: move the settings to Settings › Hierarchy Guard"
 
 **Interfaces:**
 - Consumes: `Records` (Task 5), `Settings_Page::url()` (Task 6), `Providers::detect()`, `Settings::serve_redirects()`, `Subtree::count_cap()`.
-- Produces: `Admin\Redirects_Table extends WP_List_Table` (`singular` redirect, `plural` redirects, screen `settings_page_hierarchy-guard`): columns `cb`, `old` (primary), `target`, `http_code` (not `code`: a cell carries its key as a class, and core's admin CSS sets `.code` in a monospace font), `status`; bulk action `delete`; row action Delete; post type filter `post_type` when two or more types are supported; static `search()`, `post_type()`, `old_label( array $item ): string` (escaped HTML), `status_label( string $status ): string`; `is_capped(): bool`.
-- Produces: `Admin\Redirect_Edit::__construct( Records $records )`, `NONCE_DELETE = 'hierarchy_guard_delete_'` (plus the record ID), `NONCE_BULK = 'bulk-redirects'` (the table's own `bulk-{plural}` nonce), `delete_url( string $id ): string`, `handle(): ?string` (where to redirect, or null to print the page). It reads `action`, then `action2`, so the bottom bulk selector works without JavaScript; it checks `manage_options` (else `wp_die()` 403) and the nonce (`check_admin_referer()`) before it changes anything; bulk deletes at most `Records::PER_PAGE` string IDs. Notices go through `add_settings_error()` and the `settings_errors` transient with `settings-updated=true`, as `options.php` does, so core's options header prints them.
-- Produces: `Settings_Page::__construct( Providers $providers, Records $records )`, `current_tab(): string` (`redirects` or `settings`), `load()` on the page's `load-{hook}` (runs `Redirect_Edit::handle()` on the Redirects tab, then `wp_safe_redirect()` and `exit`).
+- Produces: `Admin\Redirects_Table extends WP_List_Table` (`singular` redirect, `plural` redirects, screen `settings_page_hierarchy-guard`): columns `cb`, `old` (primary), `target`, `http_code` (not `code`: a cell carries its key as a class, and core's admin CSS sets `.code` in a monospace font), `status`; bulk action `delete`; row action Delete; a post type filter when two or more types are supported, whose argument is `TYPE_ARG = 'redirect_type'` (wp-admin/admin.php reads `post_type` before the page loads and then refuses to load a plugin page under Settings); static `search()` (percent-decoded before `sanitize_text_field()`, which strips octets), `post_type()`, `old_label( array $item ): string` (escaped HTML, the old URL in `<code>`), `status_label( string $status ): string`; `is_capped(): bool`; `get_pagenum()` returns the page `Records::page()` showed; `pagination()` shows the count as "1,000+ items" past the cap. URLs in the Redirects to column sit in `<span dir="ltr">`. Empty states: "No redirects found." under a type filter, "No redirects match your search.", "No redirects have been recorded yet."
+- Produces: `Admin\Redirect_Edit::__construct( Records $records )`, `NONCE_DELETE = 'hierarchy_guard_delete_'` (plus the record ID), `NONCE_BULK = 'bulk-redirects'` (the table's own `bulk-{plural}` nonce), `delete_url( string $id ): string`, `confirm_one( string $old ): string` ("Delete the redirect from %s?" and "This can’t be undone.", two strings), `handle(): ?string` (where to redirect, or null to print the page). It runs nothing when `filter_action` is set, as core's `current_action()` does, then reads `action`, then `action2`, so the bottom bulk selector works without JavaScript; it checks `manage_options` (else `wp_die()` 403) and the nonce (`check_admin_referer()`) before it changes anything. A request carrying the bulk nonce is a bulk request: with no rows ticked it returns to the list, and it deletes at most `Records::PER_PAGE` string IDs. Notices, in the spec's words ("Redirect deleted. `<code>/about/team/</code>` no longer redirects through it."), go through `add_settings_error()` and the `settings_errors` transient with `settings-updated=true`, as `options.php` does, so core's options header prints them.
+- Produces: `Settings_Page::__construct( Providers $providers, Records $records )`, `current_tab(): string` (`redirects` or `settings`), `load()` on the page's `load-{hook}`: runs `Redirect_Edit::handle()` on the Redirects tab, then `wp_safe_redirect()` and `exit`; otherwise sets the screen's list headings for screen readers, filters `admin_title` ("Redirects ‹ …"), and adds `Settings_Page::confirm_script()` to core's `common` script: a click on an `a[data-hierarchy-guard-confirm]` and a bulk Delete (asked once, from `data-hierarchy-guard-confirm` on the form or, for one ticked row, its box's `data-hierarchy-guard-confirm-one`) ask with `window.confirm()`. The Redirects tab prints "Search results for:" beside the heading while searching, and the redirects-off notice links to the Settings tab's Redirects field.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3857,6 +4280,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
 		delete_option( Ledger::ROOT_TARGETS );
+		delete_option( Ledger::RECENT );
 		delete_transient( 'settings_errors' );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
@@ -3870,7 +4294,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		foreach ( [ 'tab', 'action', 'action2', 'redirect', '_wpnonce', '_wp_http_referer', 's', 'post_type', 'paged' ] as $key ) {
+		foreach ( [ 'tab', 'action', 'action2', 'redirect', '_wpnonce', '_wp_http_referer', 's', 'redirect_type', 'paged', 'filter_action' ] as $key ) {
 			unset( $_GET[ $key ], $_REQUEST[ $key ], $_POST[ $key ] );
 		}
 		$GLOBALS['wp_settings_errors'] = [];
@@ -3962,24 +4386,26 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<strong>/old-about/</strong> and the URLs under it', $html );
-		$this->assertStringContainsString( '<strong>/careers/</strong><', $html, 'A URL target covers its exact old URL only.' );
-		$this->assertStringContainsString( '<strong>/archive/</strong> and the URLs under it', $html );
-		$this->assertStringContainsString( '<a href="' . esc_url( get_edit_post_link( $this->ids['about'] ) ) . '">About</a><br>/company/about/', $html );
-		$this->assertStringContainsString( '">Whats-on</a> &mdash; <span class=\'post-state\'>Draft</span><br>/?page_id=' . $draft, $html );
-		$this->assertStringContainsString( 'https://jobs.example.org/', $html );
+		$this->assertStringContainsString( '<code>/old-about/</code> and the URLs under it', $html, 'In code, so it reads left to right in a right-to-left language too.' );
+		$this->assertStringContainsString( '<code>/careers/</code><', $html, 'A URL target covers its exact old URL only.' );
+		$this->assertStringContainsString( '<code>/archive/</code> and the URLs under it', $html );
+		$this->assertStringContainsString( '<a href="' . esc_url( get_edit_post_link( $this->ids['about'] ) ) . '">About</a><br><span dir="ltr">/company/about/</span>', $html );
+		$this->assertStringContainsString( '">Whats-on</a> &mdash; <span class=\'post-state\'>Draft</span><br><span dir="ltr">/?page_id=' . $draft . '</span>', $html );
+		$this->assertStringContainsString( '<span dir="ltr">https://jobs.example.org/</span>', $html );
 		$this->assertStringContainsString( '>Top level<', $html );
 		$this->assertSame( 3, substr_count( $html, '>Automatic<' ) );
 		$this->assertStringContainsString( '>302<', $html );
 		$this->assertSame( 3, substr_count( $html, '>Active<' ) );
 		$this->assertStringContainsString( '>Not active: the page it points to isn’t published<', $html );
 		$this->assertStringContainsString( '<label class="screen-reader-text" for="cb-select-' . Records::id( $this->ids['about'], 'page', 'old-about' ) . '">Select the redirect from /old-about/</label>', $html );
-		$this->assertStringContainsString( 'aria-label="Delete the redirect from /old-about/"', $html );
+		$this->assertStringContainsString( 'aria-label="Delete the redirect from /old-about/" data-hierarchy-guard-confirm="Delete the redirect from /old-about/? This can’t be undone."', $html );
+		$this->assertStringContainsString( 'data-hierarchy-guard-confirm-one="Delete the redirect from /old-about/? This can’t be undone."', $html, 'A bulk Delete of one row asks about that row.' );
+		$this->assertStringContainsString( '<form method="get" id="hierarchy-guard-redirects" data-hierarchy-guard-confirm="Delete the selected redirects? This can’t be undone.">', $html );
 	}
 
 	public function test_the_post_type_filter_appears_only_when_two_types_are_supported(): void {
 		$this->recorded( $this->ids['about'], 'old-about' );
-		$this->assertStringNotContainsString( 'name="post_type"', $this->rendered() );
+		$this->assertStringNotContainsString( 'name="redirect_type"', $this->rendered() );
 
 		register_post_type(
 			'hg_docs',
@@ -3991,9 +4417,39 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		);
 		Post_Types::reset();
 		$html = $this->rendered();
-		$this->assertStringContainsString( '<select name="post_type" id="hierarchy-guard-post-type">', $html );
+		$this->assertStringContainsString( '<select name="redirect_type" id="hierarchy-guard-post-type">', $html );
 		$this->assertStringContainsString( '<option value="">All post types</option>', $html );
 		$this->assertStringContainsString( '<option value="hg_docs">Docs</option>', $html );
+
+		$_GET['redirect_type']     = 'hg_docs';
+		$_REQUEST['redirect_type'] = 'hg_docs';
+		$html                      = $this->rendered();
+		$this->assertStringContainsString( '<option value="hg_docs" selected=\'selected\'>Docs</option>', $html );
+		$this->assertStringContainsString( 'No redirects found.', $html, 'Under a filter, not “No redirects have been recorded yet.”' );
+	}
+
+	public function test_no_argument_of_the_tab_is_one_wp_admin_reads_before_the_page_loads(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		Post_Types::reset();
+		$id                        = $this->recorded( $this->ids['about'], 'old-about' );
+		$_GET['redirect_type']     = 'page';
+		$_REQUEST['redirect_type'] = 'page';
+		$html                      = $this->rendered();
+		$this->follow( Redirect_Edit::delete_url( $id ) );
+		$after = ( new Redirect_Edit( $this->records ) )->handle();
+
+		// wp-admin/admin.php sets $typenow from post_type and then cannot find a plugin page under Settings; it reads taxonomy too.
+		preg_match_all( '#name="([^"]+)"#', $html, $names );
+		$this->assertEmpty( array_intersect( [ 'post_type', 'taxonomy' ], $names[1] ) );
+		$this->assertStringNotContainsString( 'post_type=', $html );
+		$this->assertStringContainsString( 'redirect_type=page', $after );
+		$this->assertStringNotContainsString( 'post_type=', $after );
 	}
 
 	public function test_rows_come_twenty_a_page(): void {
@@ -4016,7 +4472,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->recorded( $this->ids['about'], 'old-about' );
 
 		$html = $this->rendered();
-		$this->assertStringContainsString( 'Built-in redirects are off, so these redirects aren’t served. Turn them on in the Settings tab.', $html );
+		$this->assertStringContainsString( 'Built-in redirects are off, so these redirects aren’t served. Turn them on in the <a href="' . esc_url( Settings_Page::redirects_url() ) . '">Settings tab</a>.', $html );
 		$this->assertStringContainsString( 'notice notice-warning inline', $html );
 		$this->assertStringNotContainsString( 'is active.', $html );
 
@@ -4037,10 +4493,11 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->recorded( $this->ids['team'], 'old-team' );
 		$html = $this->rendered();
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
-		$this->assertStringContainsString( 'Only 1 of the recorded redirects are listed. To find another, search for its full old URL.', $html );
+		$this->assertStringContainsString( 'Only the newest 1 recorded redirect is listed. To find another, search for its full old URL.', $html );
+		$this->assertStringContainsString( '<span class="displaying-num">1+ item</span>', $html, 'Past the cap, the count is a lower bound.' );
 	}
 
-	public function test_delete_from_a_row_deletes_the_record_and_says_its_old_url_now_shows_page_not_found(): void {
+	public function test_delete_from_a_row_deletes_the_record_and_says_its_old_url_no_longer_redirects_through_it(): void {
 		$id = $this->recorded( $this->ids['about'], 'old-about' );
 		$this->ledger->set_target( 'page', 'old-about', $this->ids['about'], '', 302 );
 		$this->follow( Redirect_Edit::delete_url( $id ) );
@@ -4052,7 +4509,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertFalse( metadata_exists( 'post', $this->ids['about'], Ledger::target_key( 'page', 'old-about' ) ) );
 		$this->assertSame(
 			[
-				'message' => 'Redirect deleted. /old-about/ now shows “Page not found”.',
+				'message' => 'Redirect deleted. <code>/old-about/</code> no longer redirects through it.',
 				'type'    => 'success',
 			],
 			$this->kept_notice()
@@ -4089,7 +4546,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertSame( [], $this->ledger->paths_for( $this->ids['about'] ) );
 		$this->assertSame( [], $this->ledger->paths_for( $this->ids['team'] ) );
 		$this->assertSame( [ 'old-history' ], $this->ledger->paths_for( $this->ids['history'] ) );
-		$this->assertSame( '2 redirects deleted. Their old URLs now show “Page not found”.', $this->kept_notice()['message'] );
+		$this->assertSame( '2 redirects deleted. Their old URLs no longer redirect through them.', $this->kept_notice()['message'] );
 	}
 
 	public function test_a_bulk_delete_without_the_table_s_nonce_deletes_nothing(): void {
@@ -4173,7 +4630,82 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		( new Redirect_Edit( $this->records ) )->handle();
 
 		$this->assertCount( 5, $this->ledger->paths_for( $this->ids['about'] ), 'Twenty deleted, one page of the table.' );
-		$this->assertSame( '20 redirects deleted. Their old URLs now show “Page not found”.', $this->kept_notice()['message'] );
+		$this->assertSame( '20 redirects deleted. Their old URLs no longer redirect through them.', $this->kept_notice()['message'] );
+	}
+
+	public function test_filter_never_runs_a_bulk_delete_and_an_empty_selection_returns_to_the_list(): void {
+		$id                        = $this->recorded( $this->ids['about'], 'old-about' );
+		$_REQUEST['action']        = 'delete';
+		$_REQUEST['redirect']      = [ $id ];
+		$_REQUEST['_wpnonce']      = wp_create_nonce( Redirect_Edit::NONCE_BULK );
+		$_REQUEST['filter_action'] = 'Filter';
+
+		$this->assertNull( ( new Redirect_Edit( $this->records ) )->handle(), 'Filter prints the list, as core’s tables do.' );
+		$this->assertSame( [ 'old-about' ], $this->ledger->paths_for( $this->ids['about'] ) );
+
+		unset( $_REQUEST['filter_action'], $_REQUEST['redirect'] );
+		$_REQUEST['s'] = 'about';
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=about' ), ( new Redirect_Edit( $this->records ) )->handle(), 'Delete with nothing ticked, without JavaScript: back to the list.' );
+		$this->assertSame( [ 'old-about' ], $this->ledger->paths_for( $this->ids['about'] ) );
+		$this->assertFalse( get_transient( 'settings_errors' ) );
+	}
+
+	public function test_a_bulk_delete_of_records_all_gone_since_says_so_in_the_plural(): void {
+		$ids = [ $this->recorded( $this->ids['about'], 'old-about' ), $this->recorded( $this->ids['team'], 'old-team' ) ];
+		$this->ledger->forget( $this->ids['about'], 'old-about' );
+		$this->ledger->forget( $this->ids['team'], 'old-team' );
+		$_REQUEST['action']   = 'delete';
+		$_REQUEST['redirect'] = $ids;
+		$_REQUEST['_wpnonce'] = wp_create_nonce( Redirect_Edit::NONCE_BULK );
+
+		( new Redirect_Edit( $this->records ) )->handle();
+
+		$this->assertSame( 'These redirects no longer exist.', $this->kept_notice()['message'] );
+	}
+
+	public function test_a_percent_encoded_search_finds_the_old_url_it_names(): void {
+		$this->recorded( $this->ids['about'], 'café/équipe' );
+		$this->recorded( $this->ids['team'], 'other' );
+		$_REQUEST['s'] = home_url( '/caf%C3%A9/%C3%A9quipe/' );
+
+		$html = $this->rendered();
+
+		$this->assertStringContainsString( '<code>/café/équipe/</code>', $html );
+		$this->assertStringNotContainsString( '/other/', $html );
+		$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong>' . esc_html( home_url( '/café/équipe/' ) ) . '</strong></span>', $html );
+	}
+
+	public function test_a_page_past_the_last_one_shows_the_last_one_with_its_rows(): void {
+		for ( $i = 1; $i <= 21; $i++ ) {
+			$this->recorded( $this->ids['about'], sprintf( 'old-%02d', $i ) );
+		}
+		$this->ledger->forget( $this->ids['about'], 'old-21' );
+		$_GET['paged']     = '2';
+		$_REQUEST['paged'] = '2';
+
+		$html = $this->rendered();
+
+		$this->assertSame( 20, substr_count( $html, 'name="redirect[]"' ) );
+		$this->assertStringNotContainsString( 'No redirects have been recorded yet.', $html );
+		$this->assertMatchesRegularExpression( "#id='current-page-selector' type='text'\\s+name='paged' value='1'#", $html, 'The pager agrees with the rows.' );
+	}
+
+	public function test_the_list_is_named_for_screen_readers_and_in_the_title_and_asks_before_a_delete(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+		$scripts                                       = wp_scripts();
+		$before                                        = $scripts->registered['common']->extra['after'] ?? null;
+		$scripts->registered['common']->extra['after'] = [];
+
+		$this->page->load();
+		$html = $this->rendered();
+
+		$this->assertMatchesRegularExpression( '#<h2 class=[\'"]screen-reader-text[\'"]>Redirects list</h2>#', $html );
+		$this->assertSame( 10, has_filter( 'admin_title', [ $this->page, 'admin_title' ] ) );
+		$this->assertSame( 'Redirects ‹ Hierarchy Guard ‹ Site — WordPress', $this->page->admin_title( 'Hierarchy Guard ‹ Site — WordPress' ) );
+		$this->assertStringContainsString( 'window.confirm', implode( '', (array) $scripts->registered['common']->extra['after'] ) );
+		$this->assertStringContainsString( '<hr class="wp-header-end">', $html );
+		remove_filter( 'admin_title', [ $this->page, 'admin_title' ] );
+		$scripts->registered['common']->extra['after'] = $before;
 	}
 }
 ```
@@ -4233,6 +4765,7 @@ namespace HierarchyGuard\Admin;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Records;
+use HierarchyGuard\Subtree;
 use WP_List_Table;
 use WP_Post;
 
@@ -4244,9 +4777,13 @@ if ( ! class_exists( WP_List_Table::class ) ) {
  * Core's list table of the redirects the plugin recorded: Old URL,
  * Redirects to, Code and Status, 20 rows a page sorted by old URL, a search
  * on the old URL, a post type filter when more than one type is supported,
- * and Delete. There is nothing to add.
+ * and Delete. There is nothing to add. The filter's request argument is
+ * TYPE_ARG, never `post_type`: wp-admin/admin.php reads that one before the
+ * page loads and, for a plugin page under Settings, refuses to load it.
  */
 final class Redirects_Table extends WP_List_Table {
+
+	public const TYPE_ARG = 'redirect_type';
 
 	/**
 	 * Records.
@@ -4268,6 +4805,13 @@ final class Redirects_Table extends WP_List_Table {
 	 * @var bool
 	 */
 	private bool $capped = false;
+
+	/**
+	 * The page shown, which is the last one when the request asked for one past it.
+	 *
+	 * @var int|null
+	 */
+	private ?int $shown = null;
 
 	/**
 	 * Constructor.
@@ -4292,8 +4836,9 @@ final class Redirects_Table extends WP_List_Table {
 	 * @return string
 	 */
 	public static function search(): string {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- A search reads, it changes nothing.
-		return isset( $_REQUEST['s'] ) ? trim( sanitize_text_field( wp_unslash( $_REQUEST['s'] ) ) ) : '';
+		// Decoded first: sanitize_text_field() strips percent-encoded octets, as a pasted URL has them.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A search reads, it changes nothing; sanitize_text_field() runs on the decoded text.
+		return isset( $_REQUEST['s'] ) && is_string( $_REQUEST['s'] ) ? trim( sanitize_text_field( rawurldecode( wp_unslash( $_REQUEST['s'] ) ) ) ) : '';
 	}
 
 	/**
@@ -4303,7 +4848,7 @@ final class Redirects_Table extends WP_List_Table {
 	 */
 	public static function post_type(): string {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- A filter reads, it changes nothing.
-		$type = isset( $_REQUEST['post_type'] ) ? sanitize_key( wp_unslash( $_REQUEST['post_type'] ) ) : '';
+		$type = isset( $_REQUEST[ self::TYPE_ARG ] ) && is_string( $_REQUEST[ self::TYPE_ARG ] ) ? sanitize_key( wp_unslash( $_REQUEST[ self::TYPE_ARG ] ) ) : '';
 		return Post_Types::is_supported( $type ) ? $type : '';
 	}
 
@@ -4348,6 +4893,7 @@ final class Redirects_Table extends WP_List_Table {
 		$this->_column_headers = [ $this->get_columns(), [], [], 'old' ];
 
 		$page           = $this->records->page( self::post_type(), self::search(), $this->get_pagenum() );
+		$this->shown    = $page['page'];
 		$this->items    = $page['rows'];
 		$this->capped   = $page['capped'];
 		$this->statuses = $this->records->statuses( $this->items );
@@ -4369,9 +4915,42 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
+	 * The page shown: the records' own, once read, so the pagination links
+	 * agree with the rows when the request asked for a page past the last.
+	 *
+	 * @return int
+	 */
+	public function get_pagenum(): int {
+		return $this->shown ?? (int) parent::get_pagenum();
+	}
+
+	/**
+	 * Core's pagination, with the count shown as "1,000+" once older
+	 * records exist than the listing read, as the plugin's other counts show it.
+	 *
+	 * @param string $which Top or bottom.
+	 */
+	protected function pagination( $which ): void {
+		ob_start();
+		parent::pagination( $which );
+		$html = (string) ob_get_clean();
+		if ( $this->capped ) {
+			$cap = Subtree::count_cap();
+			/* translators: %s: number of redirects, such as 1,000+. */
+			$count = sprintf( _n( '%s item', '%s items', $cap, 'hierarchy-guard' ), Subtree::format_count( $cap, true ) );
+			$html  = (string) preg_replace( '#<span class="displaying-num">[^<]*</span>#', '<span class="displaying-num">' . esc_html( $count ) . '</span>', $html );
+		}
+		echo $html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Core's own pagination markup, with an escaped count.
+	}
+
+	/**
 	 * The message for an empty table.
 	 */
 	public function no_items(): void {
+		if ( '' !== self::post_type() ) {
+			esc_html_e( 'No redirects found.', 'hierarchy-guard' );
+			return;
+		}
 		if ( '' !== self::search() ) {
 			esc_html_e( 'No redirects match your search.', 'hierarchy-guard' );
 			return;
@@ -4392,7 +4971,7 @@ final class Redirects_Table extends WP_List_Table {
 		$current = self::post_type();
 		echo '<div class="alignleft actions">';
 		echo '<label class="screen-reader-text" for="hierarchy-guard-post-type">' . esc_html__( 'Filter by post type', 'hierarchy-guard' ) . '</label>';
-		echo '<select name="post_type" id="hierarchy-guard-post-type">';
+		printf( '<select name="%s" id="hierarchy-guard-post-type">', esc_attr( self::TYPE_ARG ) );
 		echo '<option value="">' . esc_html__( 'All post types', 'hierarchy-guard' ) . '</option>';
 		foreach ( $types as $type ) {
 			$object = get_post_type_object( $type );
@@ -4410,11 +4989,13 @@ final class Redirects_Table extends WP_List_Table {
 	 * @return string
 	 */
 	protected function column_cb( $item ): string {
+		/* translators: %s: an old URL, such as /about/team/. */
+		$label = sprintf( __( 'Select the redirect from %s', 'hierarchy-guard' ), (string) $item['old'] );
 		return sprintf(
-			'<label class="screen-reader-text" for="cb-select-%1$s">%2$s</label><input id="cb-select-%1$s" type="checkbox" name="redirect[]" value="%1$s" />',
+			'<label class="screen-reader-text" for="cb-select-%1$s">%2$s</label><input id="cb-select-%1$s" type="checkbox" name="redirect[]" value="%1$s" data-hierarchy-guard-confirm-one="%3$s" />',
 			esc_attr( (string) $item['id'] ),
-			/* translators: %s: an old URL, such as /about/team/. */
-			esc_html( sprintf( __( 'Select the redirect from %s', 'hierarchy-guard' ), (string) $item['old'] ) )
+			esc_html( $label ),
+			esc_attr( Redirect_Edit::confirm_one( (string) $item['old'] ) )
 		);
 	}
 
@@ -4438,7 +5019,7 @@ final class Redirects_Table extends WP_List_Table {
 	protected function column_target( $item ): string {
 		$url = null !== $item['target'] ? (string) $item['target']['url'] : '';
 		if ( '' !== $url ) {
-			return esc_html( $url );
+			return '<span dir="ltr">' . esc_html( $url ) . '</span>';
 		}
 		if ( 0 === (int) $item['holder'] ) {
 			return esc_html__( 'Top level', 'hierarchy-guard' );
@@ -4452,7 +5033,7 @@ final class Redirects_Table extends WP_List_Table {
 		$link  = get_edit_post_link( $post );
 		$name  = null !== $link ? sprintf( '<a href="%1$s">%2$s</a>', esc_url( $link ), esc_html( $title ) ) : esc_html( $title );
 		$now   = get_permalink( $post );
-		return $name . _post_states( $post, false ) . ( is_string( $now ) ? '<br>' . esc_html( Paths::relative( $now ) ) : '' );
+		return $name . _post_states( $post, false ) . ( is_string( $now ) ? '<br><span dir="ltr">' . esc_html( Paths::relative( $now ) ) . '</span>' : '' );
 	}
 
 	/**
@@ -4490,13 +5071,15 @@ final class Redirects_Table extends WP_List_Table {
 		}
 		$id  = (string) $item['id'];
 		$old = (string) $item['old'];
+		/* translators: %s: an old URL, such as /about/team/. */
+		$delete = sprintf( __( 'Delete the redirect from %s', 'hierarchy-guard' ), $old );
 		return $this->row_actions(
 			[
 				'delete' => sprintf(
-					'<a href="%1$s" class="submitdelete" aria-label="%2$s">%3$s</a>',
+					'<a href="%1$s" class="submitdelete" aria-label="%2$s" data-hierarchy-guard-confirm="%3$s">%4$s</a>',
 					esc_url( Redirect_Edit::delete_url( $id ) ),
-					/* translators: %s: an old URL, such as /about/team/. */
-					esc_attr( sprintf( __( 'Delete the redirect from %s', 'hierarchy-guard' ), $old ) ),
+					esc_attr( $delete ),
+					esc_attr( Redirect_Edit::confirm_one( $old ) ),
 					esc_html__( 'Delete', 'hierarchy-guard' )
 				),
 			]
@@ -4504,13 +5087,14 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * A record's old URL as HTML, with "and the URLs under it" for a page target.
+	 * A record's old URL as HTML, in code so it reads left to right in a
+	 * right-to-left language too, with "and the URLs under it" for a page target.
 	 *
 	 * @param array<string,mixed> $item Record.
 	 * @return string
 	 */
 	public static function old_label( array $item ): string {
-		$old = '<strong>' . esc_html( (string) $item['old'] ) . '</strong>';
+		$old = '<code>' . esc_html( (string) $item['old'] ) . '</code>';
 		if ( null !== $item['target'] && '' !== (string) $item['target']['url'] ) {
 			return $old;
 		}
@@ -4601,6 +5185,18 @@ final class Redirect_Edit {
 	}
 
 	/**
+	 * What a Delete asks before it runs, for one record.
+	 *
+	 * @param string $old The record's old URL.
+	 * @return string
+	 */
+	public static function confirm_one( string $old ): string {
+		/* translators: %s: an old URL, such as /about/team/. */
+		$question = sprintf( __( 'Delete the redirect from %s?', 'hierarchy-guard' ), $old );
+		return $question . ' ' . __( 'This can’t be undone.', 'hierarchy-guard' );
+	}
+
+	/**
 	 * Runs the Redirects tab's action, before the page prints anything.
 	 *
 	 * @return string|null Where to send the browser, or null to print the page.
@@ -4618,11 +5214,15 @@ final class Redirect_Edit {
 			return null;
 		}
 
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Each branch checks its nonce before it changes anything.
-		$ids = isset( $_REQUEST['redirect'] ) ? map_deep( wp_unslash( $_REQUEST['redirect'] ), 'sanitize_text_field' ) : '';
-		if ( is_array( $ids ) ) {
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Each branch checks its nonce before it changes anything.
+		$ids   = isset( $_REQUEST['redirect'] ) ? map_deep( wp_unslash( $_REQUEST['redirect'] ), 'sanitize_text_field' ) : '';
+		$nonce = isset( $_REQUEST['_wpnonce'] ) && is_string( $_REQUEST['_wpnonce'] ) ? sanitize_key( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
+		// The table's form, with or without rows ticked, carries the bulk nonce; a row's link its own.
+		if ( is_array( $ids ) || false !== wp_verify_nonce( $nonce, self::NONCE_BULK ) ) {
 			check_admin_referer( self::NONCE_BULK );
-			return $this->delete_many( array_slice( array_values( array_filter( $ids, 'is_string' ) ), 0, Records::PER_PAGE ) );
+			$ids = is_array( $ids ) ? array_slice( array_values( array_filter( $ids, 'is_string' ) ), 0, Records::PER_PAGE ) : [];
+			return [] === $ids ? $this->tab_url( false ) : $this->delete_many( $ids );
 		}
 		$id = is_string( $ids ) ? $ids : '';
 		check_admin_referer( self::NONCE_DELETE . $id );
@@ -4630,11 +5230,16 @@ final class Redirect_Edit {
 	}
 
 	/**
-	 * The action asked for: the top bulk selector's, or the bottom one's, or a link's.
+	 * The action asked for: the top bulk selector's, or the bottom one's, or
+	 * a link's. Pressing Filter runs none, as in core's list tables.
 	 *
 	 * @return string
 	 */
 	private static function action(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read only, to run nothing.
+		if ( ! empty( $_REQUEST['filter_action'] ) ) {
+			return '';
+		}
 		foreach ( [ 'action', 'action2' ] as $key ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The action's nonce is checked before it runs.
 			$value = isset( $_REQUEST[ $key ] ) ? sanitize_key( wp_unslash( $_REQUEST[ $key ] ) ) : '';
@@ -4657,9 +5262,10 @@ final class Redirect_Edit {
 			return $this->gone();
 		}
 		$this->records->delete( $record );
+		$deleted = esc_html__( 'Redirect deleted.', 'hierarchy-guard' );
 		/* translators: %s: the old URL, such as /about/team/. */
-		$message = __( 'Redirect deleted.', 'hierarchy-guard' ) . ' ' . sprintf( __( '%s now shows “Page not found”.', 'hierarchy-guard' ), $record['old'] );
-		return $this->notice( $message, 'success' );
+		$through = sprintf( esc_html__( '%s no longer redirects through it.', 'hierarchy-guard' ), '<code>' . esc_html( $record['old'] ) . '</code>' );
+		return $this->notice( $deleted . ' ' . $through, 'success' );
 	}
 
 	/**
@@ -4677,32 +5283,34 @@ final class Redirect_Edit {
 			}
 		}
 		if ( 0 === $count ) {
-			return $this->gone();
+			return $this->gone( count( $ids ) );
 		}
 		/* translators: %s: number of redirects. */
-		$message = sprintf( _n( '%s redirect deleted.', '%s redirects deleted.', $count, 'hierarchy-guard' ), number_format_i18n( $count ) ) . ' ' . _n( 'Its old URL now shows “Page not found”.', 'Their old URLs now show “Page not found”.', $count, 'hierarchy-guard' );
-		return $this->notice( $message, 'success' );
+		$deleted = sprintf( _n( '%s redirect deleted.', '%s redirects deleted.', $count, 'hierarchy-guard' ), number_format_i18n( $count ) );
+		$through = _n( 'Its old URL no longer redirects through it.', 'Their old URLs no longer redirect through them.', $count, 'hierarchy-guard' );
+		return $this->notice( esc_html( $deleted . ' ' . $through ), 'success' );
 	}
 
 	/**
-	 * The notice for a record that is no longer there.
+	 * The notice for records that are no longer there.
 	 *
+	 * @param int $count How many the request named.
 	 * @return string The Redirects tab.
 	 */
-	private function gone(): string {
-		return $this->notice( __( 'This redirect no longer exists.', 'hierarchy-guard' ), 'error' );
+	private function gone( int $count = 1 ): string {
+		return $this->notice( esc_html( _n( 'This redirect no longer exists.', 'These redirects no longer exist.', $count, 'hierarchy-guard' ) ), 'error' );
 	}
 
 	/**
 	 * Keeps a notice for the next page load, as options.php does, and gives
 	 * the Redirects tab's URL that shows it.
 	 *
-	 * @param string $message Message, plain text.
+	 * @param string $message Message, escaped HTML.
 	 * @param string $type    success or error.
 	 * @return string
 	 */
 	private function notice( string $message, string $type ): string {
-		add_settings_error( 'hierarchy_guard', 'hierarchy_guard_redirects', esc_html( $message ), $type );
+		add_settings_error( 'hierarchy_guard', 'hierarchy_guard_redirects', $message, $type );
 		set_transient( 'settings_errors', get_settings_errors(), 30 );
 		return $this->tab_url( true );
 	}
@@ -4718,10 +5326,10 @@ final class Redirect_Edit {
 		$paged = isset( $_REQUEST['paged'] ) ? absint( wp_unslash( $_REQUEST['paged'] ) ) : 0;
 		$args  = array_filter(
 			[
-				's'                => rawurlencode( Redirects_Table::search() ),
-				'post_type'        => Redirects_Table::post_type(),
-				'paged'            => $paged > 1 ? $paged : '',
-				'settings-updated' => $notice ? 'true' : '',
+				's'                       => rawurlencode( Redirects_Table::search() ),
+				Redirects_Table::TYPE_ARG => Redirects_Table::post_type(),
+				'paged'                   => $paged > 1 ? $paged : '',
+				'settings-updated'        => $notice ? 'true' : '',
 			]
 		);
 		return add_query_arg( $args, Settings_Page::url( 'redirects' ) );
@@ -4839,7 +5447,9 @@ with:
 	}
 
 	/**
-	 * Before the page prints: runs the Redirects tab's action and sends the browser on.
+	 * Before the page prints: runs the Redirects tab's action and sends the
+	 * browser on; otherwise names the tab's list for screen readers and in the
+	 * browser title, and adds the Delete confirmation to core's common script.
 	 */
 	public function load(): void {
 		if ( 'redirects' !== self::current_tab() ) {
@@ -4850,6 +5460,62 @@ with:
 			wp_safe_redirect( $url );
 			exit;
 		}
+		$screen = get_current_screen();
+		if ( null !== $screen ) {
+			$screen->set_screen_reader_content(
+				[
+					'heading_pagination' => __( 'Redirects list navigation', 'hierarchy-guard' ),
+					'heading_list'       => __( 'Redirects list', 'hierarchy-guard' ),
+				]
+			);
+		}
+		add_filter( 'admin_title', [ $this, 'admin_title' ] );
+		wp_add_inline_script( 'common', self::confirm_script() );
+	}
+
+	/**
+	 * The browser title of the Redirects tab: the view's name first.
+	 *
+	 * @param string $admin_title The admin page's title, as core builds it.
+	 * @return string
+	 */
+	public function admin_title( $admin_title ): string {
+		/* translators: 1: the view of the page, such as Redirects; 2: the page's title, as the browser shows it. */
+		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), __( 'Redirects', 'hierarchy-guard' ), (string) $admin_title );
+	}
+
+	/**
+	 * Asks before a Delete, as core does before deleting a term: a link that
+	 * carries data-hierarchy-guard-confirm, and the table's bulk Delete, asked
+	 * once for the selection. Without JavaScript the Delete runs, as in core.
+	 *
+	 * @return string
+	 */
+	public static function confirm_script(): string {
+		return <<<'JS'
+( function () {
+	document.addEventListener( 'click', function ( event ) {
+		var link = event.target.closest ? event.target.closest( 'a[data-hierarchy-guard-confirm]' ) : null;
+		if ( link && ! window.confirm( link.getAttribute( 'data-hierarchy-guard-confirm' ) ) ) {
+			event.preventDefault();
+		}
+	} );
+	document.addEventListener( 'submit', function ( event ) {
+		var form = event.target, button = event.submitter, select, checked;
+		if ( ! form.hasAttribute || ! form.hasAttribute( 'data-hierarchy-guard-confirm' ) || ! button || ( 'doaction' !== button.id && 'doaction2' !== button.id ) ) {
+			return;
+		}
+		select = form.querySelector( 'doaction2' === button.id ? 'select[name="action2"]' : 'select[name="action"]' );
+		checked = form.querySelectorAll( 'input[name="redirect[]"]:checked' );
+		if ( ! select || 'delete' !== select.value || 0 === checked.length ) {
+			return;
+		}
+		if ( ! window.confirm( 1 === checked.length ? checked[ 0 ].getAttribute( 'data-hierarchy-guard-confirm-one' ) : form.getAttribute( 'data-hierarchy-guard-confirm' ) ) ) {
+			event.preventDefault();
+		}
+	} );
+}() );
+JS;
 	}
 ```
 
@@ -4859,6 +5525,8 @@ Replace:
 		echo '<div class="wrap">';
 		echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';
 		$this->render_tabs( 'settings' );
+		// Core moves notices to just after this, below the tabs.
+		echo '<hr class="wp-header-end">';
 		echo '<form action="options.php" method="post">';
 		settings_fields( Settings::GROUP );
 		do_settings_sections( self::SLUG );
@@ -4870,10 +5538,19 @@ Replace:
 with:
 ```php
 		}
-		$tab = self::current_tab();
+		$tab    = self::current_tab();
+		$search = 'redirects' === $tab ? Redirects_Table::search() : '';
 		echo '<div class="wrap">';
-		echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';
+		if ( '' === $search ) {
+			echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';
+		} else {
+			echo '<h1 class="wp-heading-inline">' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1> ';
+			/* translators: %s: the search text. */
+			printf( '<span class="subtitle">%s</span>', sprintf( esc_html__( 'Search results for: %s', 'hierarchy-guard' ), '<strong>' . esc_html( $search ) . '</strong>' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Both parts are escaped.
+		}
 		$this->render_tabs( $tab );
+		// Core moves notices to just after this, below the tabs.
+		echo '<hr class="wp-header-end">';
 		if ( 'redirects' === $tab ) {
 			$this->render_redirects();
 		} else {
@@ -4895,23 +5572,35 @@ with:
 		$table->prepare_items();
 
 		if ( ! Settings::serve_redirects() ) {
-			$this->inline_notice( __( 'Built-in redirects are off, so these redirects aren’t served.', 'hierarchy-guard' ) . ' ' . __( 'Turn them on in the Settings tab.', 'hierarchy-guard' ), 'warning' );
+			$off = esc_html__( 'Built-in redirects are off, so these redirects aren’t served.', 'hierarchy-guard' );
+			/* translators: %s: URL of the Redirects field on the Settings tab. */
+			$on = sprintf( __( 'Turn them on in the <a href="%s">Settings tab</a>.', 'hierarchy-guard' ), esc_url( self::redirects_url() ) );
+			$this->inline_notice( $off . ' ' . $on, 'warning' );
 		}
 		$provider = $this->providers->detect();
 		if ( null !== $provider ) {
 			$name = trim( (string) ( $provider['name'] ?? '' ) );
-			$text = '' !== $name
+			if ( '' !== $name ) {
 				/* translators: %s: name of the detected redirect plugin. */
-				? sprintf( __( '%s is active.', 'hierarchy-guard' ), $name ) . ' ' . sprintf( __( 'These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them in %s.', 'hierarchy-guard' ), $name )
-				: __( 'A redirect plugin is active.', 'hierarchy-guard' ) . ' ' . __( 'These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them there.', 'hierarchy-guard' );
-			$this->inline_notice( $text, 'info' );
+				$active = sprintf( __( '%s is active.', 'hierarchy-guard' ), $name );
+				/* translators: %s: name of the detected redirect plugin. */
+				$recorded = sprintf( __( 'These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them in %s.', 'hierarchy-guard' ), $name );
+			} else {
+				$active   = __( 'A redirect plugin is active.', 'hierarchy-guard' );
+				$recorded = __( 'These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them there.', 'hierarchy-guard' );
+			}
+			$this->inline_notice( esc_html( $active . ' ' . $recorded ), 'info' );
 		}
 		if ( $table->is_capped() ) {
+			$cap = Subtree::count_cap();
 			/* translators: %s: the most recorded redirects listed, such as 1,000. */
-			$this->inline_notice( sprintf( __( 'Only %s of the recorded redirects are listed.', 'hierarchy-guard' ), number_format_i18n( Subtree::count_cap() ) ) . ' ' . __( 'To find another, search for its full old URL.', 'hierarchy-guard' ), 'info' );
+			$only    = sprintf( _n( 'Only the newest %s recorded redirect is listed.', 'Only the newest %s recorded redirects are listed.', $cap, 'hierarchy-guard' ), number_format_i18n( $cap ) );
+			$another = __( 'To find another, search for its full old URL.', 'hierarchy-guard' );
+			$this->inline_notice( esc_html( $only . ' ' . $another ), 'info' );
 		}
 
-		echo '<form method="get">';
+		$bulk = __( 'Delete the selected redirects?', 'hierarchy-guard' ) . ' ' . __( 'This can’t be undone.', 'hierarchy-guard' );
+		printf( '<form method="get" id="hierarchy-guard-redirects" data-hierarchy-guard-confirm="%s">', esc_attr( $bulk ) );
 		printf( '<input type="hidden" name="page" value="%s">', esc_attr( self::SLUG ) );
 		echo '<input type="hidden" name="tab" value="redirects">';
 		$table->search_box( __( 'Search Redirects', 'hierarchy-guard' ), 'hierarchy-guard-search' );
@@ -4922,12 +5611,18 @@ with:
 	/**
 	 * A core notice in the page's flow.
 	 *
-	 * @param string $message Message, plain text.
+	 * @param string $message Message, escaped HTML: text, links and code.
 	 * @param string $type    Notice type.
 	 */
 	private function inline_notice( string $message, string $type ): void {
 		wp_admin_notice(
-			esc_html( $message ),
+			wp_kses(
+				$message,
+				[
+					'a'    => [ 'href' => [] ],
+					'code' => [],
+				]
+			),
 			[
 				'type'               => $type,
 				'additional_classes' => [ 'inline' ],
@@ -4981,16 +5676,17 @@ git commit -m "feat: list the recorded redirects on a Redirects tab, with Delete
 ### Task 8: The Edit view and Save
 
 **Files:**
-- Modify: `includes/HierarchyGuard/Admin/Redirect_Edit.php` (edit and save nonces, `edit_url()`, the `edit` and `save` actions, `render()`, `requested_id()`, `save()`)
+- Modify: `includes/HierarchyGuard/Admin/Redirect_Edit.php` (edit and save nonces, `edit_url()`, the `edit` and `save` actions, `render()`, `is_editing()`, `requested_id()`, `save()`)
 - Modify: `includes/HierarchyGuard/Admin/Redirects_Table.php` (the Edit row action)
-- Modify: `includes/HierarchyGuard/Admin/Settings_Page.php` (the Redirects tab prints the Edit view when asked)
+- Modify: `includes/HierarchyGuard/Admin/Settings_Page.php` (the Redirects tab prints the Edit view when asked, and titles it)
 - Test: `tests/phpunit/RedirectEditTest.php`
 
 **Interfaces:**
 - Consumes: `Records::find()`, `target_url()`, `save()` (Task 5); `Redirects_Table::old_label()`, `Redirect_Edit::delete_url()` (Task 7).
 - Produces: `Redirect_Edit::NONCE_EDIT = 'hierarchy_guard_edit_'`, `NONCE_SAVE = 'hierarchy_guard_save_'` (each plus the record ID); `edit_url( string $id ): string` (`…&tab=redirects&action=edit&redirect=<id>&_wpnonce=…`).
 - Produces: `handle()` also takes `edit` (checks the nonce; a record gone since returns to the tab with "This redirect no longer exists.") and `save` (POST `redirect`, `target`, `code` of 0, 301 or 302, checked against `NONCE_SAVE . $id`). A saved edit returns to the tab with "Redirect updated."; a refused one returns null, keeps the record and what was entered, and adds the reason as a settings error.
-- Produces: `render(): bool`: prints the Edit view (`<h2>`, a POST form to the Redirects tab, a `form-table` with the read-only Old URL, one `type="url"` field with the spec's two sentences, the Code radios, Save, Cancel and Delete) and returns true, or prints nothing and returns false. It works without JavaScript.
+- Produces: `render(): bool`: prints the Edit view (`<h2>`, a POST form to the Redirects tab, a `form-table` with the read-only Old URL, one `type="text"` field so that a path is not stopped by the browser, with the spec's two sentences and "A path on this site, such as /about/team/, works as well as a full URL.", the Code radios with Automatic's description tied by `aria-describedby`, Save, Cancel and core's red `<span id="delete-link"><a class="delete">` Delete, which asks first) and returns true, or prints nothing and returns false. For a top-level root-list entry it says "Now redirects to the same page at the top level, for example /about/team/ to /team/.", the field starts empty and its help begins "Leave empty to keep this. Enter a URL to send these URLs somewhere else." It works without JavaScript.
+- Produces: `Redirect_Edit::is_editing(): bool`, which `Settings_Page::admin_title()` reads to title the view "Edit redirect ‹ …".
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5045,6 +5741,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
 		delete_option( Ledger::ROOT_TARGETS );
+		delete_option( Ledger::RECENT );
 		delete_transient( 'settings_errors' );
 		Post_Types::reset();
 		$this->set_permalink_structure( '/%postname%/' );
@@ -5121,14 +5818,15 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
 		$this->assertStringContainsString( '<form method="post" action="' . esc_url( Settings_Page::url( 'redirects' ) ) . '">', $html );
-		$this->assertStringContainsString( '<tr><th scope="row">Old URL</th><td><strong>/old-about/</strong> and the URLs under it</td></tr>', $html );
-		$this->assertStringContainsString( '<input type="url" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" required', $html );
-		$this->assertStringContainsString( 'A page on this site: the redirect follows it when it moves, and the URLs under /old-about/ go to the matching URLs under it. Any other URL: only /old-about/ redirects, and this redirect no longer covers the URLs under it.', $html );
-		$this->assertMatchesRegularExpression( '#<input type="radio" name="code" value="0"\s+checked=\'checked\'> Automatic</label><p class="description">301, or 302 while restoring a page from the Trash could undo the move.</p>#', $html );
+		$this->assertStringContainsString( '<tr><th scope="row">Old URL</th><td><code>/old-about/</code> and the URLs under it</td></tr>', $html );
+		$this->assertStringContainsString( '<td><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" dir="ltr" aria-describedby="hierarchy-guard-target-description">', $html, 'A text field, so a path is not stopped by the browser.' );
+		$this->assertStringContainsString( '<p class="description" id="hierarchy-guard-target-description">A page on this site: the redirect follows it when it moves, and the URLs under /old-about/ go to the matching URLs under it. Any other URL: only /old-about/ redirects, and this redirect no longer covers the URLs under it. A path on this site, such as /about/team/, works as well as a full URL.</p>', $html );
+		$this->assertStringNotContainsString( 'Leave empty to keep this.', $html );
+		$this->assertMatchesRegularExpression( '#<input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description"\s+checked=\'checked\'> Automatic</label><p class="description" id="hierarchy-guard-code-automatic-description">301, or 302 while restoring a page from the Trash could undo the move.</p>#', $html );
 		$this->assertStringContainsString( '301 (permanent)', $html );
 		$this->assertStringContainsString( '302 (temporary)', $html );
 		$this->assertStringContainsString( 'name="_wpnonce" value="' . wp_create_nonce( Redirect_Edit::NONCE_SAVE . $this->id ) . '"', $html );
-		$this->assertMatchesRegularExpression( '#<input type="submit" name="submit" id="submit" class="button button-primary" value="Save"\s*/> <a class="button" href="[^"]+">Cancel</a> <a class="submitdelete" href="[^"]*action=delete[^"]*">Delete</a>#', $html );
+		$this->assertMatchesRegularExpression( '#<input type="submit" name="submit" id="submit" class="button button-primary" value="Save"\s*/> <a class="button" href="[^"]+">Cancel</a> <span id="delete-link"><a class="delete" href="[^"]*action=delete[^"]*" data-hierarchy-guard-confirm="Delete the redirect from /old-about/\? This can’t be undone.">Delete</a></span>#', $html, 'Core’s red delete link, which asks first.' );
 	}
 
 	public function test_the_view_of_a_url_target_offers_its_url_and_its_code(): void {
@@ -5137,7 +5835,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$html = $this->view();
 
-		$this->assertStringContainsString( '<td><strong>/old-about/</strong></td>', $html, 'A URL target covers the exact old URL only.' );
+		$this->assertStringContainsString( '<td><code>/old-about/</code></td>', $html, 'A URL target covers the exact old URL only.' );
 		$this->assertStringContainsString( 'value="https://jobs.example.org/"', $html );
 		$this->assertMatchesRegularExpression( '#value="302"\s+checked=\'checked\'#', $html );
 	}
@@ -5191,7 +5889,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$this->assertNull( $this->edit->handle() );
 
-		$this->assertSame( [ 'Enter a URL that starts with http:// or https://.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
+		$this->assertSame( [ 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ), 'Nothing is saved.' );
 		$html = $this->view();
 		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
@@ -5251,6 +5949,42 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertFalse( metadata_exists( 'post', $this->ids['about'], Ledger::target_key( 'page', 'old-about' ) ), 'No override without its record.' );
 		$kept = get_transient( 'settings_errors' );
 		$this->assertSame( 'This redirect no longer exists.', end( $kept )['message'] );
+	}
+
+	public function test_a_top_level_entry_s_view_says_where_it_leads_and_keeps_it_when_left_empty(): void {
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->id = Records::id( 0, 'page', 'archive' );
+		$this->follow( Redirect_Edit::edit_url( $this->id ) );
+
+		$html = $this->view();
+
+		$this->assertStringContainsString( '<td><p>Now redirects to the same page at the top level, for example /about/team/ to /team/.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value=""', $html, 'The field starts empty.' );
+		$this->assertStringContainsString( 'id="hierarchy-guard-target-description">Leave empty to keep this. Enter a URL to send these URLs somewhere else. A page on this site:', $html );
+
+		$this->submit( '', '302' );
+		$this->assertStringContainsString( 'settings-updated=true', $this->edit->handle() );
+		$this->assertSame( [ 'page' => [ 'archive' ] ], $this->ledger->root_paths(), 'Still top level.' );
+		$this->assertSame( 302, $this->ledger->target( 'page', 'archive', 0 )['code'] );
+	}
+
+	public function test_a_path_entered_is_saved_as_the_url_on_this_site(): void {
+		$this->submit( '/company/about/history/', '0' );
+
+		$this->assertStringContainsString( 'settings-updated=true', $this->edit->handle() );
+
+		$this->assertSame( [ 'old-about' ], $this->ledger->paths_for( $this->ids['history'] ), 'The path of a page moves the record onto it.' );
+	}
+
+	public function test_the_edit_view_is_named_in_the_browser_title(): void {
+		set_current_screen( 'settings_page_hierarchy-guard' );
+		$page = new Settings_Page( new Providers(), $this->records );
+		$this->follow( Redirect_Edit::edit_url( $this->id ) );
+
+		$page->load();
+
+		$this->assertSame( 'Edit redirect ‹ Hierarchy Guard ‹ Site — WordPress', $page->admin_title( 'Hierarchy Guard ‹ Site — WordPress' ) );
+		remove_filter( 'admin_title', [ $page, 'admin_title' ] );
+		set_current_screen( 'front' );
 	}
 }
 ```
@@ -5378,8 +6112,10 @@ with:
 
 	/**
 	 * Prints the Edit view when the request asks for it, or when a save was
-	 * refused: the old URL, read only; one URL field; the code; Save, Cancel
-	 * and Delete. It works without JavaScript.
+	 * refused: the old URL, read only; one field for a URL or a path; the
+	 * code; Save, Cancel and Delete. A top-level root-list entry says where
+	 * it leads and starts with the field empty. It works without JavaScript;
+	 * with it, Delete asks first.
 	 *
 	 * @return bool Whether it printed.
 	 */
@@ -5396,7 +6132,17 @@ with:
 			$url  = Records::target_url( $record );
 			$code = null !== $record['target'] ? (int) $record['target']['code'] : 0;
 		}
-		$old = (string) $record['old'];
+		$old  = (string) $record['old'];
+		$help = [];
+		if ( Records::is_top_level( $record ) ) {
+			$help[] = __( 'Leave empty to keep this.', 'hierarchy-guard' );
+			$help[] = __( 'Enter a URL to send these URLs somewhere else.', 'hierarchy-guard' );
+		}
+		/* translators: %s: the old URL, such as /about/team/. */
+		$help[] = sprintf( __( 'A page on this site: the redirect follows it when it moves, and the URLs under %s go to the matching URLs under it.', 'hierarchy-guard' ), $old );
+		/* translators: %s: the old URL, such as /about/team/. */
+		$help[] = sprintf( __( 'Any other URL: only %s redirects, and this redirect no longer covers the URLs under it.', 'hierarchy-guard' ), $old );
+		$help[] = __( 'A path on this site, such as /about/team/, works as well as a full URL.', 'hierarchy-guard' );
 
 		echo '<h2>' . esc_html__( 'Edit redirect', 'hierarchy-guard' ) . '</h2>';
 		printf( '<form method="post" action="%s">', esc_url( Settings_Page::url( 'redirects' ) ) );
@@ -5405,17 +6151,16 @@ with:
 		wp_nonce_field( self::NONCE_SAVE . $record['id'] );
 		echo '<table class="form-table" role="presentation"><tbody>';
 		printf( '<tr><th scope="row">%1$s</th><td>%2$s</td></tr>', esc_html__( 'Old URL', 'hierarchy-guard' ), Redirects_Table::old_label( $record ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- old_label() escapes its parts.
+		$now = Records::is_top_level( $record ) ? '<p>' . esc_html__( 'Now redirects to the same page at the top level, for example /about/team/ to /team/.', 'hierarchy-guard' ) . '</p>' : '';
 		printf(
-			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td><input type="url" class="regular-text code" id="hierarchy-guard-target" name="target" value="%2$s" required aria-describedby="hierarchy-guard-target-description"><p class="description" id="hierarchy-guard-target-description">%3$s %4$s</p></td></tr>',
+			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="hierarchy-guard-target-description"><p class="description" id="hierarchy-guard-target-description">%4$s</p></td></tr>',
 			esc_html__( 'Redirect to', 'hierarchy-guard' ),
+			$now, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 			esc_attr( $url ),
-			/* translators: %s: the old URL, such as /about/team/. */
-			esc_html( sprintf( __( 'A page on this site: the redirect follows it when it moves, and the URLs under %s go to the matching URLs under it.', 'hierarchy-guard' ), $old ) ),
-			/* translators: %s: the old URL, such as /about/team/. */
-			esc_html( sprintf( __( 'Any other URL: only %s redirects, and this redirect no longer covers the URLs under it.', 'hierarchy-guard' ), $old ) )
+			esc_html( implode( ' ', $help ) )
 		);
 		echo '<tr><th scope="row">' . esc_html__( 'Code', 'hierarchy-guard' ) . '</th><td><fieldset><legend class="screen-reader-text"><span>' . esc_html__( 'Code', 'hierarchy-guard' ) . '</span></legend>';
-		printf( '<label><input type="radio" name="code" value="0" %1$s> %2$s</label><p class="description">%3$s</p>', checked( 0, $code, false ), esc_html__( 'Automatic', 'hierarchy-guard' ), esc_html__( '301, or 302 while restoring a page from the Trash could undo the move.', 'hierarchy-guard' ) );
+		printf( '<label><input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description" %1$s> %2$s</label><p class="description" id="hierarchy-guard-code-automatic-description">%3$s</p>', checked( 0, $code, false ), esc_html__( 'Automatic', 'hierarchy-guard' ), esc_html__( '301, or 302 while restoring a page from the Trash could undo the move.', 'hierarchy-guard' ) );
 		printf( '<label><input type="radio" name="code" value="301" %1$s> %2$s</label><br>', checked( 301, $code, false ), esc_html__( '301 (permanent)', 'hierarchy-guard' ) );
 		printf( '<label><input type="radio" name="code" value="302" %1$s> %2$s</label>', checked( 302, $code, false ), esc_html__( '302 (temporary)', 'hierarchy-guard' ) );
 		echo '</fieldset></td></tr>';
@@ -5423,10 +6168,19 @@ with:
 		echo '<p class="submit">';
 		submit_button( __( 'Save', 'hierarchy-guard' ), 'primary', 'submit', false );
 		printf( ' <a class="button" href="%1$s">%2$s</a>', esc_url( Settings_Page::url( 'redirects' ) ), esc_html__( 'Cancel', 'hierarchy-guard' ) );
-		printf( ' <a class="submitdelete" href="%1$s">%2$s</a>', esc_url( self::delete_url( (string) $record['id'] ) ), esc_html__( 'Delete', 'hierarchy-guard' ) );
+		printf( ' <span id="delete-link"><a class="delete" href="%1$s" data-hierarchy-guard-confirm="%2$s">%3$s</a></span>', esc_url( self::delete_url( (string) $record['id'] ) ), esc_attr( self::confirm_one( $old ) ), esc_html__( 'Delete', 'hierarchy-guard' ) );
 		echo '</p>';
 		echo '</form>';
 		return true;
+	}
+
+	/**
+	 * Whether this load shows the Edit view: asked for, or a save refused.
+	 *
+	 * @return bool
+	 */
+	public function is_editing(): bool {
+		return null !== $this->refused || 'edit' === self::action();
 	}
 
 	/**
@@ -5451,7 +6205,7 @@ with:
 			return $this->gone();
 		}
 		// phpcs:disable WordPress.Security.NonceVerification.Missing -- handle() checked the save's nonce.
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Records::save() passes it through esc_url_raw(); sanitize_text_field() would strip its percent-encoding.
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A URL or a path; Records::save() passes it through esc_url_raw(), and sanitize_text_field() would strip its percent-encoding.
 		$url  = isset( $_POST['target'] ) && is_string( $_POST['target'] ) ? trim( wp_unslash( $_POST['target'] ) ) : '';
 		$code = isset( $_POST['code'] ) ? absint( wp_unslash( $_POST['code'] ) ) : 0;
 		// phpcs:enable WordPress.Security.NonceVerification.Missing
@@ -5466,7 +6220,7 @@ with:
 			];
 			return null;
 		}
-		return $this->notice( __( 'Redirect updated.', 'hierarchy-guard' ), 'success' );
+		return $this->notice( esc_html__( 'Redirect updated.', 'hierarchy-guard' ), 'success' );
 	}
 ```
 
@@ -5477,13 +6231,18 @@ In `includes/HierarchyGuard/Admin/Redirects_Table.php`, make these replacements.
 Replace:
 ```php
  * on the old URL, a post type filter when more than one type is supported,
- * and Delete. There is nothing to add.
+ * and Delete. There is nothing to add. The filter's request argument is
+ * TYPE_ARG, never `post_type`: wp-admin/admin.php reads that one before the
+ * page loads and, for a plugin page under Settings, refuses to load it.
  */
 ```
 with:
 ```php
  * on the old URL, a post type filter when more than one type is supported,
- * and Edit and Delete. There is nothing to add.
+ * and Edit and Delete. There is nothing to add. The filter's request
+ * argument is TYPE_ARG, never `post_type`: wp-admin/admin.php reads that one
+ * before the page loads and, for a plugin page under Settings, refuses to
+ * load it.
  */
 ```
 
@@ -5518,7 +6277,38 @@ with:
 				'delete' => sprintf(
 ```
 
-In `includes/HierarchyGuard/Admin/Settings_Page.php`, replace:
+In `includes/HierarchyGuard/Admin/Settings_Page.php`, make these replacements.
+
+Replace:
+```php
+	/**
+	 * The browser title of the Redirects tab: the view's name first.
+	 *
+```
+with:
+```php
+	/**
+	 * The browser title of the Redirects tab and the Edit view: the view's name first.
+	 *
+```
+
+Replace:
+```php
+	public function admin_title( $admin_title ): string {
+		/* translators: 1: the view of the page, such as Redirects; 2: the page's title, as the browser shows it. */
+		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), __( 'Redirects', 'hierarchy-guard' ), (string) $admin_title );
+	}
+```
+with:
+```php
+	public function admin_title( $admin_title ): string {
+		$view = $this->edit->is_editing() ? __( 'Edit redirect', 'hierarchy-guard' ) : __( 'Redirects', 'hierarchy-guard' );
+		/* translators: 1: the view of the page, such as Redirects; 2: the page's title, as the browser shows it. */
+		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), $view, (string) $admin_title );
+	}
+```
+
+Replace:
 ```php
 	/**
 	 * The Redirects tab: its notices, the search box and the table, in a GET
@@ -5571,26 +6361,28 @@ In `README.md`, replace:
 with:
 ```markdown
   On the Pages list and in the block editor, "View redirects" opens a list of each old URL of that change and its new one, which links to the detected redirect plugin, downloads a CSV in its import layout, or copies the list as text. Without JavaScript the link downloads the CSV. A CSV row's code is the one the plugin's own redirect rule chooses (before filters): 302 while restoring a page from the trash could still undo the move its redirect follows, and 301 otherwise. The list stays available for 30 minutes, until the user's next change replaces it, or until the page a save moved, or a trashed parent whose subpages moved up, is deleted for good, and a trash's list covers only its pages still in the Trash. If another user then trashes a subpage that trash moved, that subpage's own subpages are left out of the first trash's list, though with Redirects on they keep redirecting. Old URLs from earlier changes, or from pages deleted for good, are not listed again, and with Redirects on they keep redirecting.
-- **Settings › Hierarchy Guard.** The Settings tab holds the supported post types, the trash policy and the switch for built-in redirects. The Redirects tab lists every redirect Hierarchy Guard recorded, 20 to a page in old URL order, with where each one leads, its code and whether it is served; search finds them by old URL. Edit points one at another page of its post type, which it then follows along with the URLs under it, or at any other http(s) URL, which redirects only its exact old URL, and sets the code to 301, 302 or automatic. Delete removes it, from its row or in bulk. Redirects can't be added by hand: that is a redirect plugin's job. With more than 1,000 recorded redirects the tab lists 1,000 of them, and a search for a full old URL finds any other.
+- **Settings › Hierarchy Guard.** The Settings tab holds the supported post types, the trash policy and the switch for built-in redirects. The Redirects tab lists every redirect Hierarchy Guard recorded, 20 to a page in old URL order, with where each one leads, its code and whether it is served; search finds them by old URL. Edit points one at another page of its post type, which it then follows along with the URLs under it, or at any other http(s) URL, which redirects only its exact old URL, and sets the code to 301, 302 or automatic; a path on this site, such as `/about/team/`, works as well as a full URL. Delete removes it, from its row or in bulk, after asking. Redirects can't be added by hand: that is a redirect plugin's job. With more than 1,000 recorded redirects the tab lists the newest 1,000, and a search for a full old URL finds any other.
 - **Editor.** The block editor warns under the page's Summary before a save changes subpage URLs. Its Hierarchy panel shows the parent pages and the subpages, where the page is now. The classic editor shows the same in a box, and asks before saving such a change.
 ```
 
 - [ ] **Step 2: Run every check**
 
 Run: `npm run test:php`, `npx wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard bash -c 'WP_MULTISITE=1 vendor/bin/phpunit'`, `composer lint`, `npm run lint:js`, `npm run lint:style`, `npm run test:js`, `npm run build`
-Expected: 744 PHPUnit tests pass (3 skipped), the same suite passes as multisite, both lints and Stylelint exit 0, 73 Vitest tests pass, and the build compiles.
+Expected: 762 PHPUnit tests pass (3 skipped), the same suite passes as multisite, both lints and Stylelint exit 0, 73 Vitest tests pass, and the build compiles. Run the pairs fuzz test with `HG_FUZZ_SEEDS=300` or more too: every seed passes.
 
 - [ ] **Step 3: Live check**
 
-With the build done and the dev site at http://localhost:8898 (admin / password), create test pages over WP-CLI as the admin, so the saves are recorded: a published top-level page with slug `hgp4-studio`, a published subpage `hgp4-team` under it and `hgp4-ada` under that, and a published top-level page `hgp4-events`. Rename `hgp4-studio` to `hgp4-studio-new` and `hgp4-events` to `hgp4-whats-on`, then make `hgp4-whats-on` a draft. Report what you see:
+With the build done and the dev site at http://localhost:8898 (admin / password), take a snapshot of the `_hierarchy_guard_%` meta rows, the `hierarchy_guard_*` options and the transients. Records made before this plan are not on the newest-records list, so create test pages over WP-CLI as the admin, so the saves are recorded: a published top-level page with slug `hgp4-studio`, a published subpage `hgp4-team` under it and `hgp4-ada` under that, and a published top-level page `hgp4-events`. Rename `hgp4-studio` to `hgp4-studio-new` and `hgp4-events` to `hgp4-whats-on`, then make `hgp4-whats-on` a draft. Report what you see:
 
-1. Settings › Hierarchy Guard opens on the Settings tab with core nav tabs Settings | Redirects and the three fields; Save Changes says "Settings saved." and stays on the page. Settings › Writing has no Hierarchy Guard section. The Plugins screen row reads "Settings | Deactivate", and Settings opens the page.
-2. The Redirects tab, searched for `hgp4`, lists "/hgp4-events/ and the URLs under it → HGP4-Events — Draft, /?page_id=…, Automatic, Not active: the page it points to isn’t published" and "/hgp4-studio/ and the URLs under it → HGP4-Studio, /hgp4-studio-new/, Automatic, Active". The Code column is in the admin's normal font.
-3. Edit on /hgp4-studio/: the view matches the spec's mockup. Enter `https://jobs.example.org/studio/`, choose 302 and Save: "Redirect updated.", and the row reads "/hgp4-studio/ → https://jobs.example.org/studio/, 302, Active". `curl -sI http://localhost:8898/hgp4-studio/` answers 302 to that URL with `X-Redirect-By: Hierarchy Guard`; `/hgp4-studio/hgp4-team/` is not redirected by Hierarchy Guard (core's own guess may still redirect it, with `X-Redirect-By: WordPress`).
-4. Edit on /hgp4-events/: enter `ftp://example.org/` with the field's type changed to text in DevTools, Save: the form comes back with "Enter a URL that starts with http:// or https://." and the value entered. Enter the URL of `hgp4-team` and Save: the record moves onto that page, and `/hgp4-events/hgp4-ada/` redirects 301 to `/hgp4-studio-new/hgp4-team/hgp4-ada/`.
-5. Delete on /hgp4-events/: "Redirect deleted. /hgp4-events/ now shows “Page not found”." Select the last row, choose Delete in the bottom Bulk actions and Apply: "1 redirect deleted. Its old URL now shows “Page not found”."
+1. Settings › Hierarchy Guard opens on the Settings tab with core nav tabs Settings | Redirects and the three fields; Save Changes says "Settings saved." below the tabs and stays on the page. Settings › Writing has no Hierarchy Guard section. The Plugins screen row reads "Settings | Deactivate", and Settings opens the page.
+2. The Redirects tab at `&tab=redirects&s=hgp4&redirect_type=page` loads (with `post_type=page` instead, core would refuse it). The browser title starts "Redirects ‹ Hierarchy Guard", "Search results for: hgp4" sits beside the heading, and the table lists "/hgp4-events/ and the URLs under it → HGP4-Events — Draft, /?page_id=…, Automatic, Not active: the page it points to isn’t published" and "/hgp4-studio/ and the URLs under it → HGP4-Studio, /hgp4-studio-new/, Automatic, Active". Old URLs are in code, and the Code column is in the admin's normal font.
+3. Delete on /hgp4-events/ asks "Delete the redirect from /hgp4-events/? This can’t be undone."; Cancel keeps the row.
+4. Edit on /hgp4-studio/: the title starts "Edit redirect ‹", the field is a text field, and Delete is core's red link. Enter `https://jobs.example.org/studio/#open`, choose 302 and Save: "Redirect updated.". `curl -sI 'http://localhost:8898/hgp4-studio/?utm=a'` answers 302 to `https://jobs.example.org/studio/?utm=a#open` with `X-Redirect-By: Hierarchy Guard`; `/hgp4-studio/hgp4-team/` is not redirected by Hierarchy Guard (core's own guess may still redirect it, with `X-Redirect-By: WordPress`).
+5. Edit on /hgp4-events/: enter the path `/hgp4-studio-new/hgp4-team/` and Save: the record moves onto that page, and `/hgp4-events/hgp4-ada/` redirects 301 to `/hgp4-studio-new/hgp4-team/hgp4-ada/`.
+6. Edit on one of the dev site's "Top level" rows: it says "Now redirects to the same page at the top level, for example /about/team/ to /team/.", the field is empty and its help begins "Leave empty to keep this.". Save with the field empty and Automatic chosen: "Redirect updated.", and the row still reads "Top level".
+7. Delete on /hgp4-events/ again, and accept: "Redirect deleted. /hgp4-events/ no longer redirects through it." Rename `hgp4-team` and `hgp4-studio-new` once more over WP-CLI so two rows match `hgp4`, tick both, choose Delete in a Bulk actions selector and Apply: it asks once, "Delete the selected redirects? This can’t be undone."; Cancel keeps them, and accepting says "2 redirects deleted. Their old URLs no longer redirect through them."
 
-Delete the test pages afterwards, subpages first (`wp post delete <ids> --force`), so deleting a parent records nothing new, and delete the `hierarchy_guard_change_1` transient the saves left. Check that the `_hierarchy_guard_%` meta rows and the `hierarchy_guard_*` options are as they were before the check.
+Afterwards delete the test pages, subpages first (`wp post delete <ids> --force`), so deleting a parent records nothing new; the newest-records list is then empty, so delete the `hierarchy_guard_recent_records` option, which didn't exist before, and the `hierarchy_guard_change_*` and `settings_errors` transients the check left. The meta rows, options and transients must match the snapshot.
 
 - [ ] **Step 4: Commit**
 
@@ -5601,16 +6393,16 @@ git commit -m "docs: describe Settings › Hierarchy Guard and its Redirects tab
 
 ## Self-Review
 
-**Spec coverage.** Settings › Hierarchy Guard at `options-general.php?page=hierarchy-guard` for `manage_options`, core nav tabs Settings | Redirects, the three fields saving `hierarchy_guard_settings` through the Settings API, nothing on Settings › Writing, every settings link (the "Set up redirects" notice action and nudge, the panel's "Change this in Settings", the readme) and the Plugins row's "Settings" link: Task 6. Redirects tab as a core `WP_List_Table` of every recorded redirect and only those, one row per `_hierarchy_guard_path_{md5}` entry and per root-list entry, Old URL with "and the URLs under it" for a page target, Redirects to as the page's title linked to its edit screen with its current URL, the URL, or "Top level", Code as Automatic or the chosen code, Status with the first reason that applies, search on the old URL, a post type filter only with two or more types, 20 rows a page sorted by old URL, Edit and Delete row actions, bulk Delete, no Add button, the built-in-redirects-off notice and the provider notice: Tasks 5 and 7. Editing a redirect at `&action=edit&redirect=<id>` behind a nonce, the read-only Old URL, one "Redirect to" field resolved through `url_to_postid()`, a page of another type counting as any other URL, no page picker, no JavaScript needed, Code as Automatic, 301 or 302, Save, Cancel and Delete, "Redirect updated." and the deleted notice from the view, a row or in bulk: Tasks 5 and 8. Editing a recorded redirect's storage (the record moves on retarget, `_hierarchy_guard_target_{md5}` and `hierarchy_guard_root_targets`, deleted with the record, the ledger cache key bumped, `manage_options` and a nonce on every action, http(s) only): Tasks 1, 5, 7 and 8. Serving a redirect with overrides (a URL target on its exact old path only, matching going on past it, a root-list entry's override from its option, `wp_redirect()` after `esc_url_raw()`, the chosen code replacing the automatic one, the batch resolver and the modal and CSV honouring the same): Tasks 2, 3 and 4. Data model rows for the two override stores: Task 1. Architecture's `Ledger` overrides and records list (the records list lives in `Redirects\Records`), `Settings` registration, `Settings_Page`, `Redirects_Table`, `Redirect_Edit`, and the `admin_menu`, `plugin_action_links_{basename}` and `load-settings_page_hierarchy-guard` hooks: Tasks 1 and 5 to 8. Every Testing bullet for plan 4 (sources, search and paging, edits to a page and to a URL, each code, delete, capability and nonce checks, a non-http URL, status labels, resolver and batch parity, settings links): Tasks 1 to 8. Out of scope kept out: adding by hand, import and export, regex, hit counts.
+**Spec coverage.** Settings › Hierarchy Guard at `options-general.php?page=hierarchy-guard` for `manage_options`, core nav tabs Settings | Redirects, the three fields saving `hierarchy_guard_settings` through the Settings API, nothing on Settings › Writing, every settings link (the "Set up redirects" notice action and nudge, the panel's "Change this in Settings", the readme) and the Plugins row's "Settings" link: Task 6. Redirects tab as a core `WP_List_Table` of every recorded redirect and only those, one row per `_hierarchy_guard_path_{md5}` entry and per root-list entry, Old URL with "and the URLs under it" for a page target, Redirects to as the page's title linked to its edit screen with its current URL, the URL, or "Top level", Code as Automatic or the chosen code, Status with the first reason that applies, search on the old URL, a post type filter only with two or more types, 20 rows a page sorted by old URL, Edit and Delete row actions, bulk Delete, no Add button, the built-in-redirects-off notice and the provider notice: Tasks 5 and 7. Editing a redirect at `&action=edit&redirect=<id>` behind a nonce, the read-only Old URL, one "Redirect to" field resolved through `url_to_postid()`, a page of another type counting as any other URL, no page picker, no JavaScript needed, Code as Automatic, 301 or 302, Save, Cancel and Delete, "Redirect updated." and the deleted notice from the view, a row or in bulk: Tasks 5 and 8. Editing a recorded redirect's storage (the record moves on retarget, `_hierarchy_guard_target_{md5}` and `hierarchy_guard_root_targets`, deleted with the record, the ledger cache key bumped, `manage_options` and a nonce on every action, http(s) only): Tasks 1, 5, 7 and 8. Serving a redirect with overrides (a URL target on its exact old path only, matching going on past it, a root-list entry's override from its option, `wp_redirect()` after `esc_url_raw()`, the chosen code replacing the automatic one, the batch resolver and the modal and CSV honouring the same): Tasks 2, 3 and 4. Data model rows for the two override stores: Task 1. Architecture's `Ledger` overrides and records list (the records list lives in `Redirects\Records`), `Settings` registration, `Settings_Page`, `Redirects_Table`, `Redirect_Edit`, and the `admin_menu`, `plugin_action_links_{basename}` and `load-settings_page_hierarchy-guard` hooks: Tasks 1 and 5 to 8. Every Testing bullet for plan 4 (sources, search and paging, edits to a page and to a URL, each code, delete, capability and nonce checks, a non-http URL, status labels, resolver and batch parity, settings links): Tasks 1 to 8. The owner's audit rulings: the newest-records option (Task 1, read in Task 5), Delete asking first (Tasks 7 and 8), the top-level Edit copy and the path input (Tasks 5 and 8). Out of scope kept out: adding by hand, import and export, regex, hit counts.
 
 **Placeholder scan.** No TBD or TODO. Every code step carries complete code taken from the verified prototype; every command names its expected result.
 
 **Type consistency.** A record (`id`, `holder`, `post_type`, `path`, `old`, `target`) is built only by `Records` and read by `Redirects_Table` and `Redirect_Edit`. An override (`url`, `code`) is built only by `Ledger::clean_target()` and read by `Rules`, `Batch_Resolver`, `Records` and the table. `Rules::resolve()` and `Resolver::resolve()` return `WP_Post|string|null` with `$code`, which `Server` and `Batch_Resolver::run()` read. `Batch_Resolver::served()`'s `$chosen` is what `Pairs::served_only()` reads. The `Records::STATUS_*` constants are what `Redirects_Table::status_label()` maps. The nonce actions (`Redirect_Edit::NONCE_EDIT`, `NONCE_SAVE`, `NONCE_DELETE`, `NONCE_BULK`) are the ones the links and forms print.
 
-**Review Focus.** All five named tests exist: three in Task 5, one each in Tasks 7 and 8.
+**Review Focus.** All named tests exist: in Tasks 5, 7 and 8.
 
 ## Hand-offs to plan 5 (Tree view) and plan 6 (DataViews and release)
 
-- Plan 6's uninstall removes `hierarchy_guard_root_targets` with the other options and the `_hierarchy_guard_target_` meta rows with the `_hierarchy_guard_path_` rows, in batches of a thousand, per site on multisite.
+- Plan 6's uninstall removes `hierarchy_guard_root_targets` and `hierarchy_guard_recent_records` with the other options and the `_hierarchy_guard_target_` meta rows with the `_hierarchy_guard_path_` rows, in batches of a thousand, per site on multisite.
 - Plan 6's readme.txt describes Settings › Hierarchy Guard from the README section Task 9 adds, and its copy pass revisits the Redirects help text that still says "Turn this on" while the switch is on.
 - Plan 6's release zip needs nothing new: this plan adds no bundle.
