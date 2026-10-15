@@ -267,8 +267,10 @@ final class Records {
 			$url = home_url( $url );
 		}
 
-		$kept = null !== $record['target'] ? $record['target']['url'] : '';
-		if ( untrailingslashit( esc_url_raw( $url ) ) === untrailingslashit( esc_url_raw( self::target_url( $record ) ) ) ) {
+		$kept    = null !== $record['target'] ? $record['target']['url'] : '';
+		$offered = self::target_url( $record );
+		// An empty offer never matches: esc_url_raw() also returns '' for a refused protocol.
+		if ( '' !== $offered && untrailingslashit( esc_url_raw( $url ) ) === untrailingslashit( esc_url_raw( $offered ) ) ) {
 			$this->ledger->set_target( $type, $path, $record['holder'], $kept, $code );
 			return true;
 		}

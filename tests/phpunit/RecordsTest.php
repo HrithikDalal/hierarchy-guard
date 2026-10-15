@@ -617,4 +617,20 @@ final class RecordsTest extends WP_UnitTestCase {
 		wp_cache_flush();
 		$this->assertSame( Records::STATUS_UNPUBLISHED, $statuses()['/story/'], 'A holder in the Trash is not served.' );
 	}
+
+	public function test_a_top_level_entry_refuses_a_value_that_is_not_http_and_writes_nothing(): void {
+		$this->ledger->record_root( 'page', 'archive' );
+		$record = $this->records->find( Records::id( 0, 'page', 'archive' ) );
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+
+		foreach ( [ 'javascript:alert(1)', 'data:text/html,x', 'vbscript:x', '<>' ] as $value ) {
+			$result = $this->records->save( $record, $value, 302 );
+			$this->assertInstanceOf( WP_Error::class, $result, $value );
+			$this->assertSame( 'hierarchy_guard_not_http', $result->get_error_code(), $value );
+		}
+
+		$this->assertNull( $this->ledger->target( 'page', 'archive', 0 ), 'No override written.' );
+		$this->assertFalse( get_option( Ledger::ROOT_TARGETS ) );
+		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+	}
 }
