@@ -54,11 +54,13 @@ use WP_UnitTestCase;
  * - Gone: at the end, the latest change's list is gone exactly when a page
  *   it lists redirects for was deleted for good: a save's page, or a trashed
  *   parent that moved subpages up.
- * - Taken: after each step, a URL a page took with its own save, creation,
- *   publish or restore, and showed last, leads by its own ledger entry to
- *   that page or to no page: no other page's entry for it is left. A page
- *   that came to a URL only because a page above it moved takes nothing,
- *   and where a shorter prefix leads is not checked.
+ * - Taken: right after a step in which a page took a URL with its own
+ *   save, creation, publish or restore, no other post outside the trash has
+ *   a ledger entry for that URL, and the root list lacks it. Later, while
+ *   that page showed the URL last and is live elsewhere, the newest live
+ *   entry for it is that page's own or there is none. A page that came to a
+ *   URL only because a page above it moved takes nothing, and where a
+ *   shorter prefix leads is not checked.
  *
  * The resolver runs only on a 404, so a URL a published page, a blog post or
  * an attachment uses now is served by it and is no redirect at all, on
@@ -276,8 +278,9 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			if ( [] !== ( new Queue() )->roots() ) {
 				$this->fail( 'Everything runs inline. ' . $this->story( $seed ) );
 			}
+			$actors = $this->actors;
 			$this->remember();
-			$this->failures = array_merge( $this->failures, $this->check_change(), $this->check_last_holders() );
+			$this->failures = array_merge( $this->failures, $this->check_change(), $this->check_taken( $actors ), $this->check_last_holders() );
 		}
 
 		$this->assertSame( [], array_merge( $this->failures, $this->violations() ), $this->story( $seed ) );
@@ -345,7 +348,10 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 				'post_name' => $slug,
 			]
 		);
-		$this->actors[] = $id;
+		if ( $this->path( $id ) !== $from ) {
+			// A rename to the slug the page has already saves no new URL.
+			$this->actors[] = $id;
+		}
 		$this->saved( $id, $from, $tree );
 		return sprintf( 'rename %s %s to %s: %s', $this->made[ $id ], $from, $slug, $this->path( $id ) );
 	}
@@ -961,6 +967,39 @@ final class PairsFuzzTest extends WP_UnitTestCase {
 			}
 		}
 		$this->actors = [];
+	}
+
+	/**
+	 * Every URL a page of this step took with its own save, creation,
+	 * publish or restore that another post outside the trash still has a
+	 * ledger entry for, or that the root list still holds.
+	 *
+	 * @param int[] $actors Pages this step saved, created, published or restored.
+	 * @return string[] One line per such URL.
+	 */
+	private function check_taken( array $actors ): array {
+		global $wpdb;
+
+		$live  = $this->live();
+		$roots = get_option( Ledger::ROOT_OPTION, [] );
+		$roots = is_array( $roots ) ? (array) ( $roots['page'] ?? [] ) : [];
+		$out   = [];
+		foreach ( array_unique( $actors ) as $id ) {
+			if ( ! in_array( $id, $live, true ) ) {
+				continue;
+			}
+			$path = $this->path( $id );
+			$this->tally( 'taken URLs checked at once' );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A test oracle's point lookup on the meta_key index.
+			$others = array_map( 'intval', (array) $wpdb->get_col( $wpdb->prepare( "SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND pm.post_id <> %d AND p.post_status <> 'trash'", Ledger::key( 'page', $path ), $id ) ) );
+			foreach ( $others as $other ) {
+				$out[] = sprintf( 'L: step %d: %s took /%s/, and %s still holds it', $this->step, $this->name( $id ), $path, $this->name( $other ) );
+			}
+			if ( in_array( $path, $roots, true ) ) {
+				$out[] = sprintf( 'L: step %d: %s took /%s/, and the root list still holds it', $this->step, $this->name( $id ), $path );
+			}
+		}
+		return $out;
 	}
 
 	/**
