@@ -826,6 +826,22 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertFalse( get_option( Ledger::ROOT_OPTION ), 'Not in the root list.' );
 	}
 
+	public function test_a_subpage_deleted_out_of_the_trash_records_only_the_urls_its_subpages_showed(): void {
+		$this->policy( Settings::POLICY_TRASH_CHILDREN );
+		$draft = $this->page( 'draft-kid', $this->ids['team'], 'draft' );
+		$older = $this->page( 'older-kid', $this->ids['team'] );
+		wp_trash_post( $older );
+		$this->handler()->reset_request_budget();
+		Change_Log::reset_request();
+		wp_trash_post( $this->ids['about'] );
+
+		wp_delete_post( $this->ids['team'], true );
+
+		$this->assertSame( [ 'company/about/team/leadership' ], $this->ledger->paths_for( $this->ids['leadership'] ) );
+		$this->assertSame( [], $this->ledger->paths_for( $draft ), 'A draft never had a public URL.' );
+		$this->assertSame( [ 'company/about/team/older-kid' ], $this->ledger->paths_for( $older ), 'Published until its own trash: that URL was public.' );
+	}
+
 	/**
 	 * Trashes about under the trash-the-subpages policy while the user may not delete leadership.
 	 */

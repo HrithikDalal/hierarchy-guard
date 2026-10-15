@@ -304,7 +304,9 @@ final class Change_Listener {
 	}
 
 	/**
-	 * Records each direct child's path from before the trash on the child.
+	 * Records each direct child's path from before the trash on the child,
+	 * for a child that was published then: one in the trash by the status
+	 * core kept from before its trash.
 	 *
 	 * @param int    $post_id   The post being deleted.
 	 * @param string $post_type Its post type.
@@ -326,7 +328,10 @@ final class Change_Listener {
 		Ledger::deferred(
 			function () use ( $children ): void {
 				foreach ( $children as $child ) {
-					$this->ledger->record( (int) $child->ID, Paths::untrashed_uri( $child ) );
+					$was = 'trash' === $child->post_status ? (string) get_post_meta( $child->ID, '_wp_trash_meta_status', true ) : (string) $child->post_status;
+					if ( 'publish' === $was ) {
+						$this->ledger->record( (int) $child->ID, Paths::untrashed_uri( $child ) );
+					}
 				}
 			}
 		);
