@@ -86,24 +86,55 @@ describe( 'a bulk Delete', () => {
 		).toBe( 'Delete the redirect from /row-0/? This can’t be undone.' );
 	} );
 
-	it( 'asks nothing for Filter, the search, another action or no rows', () => {
+	it( 'asks whatever submits the form: Enter in the search or the page number too', () => {
 		const ticked = form( { action: 'delete', ticked: 2 } );
-		expect( bulkQuestion( ticked, { id: 'post-query-submit' } ) ).toBe(
-			null
-		);
-		expect( bulkQuestion( ticked, { id: 'search-submit' } ) ).toBe( null );
-		expect( bulkQuestion( ticked, null ) ).toBe( null );
+		expect( bulkQuestion( ticked, { id: 'search-submit' } ) ).toBe( MANY );
+		expect( bulkQuestion( ticked, null ) ).toBe( MANY );
+		expect( bulkQuestion( ticked, undefined ) ).toBe( MANY );
+	} );
+
+	it( 'reads the action as the server does: the top selector, else the bottom one', () => {
+		expect(
+			bulkQuestion( form( { action2: 'delete', ticked: 2 } ), {
+				id: 'doaction',
+			} )
+		).toBe( MANY );
+		expect(
+			bulkQuestion(
+				form( { action: '-1', action2: 'delete', ticked: 2 } ),
+				{
+					id: 'search-submit',
+				}
+			)
+		).toBe( MANY );
+		expect(
+			bulkQuestion(
+				form( { action: 'other', action2: 'delete', ticked: 2 } ),
+				{ id: 'doaction2' }
+			)
+		).toBe( null );
+	} );
+
+	it( 'asks nothing for Filter, another action or no rows', () => {
+		const ticked = form( { action: 'delete', ticked: 2 } );
+		expect(
+			bulkQuestion( ticked, {
+				id: 'hierarchy-guard-filter',
+				name: 'filter_action',
+			} )
+		).toBe( null );
 		expect(
 			bulkQuestion( form( { action: 'delete' } ), { id: 'doaction' } )
 		).toBe( null );
 		expect(
-			bulkQuestion( form( { action2: 'delete', ticked: 2 } ), {
+			bulkQuestion( form( { action: 'other', ticked: 2 } ), {
 				id: 'doaction',
 			} )
 		).toBe( null );
 		expect( bulkQuestion( element( {} ), { id: 'doaction' } ) ).toBe(
 			null
 		);
+		expect( bulkQuestion( null, { id: 'doaction' } ) ).toBe( null );
 	} );
 } );
 
