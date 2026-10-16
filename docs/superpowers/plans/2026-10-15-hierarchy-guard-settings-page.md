@@ -1891,7 +1891,7 @@ git commit -m "feat: resolve old paths through a record's URL target and chosen 
 
 **Interfaces:**
 - Consumes: `Resolver::resolve( $type, $path, $temporary, $code ): WP_Post|string|null` (Task 2).
-- Produces: `Server::target_for_current_request(): ?array{url:string,status:int}` as before, now also for URL targets: the URL as set (no suffixes re-applied), with the request's query string, through `esc_url_raw( $url, [ 'http', 'https' ] )` and sent only while http(s), never through `wp_validate_redirect()`. The status is the chosen code when there is one, else 301 or 302 as before; `hierarchy_guard_redirect_status` and `hierarchy_guard_redirect_url` get `null` for the post of a URL target. The loop guard compares paths only for a URL on this site's host. The request's query string goes before a URL target's `#fragment` (`…/landing/?utm_source=news#section`), so the browser still sends it.
+- Produces: `Server::target_for_current_request(): ?array{url:string,status:int}` as before, now also for URL targets: the URL as set (no suffixes re-applied), with the request's query string, through `esc_url_raw( $url, [ 'http', 'https' ] )` and sent only while http(s), never through `wp_validate_redirect()`. The status is the chosen code when there is one, else 301 or 302 as before; `hierarchy_guard_redirect_status` and `hierarchy_guard_redirect_url` get `null` for the post of a URL target. The loop guard compares paths only for a URL on this site's host. As shipped after `/review`, "this site" is the home URL's host and port, whatever the scheme (`Server::is_here()`), and a URL target on this site whose path is another old URL the plugin redirects is never sent (`Server::redirected()`), so redirects that send each other round stop at a plain 404. The request's query string goes before a URL target's `#fragment` (`…/landing/?utm_source=news#section`), so the browser still sends it.
 - Behaviour kept: GET and HEAD only, 404 only, serving switch, plain permalinks inert, segment cap, page targets through `wp_validate_redirect()`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2513,7 +2513,7 @@ git commit -m "feat: list a change's redirects with the overrides the server hon
 - Produces: a record, `array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null}`. `holder` is the post holding the `_hierarchy_guard_path_{md5}` row, 0 for a root-list entry; `path` is the stored, normalized path; `old` is the old URL relative to the home URL, percent-decoded for reading (`/café/`); `target` is the override or null.
 - Produces: `Records::id( int $holder, string $post_type, string $path ): string` = `"{holder}.{md5(type:path)}"`; `Records::find( string $id ): ?array` accepts only `^\d{1,20}\.[0-9a-f]{32}$` naming an existing record of a supported type whose hash is of its holder's own type.
 - Produces: `Records::page( string $post_type, string $search, int $page ): array{rows:array,total:int,page:int,capped:bool}`: `PER_PAGE` (20) rows sorted by old URL (then type, then holder) across the newest `Subtree::count_cap()` post entries of the listed types (`Ledger::recent()`) plus the root list; search is a case-insensitive substring of the old URL, and a full URL is matched as its path; `page` is the page shown, the last one when the request asks for one past it; `capped` when older post entries exist. A search also finds, by its hashed key, any entry at the exact old URL or path it names, whatever the newest list holds.
-- Produces: `Records::statuses( array $rows ): array<string,string>` by ID, one of `STATUS_IN_USE`, `STATUS_UNPUBLISHED`, `STATUS_OFF`, `STATUS_ACTIVE`, the first that applies.
+- Produces: `Records::statuses( array $rows ): array<string,string>` by ID, one of `STATUS_IN_USE`, `STATUS_UNPUBLISHED`, `STATUS_REFUSED`, `STATUS_OFF`, `STATUS_ACTIVE`, the first that applies, from plain checks for the page's rows (as shipped after `/review`): a holder in the Trash reads unpublished first; in use when a published post, page or attachment anyone can view is at the old URL (`Server::shows_post()`, `url_to_postid()`); unpublished for a page target nobody can view; refused past the segment cap (a top-level entry counting the URLs under it), for a URL target at its own old URL, or for one that is another old URL the plugin redirects (`Server::redirected()`); off; active. Other WordPress URLs, such as archives, aren't checked, and the tab says so under the table. `save()` refuses another redirected old URL with "That URL is another old URL this plugin redirects.", and the server never sends a URL target to one, so redirects can't loop.
 - Produces: `Records::target_url( array $record ): string`, the URL the Edit view offers ('' for a top-level root-list entry); `Records::is_top_level( array $record ): bool` (a root-list entry with no URL target); `Records::save( array $record, string $url, int $code ): true|WP_Error` with codes `hierarchy_guard_no_url`, `hierarchy_guard_not_http`, `hierarchy_guard_same_path`, `hierarchy_guard_not_saved`; `Records::delete( array $record ): bool`.
 - Save reads a value starting with one `/` as a path on this site (`home_url( $path )`); `//host` and a value with no typed `http(s)` scheme are refused. An empty field saves only the code for a top-level entry and is refused otherwise.
 - Bounds: one option read for the newest list, then one query of `meta_id IN (…)` (at most `count_cap()` primary-key lookups) with `STRAIGHT_JOIN` to posts on their primary key, no derived or temporary table; one query for a page's overrides; one per type for the pages at the old URLs; one hashed seek per search. Nothing reads every record.
@@ -3102,6 +3102,8 @@ Expected: FAIL. Every test errors with `Error: Class "HierarchyGuard\Redirects\R
 - [ ] **Step 3: Write the records model**
 
 Create `includes/HierarchyGuard/Redirects/Records.php`:
+> As first written; the `/review` rounds superseded parts of this block (see this task's Interfaces). The shipped code is the reference.
+
 ```php
 <?php
 /**
@@ -4427,14 +4429,16 @@ git commit -m "feat: move the settings to Settings › Hierarchy Guard"
 
 **Interfaces:**
 - Consumes: `Records` (Task 5), `Settings_Page::url()` (Task 6), `Providers::detect()`, `Settings::serve_redirects()`, `Subtree::count_cap()`.
-- Produces: `Admin\Redirects_Table extends WP_List_Table` (`singular` redirect, `plural` redirects, screen `settings_page_hierarchy-guard`): columns `cb`, `old` (primary), `target`, `http_code` (not `code`: a cell carries its key as a class, and core's admin CSS sets `.code` in a monospace font), `status`; bulk action `delete`; row action Delete; a post type filter when two or more types are supported, whose argument is `TYPE_ARG = 'redirect_type'` (wp-admin/admin.php reads `post_type` before the page loads and then refuses to load a plugin page under Settings); static `search()` (percent-decoded before `sanitize_text_field()`, which strips octets), `post_type()`, `old_label( array $item ): string` (escaped HTML, the old URL in `<code>`), `status_label( string $status ): string`; `is_capped(): bool`; `get_pagenum()` returns the page `Records::page()` showed; `pagination()` shows the count as "1,000+ items" past the cap. URLs in the Redirects to column sit in `<span dir="ltr">`. Empty states: "No redirects found." under a type filter, "No redirects match your search.", "No redirects have been recorded yet."
+- Produces: `Admin\Redirects_Table extends WP_List_Table` (`singular` redirect, `plural` redirects, screen `settings_page_hierarchy-guard`): columns `cb`, `old` (primary), `target`, `http_code` (not `code`: a cell carries its key as a class, and core's admin CSS sets `.code` in a monospace font), `status`; bulk action `delete`; row action Delete; a post type filter when two or more types are supported, whose argument is `TYPE_ARG = 'redirect_type'` (wp-admin/admin.php reads `post_type` before the page loads and then refuses to load a plugin page under Settings); static `search()` (percent-decoded before `sanitize_text_field()`, which strips octets), `searched()` (the raw text: a search that sanitizing empties finds nothing), `post_type()`, `list_args()` (the list's `s`, `redirect_type` and `paged`, which the row links, the Edit view's hidden fields, Save, Cancel and Delete carry back to the list), `old_label( array $item, string $edit = '' ): string` (escaped HTML, the old URL in `<code>`; in the primary column linked to Edit as a `row-title`, named by its own text), `status_label( string $status ): string`; row checkboxes in core's markup, the box then `<label for><span class="screen-reader-text">…</span></label>`, so the whole cell ticks it; `is_capped(): bool`; `get_pagenum()` returns the page `Records::page()` showed; `pagination()` shows the count as "1,000+ items" past the cap. URLs in the Redirects to column sit in `<span dir="ltr">`. Empty states: "No redirects found." under a type filter, "No redirects match your search.", "No redirects are listed yet." while the list is first built (the notice above says why), "No redirects have been recorded yet."
 - Produces: `Admin\Redirect_Edit::__construct( Records $records )`, `NONCE_DELETE = 'hierarchy_guard_delete_'` (plus the record ID), `NONCE_BULK = 'bulk-redirects'` (the table's own `bulk-{plural}` nonce), `delete_url( string $id ): string`, `confirm_one( string $old ): string` ("Delete the redirect from %s?" and "This can’t be undone.", two strings), `handle(): ?string` (where to redirect, or null to print the page). It runs nothing when `filter_action` is set, as core's `current_action()` does, then reads `action`, then `action2`, so the bottom bulk selector works without JavaScript; it checks `manage_options` (else `wp_die()` 403) and the nonce (`check_admin_referer()`) before it changes anything. A request carrying the bulk nonce is a bulk request: with no rows ticked it returns to the list, and it deletes at most `Records::PER_PAGE` string IDs. Notices, in the spec's words ("Redirect deleted. `<code>/about/team/</code>` no longer redirects through it."), go through `add_settings_error()` and the `settings_errors` transient with `settings-updated=true`, as `options.php` does, so core's options header prints them.
-- Produces: `Settings_Page::__construct( Providers $providers, Records $records )`, `current_tab(): string` (`redirects` or `settings`), `load()` on the page's `load-{hook}`: runs `Redirect_Edit::handle()` on the Redirects tab, then `wp_safe_redirect()` and `exit`; otherwise sets the screen's list headings for screen readers and filters `admin_title` ("Redirects ‹ …"). The Redirects tab prints "Search results for:" beside the heading while searching, a notice while `Ledger::building()`, first written as `Ledger::backfilling()` ("The list of recorded redirects is still being built. Older redirects appear here once it’s done."), and the redirects-off notice with a link to the Settings tab's Redirects field.
-- Produces: the `redirects` bundle (`src/redirects/`, built to `build/redirects.js`), which `Assets::enqueue_admin()` enqueues on `settings_page_hierarchy-guard` when the tab is Redirects. `confirm.js` exports `linkQuestion( target )` (the `data-hierarchy-guard-confirm` of the Delete link clicked, or null), `bulkQuestion( form, submitter )` (for `#doaction` or `#doaction2` with Delete chosen in that selector and rows ticked: the form's `data-hierarchy-guard-confirm`, or the one ticked box's `data-hierarchy-guard-confirm-one`; null for Filter, the search or anything else) and `guard( event, question, ask )` (asks, and calls `preventDefault()` on Cancel). `index.js` binds them to `click` and `submit` with `window.confirm()`. The questions come from the page, so the bundle needs no translations. Without JavaScript the Delete runs directly, as in core.
+- Produces: `Settings_Page::__construct( Providers $providers, Records $records )`, `current_tab(): string` (`redirects` or `settings`), `load()` on the page's `load-{hook}`: runs `Redirect_Edit::handle()` on the Redirects tab, then `wp_safe_redirect()` and `exit`; otherwise sets the screen's list headings for screen readers and filters `admin_title` ("Redirects ‹ …"). The Redirects tab prints "Search results for:" beside the heading while searching, on the list only, not the Edit view, a notice while `Ledger::building()`, first written as `Ledger::backfilling()` ("The list of recorded redirects is still being built. Older redirects appear here once it’s done."), and the redirects-off notice with a link to the Settings tab's Redirects field.
+- Produces: the `redirects` bundle (`src/redirects/`, built to `build/redirects.js`), which `Assets::enqueue_admin()` enqueues on `settings_page_hierarchy-guard` when the tab is Redirects. `confirm.js` exports `linkQuestion( target )` (the `data-hierarchy-guard-confirm` of the Delete link clicked, or null), `bulkQuestion( form, submitter )` (for `#doaction` or `#doaction2` with Delete chosen in that selector and rows ticked: the form's `data-hierarchy-guard-confirm`, or the one ticked box's `data-hierarchy-guard-confirm-one`; null for Filter, the search or anything else) and `guard( event, question, ask )` (asks, and calls `preventDefault()` on Cancel), and `listen( doc, ask )`, which binds them to `click`, `auxclick` of the middle button (a middle-click opens a Delete link with no `click`) and `submit`; `index.js` calls `listen( window.document, … )` with `window.confirm()`. `Assets::enqueue( 'redirects', [], false )` adds no settings and no translations: the bundle reads only the page's questions. The questions come from the page, so the bundle needs no translations. Without JavaScript the Delete runs directly, as in core.
 
 - [ ] **Step 1: Write the failing tests**
 
 Create `tests/phpunit/RedirectsTabTest.php`:
+> As first written; the `/review` rounds superseded parts of this block (see this task's Interfaces). The shipped code is the reference.
+
 ```php
 <?php
 /**
@@ -5139,6 +5143,8 @@ Expected: FAIL. `src/redirects/test/confirm.test.js` cannot import `../confirm`.
 - [ ] **Step 3: Write the table**
 
 Create `includes/HierarchyGuard/Admin/Redirects_Table.php`:
+> As first written; the `/review` rounds superseded parts of this block (see this task's Interfaces). The shipped code is the reference.
+
 ```php
 <?php
 /**
@@ -6094,6 +6100,8 @@ export function guard( event, question, ask ) {
 ```
 
 Create `src/redirects/index.js`:
+> As first written; the `/review` rounds superseded parts of this block (see this task's Interfaces). The shipped code is the reference.
+
 ```js
 /**
  * Settings › Hierarchy Guard › Redirects: Delete asks first, from a row, the
@@ -6164,6 +6172,8 @@ Replace:
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 ```
 with:
+> As first written; the `/review` rounds superseded parts of this block (see this task's Interfaces). The shipped code is the reference.
+
 ```php
 	public function enqueue_admin( $hook_suffix ): void {
 		if ( 'settings_page_' . Settings_Page::SLUG === $hook_suffix && 'redirects' === Settings_Page::current_tab() ) {
@@ -6201,7 +6211,7 @@ git commit -m "feat: list the recorded redirects on a Redirects tab, with Delete
 
 **Interfaces:**
 - Consumes: `Records::find()`, `target_url()`, `save()` (Task 5); `Redirects_Table::old_label()`, `Redirect_Edit::delete_url()` (Task 7).
-- Produces: `Redirect_Edit::NONCE_EDIT = 'hierarchy_guard_edit_'`, `NONCE_SAVE = 'hierarchy_guard_save_'` (each plus the record ID); `edit_url( string $id ): string` (`…&tab=redirects&action=edit&redirect=<id>&_wpnonce=…`).
+- Produces: `Redirect_Edit::NONCE_EDIT = 'hierarchy_guard_edit_'`, `NONCE_SAVE = 'hierarchy_guard_save_'` (each plus the record ID); `edit_url( string $id, ?array $listing = null ): string` (`…&tab=redirects&action=edit&redirect=<id>`, the list's search, filter and page, `&_wpnonce=…`); `delete_url()` likewise.
 - Produces: `handle()` also takes `edit` (checks the nonce; a record gone since returns to the tab with "This redirect no longer exists.") and `save` (POST `redirect`, `target`, `code` of 0, 301 or 302, checked against `NONCE_SAVE . $id`). A saved edit returns to the tab with "Redirect updated."; a refused one returns null, keeps the record and what was entered, and adds the reason as a settings error.
 - Produces: `render(): bool`: prints the Edit view (`<h2>`, a POST form to the Redirects tab, a `form-table` with the read-only Old URL, one `type="text"` field so that a path is not stopped by the browser, with the spec's two sentences and "A path on this site, such as /about/team/, works as well as a full URL.", the Code radios with Automatic's description tied by `aria-describedby`, Save, Cancel and core's red `<span id="delete-link"><a class="delete">` Delete, which asks first) and returns true, or prints nothing and returns false. For a top-level root-list entry it says "Now redirects to the same page at the top level, for example /about/team/ to /team/.", the field starts empty and its help begins "Leave empty to keep this. Enter a URL to send these URLs somewhere else." It works without JavaScript.
 - Produces: `Redirect_Edit::is_editing(): bool`, which `Settings_Page::admin_title()` reads to title the view "Edit redirect ‹ …".
@@ -6573,6 +6583,8 @@ Replace:
 	}
 ```
 with:
+> As first written; the `/review` rounds superseded parts of this block (see this task's Interfaces). The shipped code is the reference.
+
 ```php
 		$this->records = $records;
 	}
