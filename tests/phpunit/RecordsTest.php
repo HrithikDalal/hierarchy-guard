@@ -696,6 +696,56 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( 'https://example.net/', $this->served_at( '/old-d/' )['url'] ?? null );
 	}
 
+	public function test_on_a_site_in_a_subdirectory_a_url_outside_it_is_another_site(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$origin = untrailingslashit( home_url() );
+		$home   = static fn(): string => $origin . '/blog';
+		add_filter( 'pre_option_home', $home );
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->ledger->record( $this->ids['team'], 'about' );
+		$holder = $this->page( 'hx' );
+		$this->ledger->record( $holder, 'old-x' );
+		$outside = $origin . '/about/';
+
+		$this->assertTrue( Server::is_here( $origin . '/blog/about/' ) );
+		$this->assertTrue( Server::is_here( $origin . '/blog' ) );
+		$this->assertFalse( Server::is_here( $outside ), 'Same host, outside this site’s home path: another site.' );
+		$this->assertFalse( Server::is_here( $origin . '/blogger/' ) );
+		$this->assertTrue( $this->records->save( $this->records->find( Records::id( $holder, 'page', 'old-x' ) ), $outside, 0 ), 'Not this site’s /blog/about/.' );
+		$this->assertSame( Records::STATUS_ACTIVE, $this->statuses_by_old()['/old-x/'] ?? null );
+		$this->assertSame( 'hierarchy_guard_redirected', $this->records->save( $this->records->find( Records::id( $holder, 'page', 'old-x' ) ), $origin . '/blog/about/', 0 )->get_error_code(), 'This site’s own old URL still is.' );
+		remove_filter( 'pre_option_home', $home );
+	}
+
+	public function test_on_a_subdirectory_subsite_a_main_site_url_that_shares_a_recorded_path_saves_and_is_sent(): void {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Multisite only: run with WP_MULTISITE=1.' );
+		}
+		$main = get_permalink( $this->ids['about'] );
+		$blog = self::factory()->blog->create( [ 'path' => '/sub/' ] );
+		switch_to_blog( $blog );
+		Post_Types::reset();
+		$this->set_permalink_structure( '/%postname%/' );
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$ledger  = new Ledger();
+		$records = new Records( $ledger );
+		$team    = $this->page( 'team' );
+		$holder  = $this->page( 'hx' );
+		// The subsite's own old URL /sub/company/about/ shares the main site's page path.
+		$ledger->record( $team, 'company/about' );
+		$ledger->record( $holder, 'old-x' );
+		wp_cache_flush();
+
+		$saved = $records->save( $records->find( Records::id( $holder, 'page', 'old-x' ) ), $main, 0 );
+		$this->go_to( home_url( '/old-x/' ) );
+		$sent = ( new Server( new Resolver( $ledger ) ) )->target_for_current_request();
+		restore_current_blog();
+		Post_Types::reset();
+
+		$this->assertTrue( $saved, 'The main site’s ' . $main . ' is another site’s URL.' );
+		$this->assertSame( $main, $sent['url'] ?? null );
+	}
+
 	public function test_a_row_is_in_use_when_a_published_post_page_or_attachment_is_at_its_old_url(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->register_docs();

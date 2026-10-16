@@ -203,7 +203,8 @@ final class Server {
 		}
 		foreach ( self::candidates( $path ) as [ $type, $candidate ] ) {
 			if ( null !== $resolver->resolve( $type, $candidate ) ) {
-				return ! self::shows_post( $url );
+				// What is shown at the path itself: url_to_postid() reads ?p=, ?page_id= and ?attachment_id= first, and the request's query rides on the target.
+				return ! self::shows_post( (string) strtok( $url, '?#' ) );
 			}
 		}
 		return false;
@@ -223,16 +224,21 @@ final class Server {
 	}
 
 	/**
-	 * Whether a URL is on this site: its host and port are the home URL's.
-	 * The scheme is left out, so http and https on their own default ports
-	 * are one site, and a port written out that is its scheme's default
-	 * counts as none; another port is another site.
+	 * Whether a URL is on this site: its host and port are the home URL's,
+	 * and its path is under the home URL's path, so on a site in a
+	 * subdirectory, or a subdirectory multisite's subsite, a URL of the same
+	 * host outside it is another site. The scheme is left out, so http and
+	 * https on their own default ports are one site, and a port written out
+	 * that is its scheme's default counts as none; another port is another
+	 * site.
 	 *
 	 * @param string $url URL.
 	 * @return bool
 	 */
 	public static function is_here( string $url ): bool {
-		return self::origin( $url ) === self::origin( home_url() );
+		$home = (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH );
+		$path = trailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) );
+		return self::origin( $url ) === self::origin( home_url() ) && str_starts_with( $path, '' !== $home ? $home : '/' );
 	}
 
 	/**

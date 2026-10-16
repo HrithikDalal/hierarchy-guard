@@ -643,6 +643,33 @@ final class ServerTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_a_query_string_on_the_request_does_not_turn_the_loop_guard_off(): void {
+		$ledger = new Ledger();
+		foreach ( [
+			'old-a' => '/old-b/',
+			'old-b' => '/old-a/',
+		] as $from => $to ) {
+			$holder = self::factory()->post->create(
+				[
+					'post_type' => 'page',
+					'post_name' => 'holder-' . $from,
+				]
+			);
+			$ledger->record( $holder, $from );
+			$ledger->set_target( 'page', $from, $holder, home_url( $to ), 0 );
+		}
+		$post = self::factory()->post->create();
+
+		// url_to_postid() reads ?p=, ?page_id= and ?attachment_id= first: the visitor's query must not count as content at the target.
+		foreach ( [ '?p=' . $post, '?page_id=' . $this->about ] as $query ) {
+			foreach ( [ '/old-a/', '/old-b/' ] as $old ) {
+				$this->go_to( $old . $query );
+				$this->assertTrue( is_404(), 'Precondition: ' . $old . $query . ' is a 404.' );
+				$this->assertNull( $this->server->target_for_current_request(), $old . $query . ' sends nothing.' );
+			}
+		}
+	}
+
 	public function test_a_url_target_on_this_site_at_a_live_page_or_post_is_still_sent(): void {
 		$ledger = new Ledger();
 		$ledger->record( $this->about, 'old-about' );
