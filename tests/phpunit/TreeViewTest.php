@@ -583,6 +583,37 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree' ), Tree_View::place_url( 'page' ) );
 	}
 
+	public function test_the_trash_link_carries_the_tree_s_place_as_core_s_referer(): void {
+		update_user_option( get_current_user_id(), 'edit_page_per_page', 1 );
+		$_GET['paged']               = '3';
+		$_GET['orderby']             = 'title';
+		$_GET['order']               = 'desc';
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['about'];
+		$this->open_levels( [ $this->ids['company'] ], 3, 3 );
+		$link = '<a href="' . esc_url( (string) get_delete_post_link( $this->ids['team'] ) ) . '" class="submitdelete" aria-label="Move “Team” to the Trash">Trash</a>';
+
+		$actions = $this->tree->row_actions( [ 'trash' => $link ], get_post( $this->ids['team'] ) );
+
+		$this->assertMatchesRegularExpression( '/^<a href="[^"]+" class="submitdelete" aria-label="Move “Team” to the Trash">Trash<\/a>$/', $actions['trash'], 'Core’s link, with one more argument.' );
+		preg_match( '/href="([^"]+)"/', $actions['trash'], $href );
+		parse_str( (string) wp_parse_url( html_entity_decode( $href[1] ), PHP_URL_QUERY ), $args );
+		$this->assertSame( 'trash', $args['action'] );
+		$this->assertSame( 1, wp_verify_nonce( $args['_wpnonce'], 'trash-post_' . $this->ids['team'] ) );
+		$this->assertSame( Tree_View::place_url( 'page', $this->ids['about'] ), $args['_wp_http_referer'], 'The same page of top-level pages, opened at the trashed page’s parent.' );
+		$this->assertStringContainsString( 'paged=3', $args['_wp_http_referer'] );
+		$this->assertStringContainsString( 'orderby=title', $args['_wp_http_referer'] );
+	}
+
+	public function test_a_trash_from_a_search_in_the_tree_returns_to_the_search(): void {
+		$_GET['s'] = 'team';
+		$this->tree->load();
+		$link = '<a href="' . esc_url( (string) get_delete_post_link( $this->ids['team'] ) ) . '" class="submitdelete">Trash</a>';
+
+		$actions = apply_filters( 'page_row_actions', [ 'trash' => $link ], get_post( $this->ids['team'] ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own row actions filter.
+
+		$this->assertSame( $link, $actions['trash'], 'Core’s link: the browser’s referrer returns to the results.' );
+	}
+
 	public function test_the_place_keeps_only_the_view_s_own_arguments(): void {
 		$_GET += [
 			'paged'                      => '2',
@@ -596,6 +627,27 @@ final class TreeViewTest extends WP_UnitTestCase {
 
 		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&orderby=title&m=202610&paged=2' ), Tree_View::place_url( 'page' ) );
 		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&orderby=title&m=202610&paged=2&hierarchy_guard_open=5&hierarchy_guard_children_page=2' ), Tree_View::place_url( 'page', 5, 2 ) );
+	}
+
+	public function test_undo_lands_on_the_tree_s_page(): void {
+		$_GET['doaction']        = 'undo';
+		$_SERVER['HTTP_REFERER'] = Tree_View::place_url( 'page', $this->ids['about'] ) . '&paged=3&trashed=1&ids=9';
+		$core                    = admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&hierarchy_guard_open=' . $this->ids['about'] . '&paged=1&untrashed=1' );
+
+		$this->tree->keep_page_on_undo();
+		$location = apply_filters( 'wp_redirect', $core, 302 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own redirect filter.
+
+		$this->assertSame( str_replace( 'paged=1', 'paged=3', $core ), $location, 'Core sets the page from the Undo link, which has none.' );
+	}
+
+	public function test_undo_elsewhere_is_left_to_core(): void {
+		$_GET['doaction']        = 'undo';
+		$_SERVER['HTTP_REFERER'] = admin_url( 'edit.php?post_type=page&paged=3' );
+		$core                    = admin_url( 'edit.php?post_type=page&paged=1' );
+
+		$this->tree->keep_page_on_undo();
+
+		$this->assertSame( $core, apply_filters( 'wp_redirect', $core, 302 ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own redirect filter.
 	}
 
 	public function test_the_controls_keep_the_view_and_leave_what_the_script_needs(): void {

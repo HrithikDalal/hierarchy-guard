@@ -94,6 +94,7 @@ final class Tree_View {
 	 * Hooks the Tree view's pieces into the list screen being loaded.
 	 */
 	public function load(): void {
+		$this->keep_page_on_undo();
 		$type = self::screen_type();
 		if ( ! Post_Types::is_supported( $type ) ) {
 			return;
@@ -110,6 +111,8 @@ final class Tree_View {
 		add_action( 'manage_posts_extra_tablenav', [ $this, 'collapse_all' ] );
 		if ( 'tree' === $mode ) {
 			add_filter( 'admin_body_class', [ $this, 'body_class' ] );
+			// A search's rows are core's, and the browser's referrer already returns to the results.
+			add_filter( 'page_row_actions', [ $this, 'row_actions' ], 20, 2 );
 		}
 	}
 
@@ -289,6 +292,31 @@ final class Tree_View {
 	}
 
 	/**
+	 * The trash link carries the tree's place as core's _wp_http_referer, so
+	 * core's redirect after the trash lands on the same page of top-level
+	 * pages, opened at the trashed page's parent.
+	 *
+	 * @param mixed $actions Row actions.
+	 * @param mixed $post    Post.
+	 * @return mixed
+	 */
+	public function row_actions( $actions, $post ) {
+		if ( ! is_array( $actions ) || ! isset( $actions['trash'] ) || ! $post instanceof WP_Post ) {
+			return $actions;
+		}
+		$row   = $this->row( (int) $post->ID );
+		$place = self::place_url( (string) $post->post_type, null !== $row ? $row['parent'] : 0, null !== $row ? $row['page'] : 1 );
+
+		$actions['trash'] = (string) preg_replace_callback(
+			'/href="([^"]*)"/',
+			static fn( array $href ): string => 'href="' . esc_url( add_query_arg( '_wp_http_referer', rawurlencode( $place ), html_entity_decode( $href[1], ENT_QUOTES, 'UTF-8' ) ) ) . '"',
+			(string) $actions['trash'],
+			1
+		);
+		return $actions;
+	}
+
+	/**
 	 * Keeps the view across Search and the date filter, says where "Back to
 	 * the tree" leads in a search, and leaves what the script needs.
 	 *
@@ -349,6 +377,34 @@ final class Tree_View {
 	 */
 	public function body_class( $classes ) {
 		return is_string( $classes ) ? $classes . ' hierarchy-guard-tree-view ' : $classes;
+	}
+
+	/**
+	 * Undo on core's trash notice redirects to the page it was clicked on,
+	 * but core sets the page number from the Undo request, which has none.
+	 * For the tree, the page number comes back from that referring page.
+	 */
+	public function keep_page_on_undo(): void {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Core checks the bulk-posts nonce before it redirects.
+		if ( ! isset( $_GET['doaction'] ) || 'undo' !== $_GET['doaction'] ) {
+			return;
+		}
+		$referer = wp_get_referer();
+		$query   = is_string( $referer ) ? (string) wp_parse_url( $referer, PHP_URL_QUERY ) : '';
+		parse_str( $query, $args );
+		if ( self::VIEW !== ( $args[ self::QUERY_VAR ] ?? '' ) ) {
+			return;
+		}
+		$paged = absint( $args['paged'] ?? 0 );
+		add_filter(
+			'wp_redirect',
+			static function ( $location ) use ( $paged ) {
+				if ( ! is_string( $location ) ) {
+					return $location;
+				}
+				return $paged > 1 ? add_query_arg( 'paged', $paged, $location ) : remove_query_arg( 'paged', $location );
+			}
+		);
 	}
 
 	/**
