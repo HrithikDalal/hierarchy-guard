@@ -8,18 +8,30 @@ import config from './config';
 const base = () => '/' + config.namespace;
 
 /**
+ * The route of one post's hierarchy.
+ *
+ * @param {number} id      Post ID.
+ * @param {number} page    Page of children.
+ * @param {number} perPage Children per page; the route's own 10 when omitted.
+ * @return {string} Path.
+ */
+export function hierarchyPath( id, page = 1, perPage = 0 ) {
+	return addQueryArgs( `${ base() }/posts/${ id }/hierarchy`, {
+		children_page: page,
+		...( perPage ? { children_per_page: perPage } : {} ),
+	} );
+}
+
+/**
  * The hierarchy of one post.
  *
- * @param {number} id   Post ID.
- * @param {number} page Page of children.
+ * @param {number} id      Post ID.
+ * @param {number} page    Page of children.
+ * @param {number} perPage Children per page; the route's own 10 when omitted.
  * @return {Promise<Object>} Hierarchy.
  */
-export function fetchHierarchy( id, page = 1 ) {
-	return apiFetch( {
-		path: addQueryArgs( `${ base() }/posts/${ id }/hierarchy`, {
-			children_page: page,
-		} ),
-	} );
+export function fetchHierarchy( id, page = 1, perPage = 0 ) {
+	return apiFetch( { path: hierarchyPath( id, page, perPage ) } );
 }
 
 /**

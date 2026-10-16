@@ -159,6 +159,194 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( 13, $second['children_total'] );
 	}
 
+	public function test_the_tree_takes_children_50_at_a_time_and_paging_stops_at_the_cap(): void {
+		for ( $i = 1; $i <= 58; $i++ ) {
+			$this->page( sprintf( 'extra-%02d', $i ), $this->ids['about'] );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+
+		$first  = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data();
+		$second = $this->get(
+			$route,
+			[
+				'children_page'     => 2,
+				'children_per_page' => 50,
+			]
+		)->get_data();
+
+		$this->assertCount( 50, $first['children'] );
+		$this->assertTrue( $first['has_more'] );
+		$this->assertCount( 10, $second['children'] );
+		$this->assertFalse( $second['has_more'] );
+		$this->assertCount( Overview::CHILDREN_PER_PAGE, $this->get( $route )->get_data()['children'], 'Without it, children still come 10 to a page.' );
+		$this->assertSame( 400, $this->get( $route, [ 'children_per_page' => 51 ] )->get_status(), 'At most 50.' );
+
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 55 );
+		$capped = $this->get(
+			$route,
+			[
+				'children_page'     => 2,
+				'children_per_page' => 50,
+			]
+		)->get_data();
+		$this->assertCount( 5, $capped['children'], 'The 51st to the 55th, then the cap.' );
+		$this->assertFalse( $capped['has_more'] );
+		$this->assertTrue( $capped['children_capped'] );
+		$this->assertSame(
+			[],
+			$this->get(
+				$route,
+				[
+					'children_page'     => 3,
+					'children_per_page' => 50,
+				]
+			)->get_data()['children']
+		);
+	}
+
+	public function test_each_child_carries_what_the_list_s_columns_show(): void {
+		$author = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_author' => $author,
+				'post_date'   => '2026-09-02 15:04:00',
+			]
+		);
+		$draft = $this->page( 'press', $this->ids['about'], 'draft' );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'children_per_page' => 50 ] )->get_data()['children'], null, 'id' );
+		$history  = $children[ $this->ids['history'] ];
+
+		$this->assertSame( 'Priya', $history['author'] );
+		$this->assertSame(
+			[
+				'label'  => 'Published',
+				'date'   => '2026/09/02 at 3:04 pm',
+				'missed' => false,
+			],
+			$history['date'],
+			'As core’s Date column words it.'
+		);
+		$this->assertSame( 'Last Modified', $children[ $draft ]['date']['label'] );
+		parse_str( (string) wp_parse_url( $history['trash_link'], PHP_URL_QUERY ), $args );
+		$this->assertSame( 'trash', $args['action'] );
+		$this->assertSame( (string) $this->ids['history'], $args['post'] );
+		$this->assertSame( 1, wp_verify_nonce( $args['_wpnonce'], 'trash-post_' . $this->ids['history'] ), 'A nonce the server made for this user.' );
+		$this->assertStringNotContainsString( '&amp;', $history['trash_link'], 'Sent raw, like every other link.' );
+	}
+
+	public function test_a_scheduled_child_is_dated_as_scheduled(): void {
+		$future = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'future',
+				'post_parent' => $this->ids['about'],
+				'post_date'   => gmdate( 'Y-m-d H:i:s', time() + DAY_IN_SECONDS ),
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Scheduled', $children[ $future ]['date']['label'] );
+	}
+
+	public function test_a_child_past_its_schedule_is_marked_missed(): void {
+		$late = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'future',
+				'post_parent' => $this->ids['about'],
+				'post_date'   => gmdate( 'Y-m-d H:i:s', time() + DAY_IN_SECONDS ),
+			]
+		);
+		// A schedule that cron never ran: still future, dated in the past.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_date' => '2020-01-01 00:00:00' ], [ 'ID' => $late ] );
+		clean_post_cache( $late );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Missed schedule', $children[ $late ]['date']['label'] );
+		$this->assertTrue( $children[ $late ]['date']['missed'], 'Core prints it in its error style.' );
+		$this->assertFalse( $children[ $this->ids['team'] ]['date']['missed'] );
+	}
+
+	public function test_a_private_child_has_the_view_link_core_prints(): void {
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_status' => 'private',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( get_permalink( $this->ids['history'] ), $children[ $this->ids['history'] ]['view_link'] );
+		$this->assertContains( 'Private', $children[ $this->ids['history'] ]['states'] );
+	}
+
+	public function test_each_child_carries_core_s_post_states(): void {
+		update_option( 'show_on_front', 'page' );
+		update_option( 'page_on_front', $this->ids['history'] );
+		wp_update_post(
+			[
+				'ID'            => $this->ids['team'],
+				'post_password' => 'secret',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( [ 'Front Page' ], $children[ $this->ids['history'] ]['states'] );
+		$this->assertSame( [ 'Password protected' ], $children[ $this->ids['team'] ]['states'] );
+		delete_option( 'show_on_front' );
+		delete_option( 'page_on_front' );
+	}
+
+	public function test_a_child_another_user_is_editing_says_who(): void {
+		$other = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $other );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Priya', $children[ $this->ids['team'] ]['locked_by'] );
+		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'] );
+	}
+
+	public function test_a_child_the_user_may_not_trash_has_no_trash_link(): void {
+		$kept = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $kept ): array {
+				return 'delete_post' === $cap && isset( $args[0] ) && $kept === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertNull( $children[ $kept ]['trash_link'] );
+		$this->assertNotNull( $children[ $this->ids['history'] ]['trash_link'] );
+	}
+
+	public function test_the_tree_s_children_need_edit_rights_on_the_page_they_open(): void {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
+
+		$this->assertSame( 403, $this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'children_per_page' => 50 ] )->get_status() );
+	}
+
 	public function test_a_child_the_user_may_not_read_is_left_out(): void {
 		$hidden = $this->ids['history'];
 		add_filter(
