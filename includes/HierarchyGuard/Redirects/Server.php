@@ -88,7 +88,7 @@ final class Server {
 			return null;
 		}
 
-		$request = $this->parse_request( (string) $wp->request );
+		$request = self::parse_request( (string) $wp->request );
 		if ( '' === $request['path'] ) {
 			return null;
 		}
@@ -155,8 +155,8 @@ final class Server {
 		// and /caf%C3%A9/ are one path): on PATH_INFO permalinks $wp->request
 		// omits index.php while the target keeps it. The query string is carried
 		// over, so it is left out of the comparison. A URL target on another
-		// host never loops.
-		$here = null !== $post || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		// host, or another port of this one, never loops.
+		$here = null !== $post || self::is_here( $url );
 		if ( $here && self::same_path( $url, $this->request_uri() ) ) {
 			return null;
 		}
@@ -178,6 +178,46 @@ final class Server {
 	 */
 	public static function same_path( string $url, string $other ): bool {
 		return Paths::normalize( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === Paths::normalize( (string) wp_parse_url( $other, PHP_URL_PATH ) );
+	}
+
+	/**
+	 * Whether a URL is on this site: its host and port are the home URL's.
+	 * The scheme is left out, so http and https on their own default ports
+	 * are one site, and a port written out that is its scheme's default
+	 * counts as none; another port is another site.
+	 *
+	 * @param string $url URL.
+	 * @return bool
+	 */
+	public static function is_here( string $url ): bool {
+		return self::origin( $url ) === self::origin( home_url() );
+	}
+
+	/**
+	 * A URL's host and port, as is_here() compares them: the host in lower
+	 * case, then a colon and the port unless it is the scheme's default.
+	 *
+	 * @param string $url URL.
+	 * @return string
+	 */
+	private static function origin( string $url ): string {
+		$parts   = wp_parse_url( $url );
+		$parts   = is_array( $parts ) ? $parts : [];
+		$port    = (int) ( $parts['port'] ?? 0 );
+		$default = 'https' === strtolower( (string) ( $parts['scheme'] ?? '' ) ) ? 443 : 80;
+		return strtolower( (string) ( $parts['host'] ?? '' ) ) . ( $port > 0 && $port !== $default ? ':' . $port : '' );
+	}
+
+	/**
+	 * The path the server resolves for a request of a URL on this site: the
+	 * home path removed, an index file and the suffixes core appends set
+	 * aside, normalized, as target_for_current_request() reads $wp->request.
+	 *
+	 * @param string $url A URL on this site.
+	 * @return string
+	 */
+	public static function request_path( string $url ): string {
+		return self::parse_request( (string) wp_parse_url( Paths::relative( $url ), PHP_URL_PATH ) )['path'];
 	}
 
 	/**
@@ -241,7 +281,7 @@ final class Server {
 	 * @param string $request Home path removed, slashes trimmed, still percent-encoded.
 	 * @return array{path:string,page:int,paged:int,cpage:int,trackback:bool,feed:string,embed:bool}
 	 */
-	private function parse_request( string $request ): array {
+	private static function parse_request( string $request ): array {
 		global $wp_rewrite;
 
 		$index = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->index : 'index.php';

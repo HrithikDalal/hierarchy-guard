@@ -200,7 +200,9 @@ final class Records {
 	 *   holder is in the Trash, which the resolver passes over;
 	 * - refused: the server can't send it, whether built-in redirects are on
 	 *   or off: a path deeper than its segment cap, which it refuses before
-	 *   it looks; a URL target at the old URL itself, a loop; or a record
+	 *   it looks; a URL target at the old URL itself, a loop; one on this
+	 *   site that other records send back to the old URL, a loop a browser
+	 *   follows for good (cycles()); or a record
 	 *   the rules reach that leads nowhere the server sends, as when the
 	 *   rewritten path is one several posts share and core finds one nobody
 	 *   can view, or the model cannot tell;
@@ -235,6 +237,11 @@ final class Records {
 			$served[ $type ] = Batch_Resolver::served( array_map( 'strval', array_keys( $list ) ), (string) $type, $facts[ $type ], $temporary, $chosen[ $type ], $used[ $type ] );
 		}
 		Batch_Resolver::prime_with_ancestors( array_values( array_filter( array_column( $rows, 'holder' ) ) ) );
+		$targets = [];
+		foreach ( $pretty ? $rows : [] as $row ) {
+			$targets[ $row['id'] ] = [ $row['post_type'], $row['path'], null !== $row['target'] ? $row['target']['url'] : '' ];
+		}
+		$cycles = self::cycles( $targets );
 
 		$out = [];
 		foreach ( $rows as $row ) {
@@ -245,7 +252,7 @@ final class Records {
 			$answer = $served[ $type ][ $path ] ?? 0;
 			$first  = $used[ $type ][ $path ] ?? null;
 			$own    = null !== $first && $first[0] === $path && $first[1] === $row['holder'];
-			$cannot = self::too_deep( $type, $path ) || self::loops( $type, $path, $url );
+			$cannot = self::too_deep( $type, $path ) || self::loops( $type, $path, $url ) || isset( $cycles[ $row['id'] ] );
 			$hidden = $holder instanceof WP_Post && ! self::reachable( $holder, $url );
 			if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
 				// Its own page is why it is not served, whatever else answers its old URL.
@@ -300,12 +307,116 @@ final class Records {
 	 * @return bool
 	 */
 	private static function loops( string $post_type, string $path, string $url ): bool {
-		if ( '' === $url || strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) !== strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) ) {
+		if ( '' === $url || ! Server::is_here( $url ) ) {
 			return false;
 		}
-		// Under plain permalinks, the URL the old path has with pretty ones.
+		return Server::same_path( $url, self::full_old_url( $post_type, $path ) );
+	}
+
+	/**
+	 * A record's old URL in full; under plain permalinks, the URL the old
+	 * path has with pretty ones.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized old path.
+	 * @return string
+	 */
+	private static function full_old_url( string $post_type, string $path ): string {
 		$old = Paths::url( $post_type, $path );
-		return Server::same_path( $url, '' !== $old ? $old : home_url( self::old_url( $post_type, $path ) ) );
+		return '' !== $old ? $old : home_url( self::old_url( $post_type, $path ) );
+	}
+
+	/**
+	 * The records whose URL target on this site leads back to their own old
+	 * URL, so a browser would go round for good: the server sends the
+	 * target's URL on through the records, a URL target to the next URL, as
+	 * its own model tells it (Batch_Resolver::served(), the rules the server
+	 * runs, a 404 check first), for at most Rules::MAX_ROUNDS hops. A hop
+	 * the server answers with a page, or with nothing, or that leaves the
+	 * site, or that the server refuses as a loop of its own, ends the chain.
+	 * One served() call per post type and hop, for these records only.
+	 *
+	 * @param array<string,array{0:string,1:string,2:string}> $targets Post type, old path and URL target, by record ID.
+	 * @return array<string,true> The IDs of the records that loop.
+	 */
+	private static function cycles( array $targets ): array {
+		$home = [];
+		$next = [];
+		foreach ( $targets as $id => [ $type, $path, $url ] ) {
+			if ( '' !== $url && Server::is_here( $url ) ) {
+				$home[ $id ] = Server::request_path( self::full_old_url( $type, $path ) );
+				$next[ $id ] = $url;
+			}
+		}
+		$out  = [];
+		$seen = [];
+		for ( $hop = 0; [] !== $next && $hop < Rules::MAX_ROUNDS; $hop++ ) {
+			$requests = [];
+			foreach ( $next as $id => $url ) {
+				$request = Server::request_path( $url );
+				if ( $hop > 0 && $request === $home[ $id ] ) {
+					// Back at its own old URL, which sends the browser on to its target again.
+					$out[ $id ] = true;
+				} elseif ( '' !== $request && $request !== $home[ $id ] && ! isset( $seen[ $id ][ $request ] ) ) {
+					$seen[ $id ][ $request ] = true;
+					$requests[ $id ]         = $request;
+				}
+			}
+			$sent = self::sent_on( array_values( array_unique( $requests ) ) );
+			$last = $next;
+			$next = [];
+			foreach ( $requests as $id => $request ) {
+				$url = $sent[ $request ] ?? '';
+				// The server never sends a request on to its own path.
+				if ( '' !== $url && Server::is_here( $url ) && ! Server::same_path( $url, $last[ $id ] ) ) {
+					$next[ $id ] = $url;
+				}
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The URL a record's URL target sends each request path on this site
+	 * to, as the server's model tells it: the post types the server tries,
+	 * in its order, the first that answers deciding. A path it answers with
+	 * a page, or that something is shown at, or that nothing answers, maps
+	 * to ''.
+	 *
+	 * @param string[] $requests Request paths, from Server::request_path().
+	 * @return array<string,string> URL by request path.
+	 */
+	private static function sent_on( array $requests ): array {
+		$tries = [];
+		$asks  = [];
+		foreach ( $requests as $request ) {
+			$tries[ $request ] = Server::candidates( $request );
+			foreach ( $tries[ $request ] as [ $type, $path ] ) {
+				$asks[ $type ][ $path ] = true;
+			}
+		}
+		$answers = [];
+		$urls    = [];
+		foreach ( $asks as $type => $paths ) {
+			$facts            = [];
+			$temporary        = null;
+			$chosen           = null;
+			$answers[ $type ] = Batch_Resolver::served( array_map( 'strval', array_keys( $paths ) ), (string) $type, $facts, $temporary, $chosen );
+			$urls[ $type ]    = $chosen;
+		}
+		$out = [];
+		foreach ( $tries as $request => $list ) {
+			$out[ (string) $request ] = '';
+			foreach ( $list as [ $type, $path ] ) {
+				$answer = $answers[ $type ][ $path ] ?? 0;
+				if ( 0 === $answer ) {
+					continue;
+				}
+				$out[ (string) $request ] = Batch_Resolver::URL === $answer ? (string) ( $urls[ $type ][ $path ]['url'] ?? '' ) : '';
+				break;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -362,8 +473,9 @@ final class Records {
 	 * its old holder, and its code goes with it. The holder's own URL makes it
 	 * a page target again. Any other http(s) URL with a host makes a URL
 	 * target, stored beside the record, unless it is the old URL itself,
-	 * which the server would refuse as a loop. Anything else is refused and
-	 * nothing is written.
+	 * which the server would refuse as a loop, or a URL on this site that
+	 * other records send back to the old URL, a loop a browser would follow
+	 * for good. Anything else is refused and nothing is written.
 	 *
 	 * @param array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null} $record Record from find().
 	 * @param string $url  The URL or path entered.
@@ -409,6 +521,10 @@ final class Records {
 			// The server refuses a redirect to the URL being requested, as a loop.
 			if ( self::loops( $type, $path, $clean ) ) {
 				return new WP_Error( 'hierarchy_guard_own_url', __( 'That URL is the old URL itself.', 'hierarchy-guard' ) );
+			}
+			// One it sends on through other records, back to this old URL, a browser follows for good.
+			if ( [] !== self::cycles( [ $record['id'] => [ $type, $path, $clean ] ] ) ) {
+				return new WP_Error( 'hierarchy_guard_loop', __( 'That URL redirects back to the old URL.', 'hierarchy-guard' ) );
 			}
 			// Another type's page, or any other URL: the record stays where it is.
 			$this->ledger->set_target( $type, $path, $record['holder'], $clean, $code );

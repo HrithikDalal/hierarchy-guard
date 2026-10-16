@@ -604,6 +604,24 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( 'https://other.example.org/old-about/', $this->server->target_for_current_request()['url'], 'The same path on another host does not.' );
 	}
 
+	public function test_a_url_target_on_another_port_is_sent_and_the_other_scheme_still_loops(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$host = (string) wp_parse_url( home_url(), PHP_URL_HOST );
+		$port = wp_parse_url( home_url(), PHP_URL_PORT );
+		$this->go_to( '/old-about/' );
+
+		// The other scheme, and the home URL's own port written out.
+		foreach ( [ set_url_scheme( home_url( '/old-about/' ), 'https' ), 'http://' . $host . ':' . ( $port ?? 80 ) . '/old-about/' ] as $url ) {
+			$ledger->set_target( 'page', 'old-about', $this->about, $url, 0 );
+			$this->assertNull( $this->server->target_for_current_request(), $url . ' is this site: that would loop.' );
+		}
+
+		$other = 'http://' . $host . ':' . ( 8080 === $port ? 8081 : 8080 ) . '/old-about/';
+		$ledger->set_target( 'page', 'old-about', $this->about, $other, 0 );
+		$this->assertSame( $other, $this->server->target_for_current_request()['url'] ?? null, 'Another port is another site.' );
+	}
+
 	public function test_a_url_target_at_the_requested_path_in_another_script_is_not_sent(): void {
 		$ledger = new Ledger();
 		$ledger->record( $this->about, 'café' );

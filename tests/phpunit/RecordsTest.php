@@ -567,6 +567,86 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertNull( $this->ledger->target( 'page', 'caf%c3%a9', $this->ids['team'] ) );
 	}
 
+	public function test_a_url_target_on_another_port_is_saved_and_the_other_scheme_is_the_old_url_itself(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+		$host   = (string) wp_parse_url( home_url(), PHP_URL_HOST );
+		$port   = wp_parse_url( home_url(), PHP_URL_PORT );
+
+		// The other scheme, and the home URL's own port written out.
+		foreach ( [ set_url_scheme( home_url( '/old-about/' ), 'https' ), 'http://' . $host . ':' . ( $port ?? 80 ) . '/old-about/' ] as $value ) {
+			$result = $this->records->save( $record, $value, 0 );
+			$this->assertInstanceOf( WP_Error::class, $result, $value . ' is this site.' );
+			$this->assertSame( 'hierarchy_guard_own_url', $result->get_error_code(), $value );
+		}
+
+		$other = 'http://' . $host . ':' . ( 8080 === $port ? 8081 : 8080 ) . '/old-about/';
+		$this->assertTrue( $this->records->save( $record, $other, 0 ), 'Another port is another site.' );
+		$this->assertSame( $other, $this->served_at( '/old-about/' )['url'] ?? null, 'The server agrees.' );
+		$this->assertSame( [ '/old-about/' => Records::STATUS_ACTIVE ], $this->statuses_by_old() );
+	}
+
+	public function test_url_targets_on_this_site_that_lead_back_to_the_old_url_are_refused(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['about'], 'old-a' );
+		$this->ledger->record( $this->ids['team'], 'old-b' );
+		$this->ledger->record( $this->ids['history'], 'old-c' );
+		$find = fn( int $holder, string $path ): array => $this->records->find( Records::id( $holder, 'page', $path ) );
+
+		$this->assertTrue( $this->records->save( $find( $this->ids['about'], 'old-a' ), '/old-b/', 0 ) );
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+		$result = $this->records->save( $find( $this->ids['team'], 'old-b' ), '/old-a/', 0 );
+		$this->assertInstanceOf( WP_Error::class, $result, 'Two records that send each other on.' );
+		$this->assertSame( 'hierarchy_guard_loop', $result->get_error_code() );
+		$this->assertSame( 'That URL redirects back to the old URL.', $result->get_error_message() );
+		$this->assertNull( $this->ledger->target( 'page', 'old-b', $this->ids['team'] ), 'Nothing written.' );
+		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+
+		$this->assertTrue( $this->records->save( $find( $this->ids['team'], 'old-b' ), '/old-c/', 302 ) );
+		$result = $this->records->save( $find( $this->ids['history'], 'old-c' ), home_url( '/old-a/?from=edit' ), 0 );
+		$this->assertInstanceOf( WP_Error::class, $result, 'Three records that send each other on.' );
+		$this->assertSame( 'hierarchy_guard_loop', $result->get_error_code() );
+		$this->assertNull( $this->ledger->target( 'page', 'old-c', $this->ids['history'] ) );
+
+		$this->assertTrue( $this->records->save( $find( $this->ids['history'], 'old-c' ), '/elsewhere/', 0 ), 'A chain that ends somewhere else is no loop.' );
+		$this->assertTrue( $this->records->save( $find( $this->ids['history'], 'old-c' ), 'https://example.net/old-a/', 0 ), 'Nor one that leaves the site.' );
+	}
+
+	public function test_url_targets_on_this_site_that_lead_back_to_the_old_url_never_read_active(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		// Written straight into the ledger, as before the Edit view refused them.
+		foreach ( [
+			'old-a' => 'old-b',
+			'old-b' => 'old-a',
+			'tri-1' => 'tri-2',
+			'tri-2' => 'tri-3',
+			'tri-3' => 'tri-1',
+		] as $from => $to ) {
+			$holder = $this->page( 'holder-' . $from );
+			$this->ledger->record( $holder, $from );
+			$this->ledger->set_target( 'page', $from, $holder, home_url( '/' . $to . '/' ), 0 );
+		}
+		$this->ledger->record( $this->ids['team'], 'old-crew' );
+		$this->ledger->set_target( 'page', 'old-crew', $this->ids['team'], home_url( '/company/' ), 0 );
+		wp_cache_flush();
+
+		$this->assertSame( home_url( '/old-a/' ), $this->served_at( '/old-b/' )['url'] ?? null, 'Precondition: the server sends each one on, so a browser goes round for good.' );
+		$this->assertSame( home_url( '/old-b/' ), $this->served_at( '/old-a/' )['url'] ?? null );
+		$this->assertSame( home_url( '/tri-1/' ), $this->served_at( '/tri-3/' )['url'] ?? null );
+		$this->assertSame(
+			[
+				'/old-a/'    => Records::STATUS_REFUSED,
+				'/old-b/'    => Records::STATUS_REFUSED,
+				'/old-crew/' => Records::STATUS_ACTIVE,
+				'/tri-1/'    => Records::STATUS_REFUSED,
+				'/tri-2/'    => Records::STATUS_REFUSED,
+				'/tri-3/'    => Records::STATUS_REFUSED,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
 	public function test_an_http_url_with_no_host_is_refused(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
 		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
