@@ -106,6 +106,8 @@ final class Tree_View {
 		add_filter( "manage_{$type}_posts_columns", [ $this, 'columns' ], 20 );
 		add_filter( "bulk_actions-edit-{$type}", [ $this, 'bulk_actions' ] );
 		add_filter( 'quick_edit_enabled_for_post_type', '__return_false' );
+		add_action( 'restrict_manage_posts', [ $this, 'controls' ], 10, 2 );
+		add_action( 'manage_posts_extra_tablenav', [ $this, 'collapse_all' ] );
 		if ( 'tree' === $mode ) {
 			add_filter( 'admin_body_class', [ $this, 'body_class' ] );
 		}
@@ -284,6 +286,59 @@ final class Tree_View {
 	 */
 	public function bulk_actions(): array {
 		return [];
+	}
+
+	/**
+	 * Keeps the view across Search and the date filter, says where "Back to
+	 * the tree" leads in a search, and leaves what the script needs.
+	 *
+	 * @param mixed $post_type Post type of the list.
+	 * @param mixed $which     Which table navigation, top or bottom.
+	 */
+	public function controls( $post_type, $which = 'top' ): void {
+		$type = (string) $post_type;
+		$mode = $this->mode( $type );
+		if ( 'top' !== $which || '' === $mode ) {
+			return;
+		}
+		/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
+		do_action( 'hierarchy_guard_list_script' );
+
+		printf( '<input type="hidden" name="%1$s" value="%2$s">', esc_attr( self::QUERY_VAR ), esc_attr( self::VIEW ) );
+		if ( 'search' === $mode ) {
+			printf( '<span class="hierarchy-guard-back"><a href="%1$s">%2$s</a></span>', esc_url( self::url( $type ) ), esc_html__( 'Back to the tree', 'hierarchy-guard' ) );
+			return;
+		}
+
+		global $wp_query;
+		$per_page = List_Table::per_page( $type );
+		$paged    = $wp_query instanceof WP_Query ? max( 1, (int) $wp_query->get( 'paged' ) ) : 1;
+		printf(
+			'<span class="hierarchy-guard-tree" hidden data-type="%1$s" data-place="%2$s" data-total="%3$d" data-start="%4$d" data-per-page="%5$d"></span>',
+			esc_attr( $type ),
+			esc_url( self::place_url( $type ) ),
+			$wp_query instanceof WP_Query ? (int) $wp_query->found_posts : 0,
+			(int) ( ( $paged - 1 ) * $per_page ),
+			(int) self::PER_PAGE
+		);
+	}
+
+	/**
+	 * "Collapse all" above the tree: a link that reloads the view with nothing
+	 * opened, which the script turns into a button that needs no request.
+	 *
+	 * @param mixed $which Which table navigation, top or bottom.
+	 */
+	public function collapse_all( $which ): void {
+		$type = self::screen_type();
+		if ( 'top' !== $which || 'tree' !== $this->mode( $type ) ) {
+			return;
+		}
+		printf(
+			'<div class="alignleft actions"><a class="hierarchy-guard-collapse" href="%1$s">%2$s</a></div>',
+			esc_url( self::place_url( $type ) ),
+			esc_html__( 'Collapse all', 'hierarchy-guard' )
+		);
 	}
 
 	/**

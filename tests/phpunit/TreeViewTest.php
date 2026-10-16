@@ -597,4 +597,44 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&orderby=title&m=202610&paged=2' ), Tree_View::place_url( 'page' ) );
 		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&orderby=title&m=202610&paged=2&hierarchy_guard_open=5&hierarchy_guard_children_page=2' ), Tree_View::place_url( 'page', 5, 2 ) );
 	}
+
+	public function test_the_controls_keep_the_view_and_leave_what_the_script_needs(): void {
+		$asked = 0;
+		add_action(
+			'hierarchy_guard_list_script',
+			static function () use ( &$asked ): void {
+				++$asked;
+			}
+		);
+		$GLOBALS['wp_query'] = $this->list_query();
+
+		ob_start();
+		$this->tree->controls( 'page', 'top' );
+		$this->tree->collapse_all( 'top' );
+		$html = (string) ob_get_clean();
+
+		$this->assertSame( 1, $asked, 'The Tree view always loads the list-table script.' );
+		$this->assertStringContainsString( '<input type="hidden" name="hierarchy_guard_view" value="tree">', $html, 'Search and the date filter stay in the tree.' );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-tree" hidden data-type="page" data-place="' . esc_url( Tree_View::place_url( 'page' ) ) . '" data-total="1" data-start="0" data-per-page="50"></span>', $html );
+		$this->assertStringContainsString( '<a class="hierarchy-guard-collapse" href="' . esc_url( Tree_View::place_url( 'page' ) ) . '">Collapse all</a>', $html );
+
+		ob_start();
+		$this->tree->controls( 'page', 'bottom' );
+		$this->tree->collapse_all( 'bottom' );
+		$this->assertSame( '', (string) ob_get_clean(), 'Printed once, above the table.' );
+	}
+
+	public function test_a_search_offers_back_to_the_tree_and_no_collapse_all(): void {
+		$_GET['s'] = 'team';
+
+		ob_start();
+		$this->tree->controls( 'page', 'top' );
+		$this->tree->collapse_all( 'top' );
+		$html = (string) ob_get_clean();
+
+		$this->assertStringContainsString( '<input type="hidden" name="hierarchy_guard_view" value="tree">', $html, 'A search refined from the results stays in the tree.' );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-back"><a href="' . esc_url( Tree_View::url( 'page' ) ) . '">Back to the tree</a></span>', $html );
+		$this->assertStringNotContainsString( 'hierarchy-guard-collapse', $html );
+		$this->assertStringNotContainsString( 'class="hierarchy-guard-tree"', $html );
+	}
 }

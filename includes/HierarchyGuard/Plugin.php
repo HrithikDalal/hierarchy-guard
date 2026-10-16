@@ -82,8 +82,9 @@ final class Plugin {
 		$pairs    = new Redirects\Pairs();
 		$overview = new Overview( $providers, $log );
 		( new Admin\Notices( $log, $queue, $pairs, $providers ) )->register();
-		( new Admin\Tree_View() )->register();
-		( new Admin\List_Table() )->register();
+		$tree = new Admin\Tree_View();
+		$tree->register();
+		( new Admin\List_Table( $tree ) )->register();
 		( new REST\Hierarchy_Controller( $overview ) )->register();
 		( new REST\Csv_Download() )->register();
 		( new Admin\Trash_Choice() )->register();
