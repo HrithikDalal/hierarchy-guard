@@ -1162,8 +1162,8 @@ final class LedgerTest extends WP_UnitTestCase {
 			return false;
 		};
 
-		$this->assertTrue( $hooked( 'before_delete_post', PHP_INT_MAX, 'on_delete_post' ), 'Last on before_delete_post: core fires delete_post after the meta is gone.' );
-		$this->assertTrue( $hooked( 'deleted_post', 10, 'on_deleted_post' ) );
+		$this->assertTrue( $hooked( 'before_delete_post', PHP_INT_MIN, 'begin_delete' ), 'First on before_delete_post, before core deletes the meta and before other handlers move paths off the post.' );
+		$this->assertTrue( $hooked( 'delete_post', PHP_INT_MAX, 'end_delete' ), 'Last on delete_post, once the meta is gone.' );
 	}
 
 	public function test_deleting_a_holder_reads_and_writes_the_newest_list_once_however_many_entries_it_holds(): void {
@@ -1203,6 +1203,46 @@ final class LedgerTest extends WP_UnitTestCase {
 			$this->assertNotNull( $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_id = %d", $id ) ), 'The deleted page’s entries left the list.' );
 		}
 		return $listed - $other;
+	}
+
+	public function test_deleting_a_holder_with_subpages_writes_the_newest_list_once(): void {
+		foreach ( [ 5, 30 ] as $entries ) {
+			$holder = self::factory()->post->create(
+				[
+					'post_type'   => 'page',
+					'post_name'   => 'holder-' . $entries,
+					'post_parent' => $this->about,
+				]
+			);
+			self::factory()->post->create(
+				[
+					'post_type'   => 'page',
+					'post_name'   => 'kid-' . $entries,
+					'post_parent' => $holder,
+				]
+			);
+			for ( $i = 1; $i <= $entries; $i++ ) {
+				$this->ledger->record( $holder, 'gone-' . $entries . '-' . $i );
+			}
+
+			$writes = 0;
+			$count  = static function ( string $query ) use ( &$writes ): string {
+				if ( 1 === preg_match( '/^\s*(UPDATE|INSERT)\b/i', $query ) && str_contains( $query, Ledger::RECENT ) ) {
+					++$writes;
+				}
+				return $query;
+			};
+			add_filter( 'query', $count );
+			wp_delete_post( $holder, true );
+			remove_filter( 'query', $count );
+
+			$this->assertSame( 1, $writes, $entries . ' entries: the holder’s entries leave the list and the paths moved to its parent join it in one write.' );
+			$this->assertNotEmpty( $this->ledger->paths_for( $this->about ), 'Precondition: its paths moved to the parent, for its subpage.' );
+			foreach ( $this->ledger->recent( [ 'page' ] )['ids'] as $id ) {
+				$this->assertNotNull( get_metadata_by_mid( 'post', $id ), 'Every listed entry exists.' );
+			}
+			$this->assertContains( $this->meta_id( $this->about, 'about/holder-' . $entries ), $this->ledger->recent( [ 'page' ] )['ids'], 'The holder’s own path, now on its parent, is listed.' );
+		}
 	}
 
 	public function test_the_merge_back_writes_the_list_again_when_another_request_deleted_its_row(): void {

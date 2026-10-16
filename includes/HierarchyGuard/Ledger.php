@@ -55,12 +55,21 @@ final class Ledger {
 	private static array $recent_pending = [];
 
 	/**
-	 * Posts being deleted for good, from before_delete_post to deleted_post:
-	 * their entries left the newest-records list at once.
+	 * Posts being deleted for good, from before_delete_post to delete_post:
+	 * the meta IDs of their entries, which leave the newest-records list
+	 * together when the delete is done.
 	 *
-	 * @var array<int,true>
+	 * @var array<int,int[]>
 	 */
 	private static array $deleting = [];
+
+	/**
+	 * Entries deleted inside deferred() or a delete, meta IDs: they leave the
+	 * newest-records list in its one write at the end.
+	 *
+	 * @var int[]
+	 */
+	private static array $recent_gone = [];
 
 	/**
 	 * Meta key for a (post type, path) pair.
@@ -296,17 +305,27 @@ final class Ledger {
 			return $callback();
 		} finally {
 			--self::$defer_depth;
-			if ( 0 === self::$defer_depth && [] !== self::$recent_pending ) {
-				$pending              = self::$recent_pending;
-				self::$recent_pending = [];
-				foreach ( $pending as $type => $ids ) {
-					self::remember( (string) $type, $ids );
-				}
-			}
-			if ( 0 === self::$defer_depth && self::$bump_pending ) {
-				self::$bump_pending = false;
-				wp_cache_set_last_changed( self::CACHE_GROUP );
-			}
+			self::settle();
+		}
+	}
+
+	/**
+	 * Once no deferral is open: writes the newest-records list once, with
+	 * the entries recorded and without those deleted meanwhile, and
+	 * invalidates cached lookups if anything was written.
+	 */
+	private static function settle(): void {
+		if ( self::$defer_depth > 0 ) {
+			return;
+		}
+		$pending              = self::$recent_pending;
+		$gone                 = self::$recent_gone;
+		self::$recent_pending = [];
+		self::$recent_gone    = [];
+		self::write_recent( $pending, $gone );
+		if ( self::$bump_pending ) {
+			self::$bump_pending = false;
+			wp_cache_set_last_changed( self::CACHE_GROUP );
 		}
 	}
 
@@ -866,7 +885,8 @@ final class Ledger {
 	 * Takes entries out of the newest-records list when their rows are
 	 * deleted, by forget(), prune() or claim(): hooked on deleted_post_meta.
 	 * Other keys cost a prefix check. The rows of a post being deleted for
-	 * good left the list already, all at once (on_delete_post()).
+	 * good leave the list all at once, when the delete is done
+	 * (begin_delete(), end_delete()).
 	 *
 	 * @param int[]  $meta_ids  Meta IDs deleted.
 	 * @param int    $object_id Post ID.
@@ -880,50 +900,61 @@ final class Ledger {
 	}
 
 	/**
-	 * Takes a supported post's entries out of the newest-records list at
-	 * once when it is deleted for good: hooked on before_delete_post, last,
-	 * which runs before core deletes the post's meta one row at a time (core
-	 * fires delete_post only after that). One query for the post's entry
-	 * IDs, and the list read and written once whatever their number, rather
-	 * than once per row; on_deleted_meta() then passes over the post's rows
-	 * until deleted_post.
+	 * Starts deleting a supported post for good, first on
+	 * before_delete_post, which runs before core deletes the post's meta one
+	 * row at a time: reads the post's entry IDs in one query and opens a
+	 * deferral, so the paths other handlers move off the post meanwhile, to
+	 * its parent or the root list, and its own entries leaving, reach the
+	 * newest-records list in one write when end_delete() closes it.
+	 * on_deleted_meta() passes over the post's rows until then.
 	 *
 	 * @param int          $post_id Post ID.
 	 * @param WP_Post|null $post    The post.
 	 */
-	public static function on_delete_post( $post_id, $post = null ): void {
+	public static function begin_delete( $post_id, $post = null ): void {
 		global $wpdb;
 
 		$post_id = (int) $post_id;
-		if ( ! $post instanceof WP_Post || ! Post_Types::is_supported( (string) $post->post_type ) ) {
+		if ( ! $post instanceof WP_Post || ! Post_Types::is_supported( (string) $post->post_type ) || isset( self::$deleting[ $post_id ] ) ) {
 			return;
 		}
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the post_id index, once per post deleted for good.
 		$ids = (array) $wpdb->get_col( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s", $post_id, $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
 
-		self::$deleting[ $post_id ] = true;
-		if ( [] !== $ids ) {
-			self::drop_recent( array_map( 'intval', $ids ) );
-		}
+		self::$deleting[ $post_id ] = array_map( 'intval', $ids );
+		++self::$defer_depth;
 	}
 
 	/**
-	 * Ends what on_delete_post() began, on deleted_post.
+	 * Ends what begin_delete() began, last on delete_post, which core fires
+	 * once the post's meta is gone and before the post's row is: the
+	 * post's entries leave the list, and the list is written once.
 	 *
 	 * @param int $post_id Post ID.
 	 */
-	public static function on_deleted_post( $post_id ): void {
-		unset( self::$deleting[ (int) $post_id ] );
+	public static function end_delete( $post_id ): void {
+		$post_id = (int) $post_id;
+		if ( ! isset( self::$deleting[ $post_id ] ) ) {
+			return;
+		}
+		$gone = self::$deleting[ $post_id ];
+		unset( self::$deleting[ $post_id ] );
+		self::drop_recent( $gone );
+		--self::$defer_depth;
+		self::settle();
 	}
 
 	/**
 	 * Takes deleted entries out of the newest-records list: from what
-	 * deferred() holds, and, when the list names any, from the list as the
-	 * database holds it, written once.
+	 * deferred() holds; then, inside a deferral or a delete, at its one
+	 * write at the end, and otherwise now, when the list names any.
 	 *
 	 * @param int[] $meta_ids Meta IDs of the entries deleted.
 	 */
 	private static function drop_recent( array $meta_ids ): void {
+		if ( [] === $meta_ids ) {
+			return;
+		}
 		$gone = array_flip( $meta_ids );
 
 		// Entries recorded inside deferred() wait in memory: a row deleted in the same batch never reaches the list.
@@ -933,17 +964,27 @@ final class Ledger {
 				unset( self::$recent_pending[ $type ] );
 			}
 		}
-
-		// Most deletes name no entry the list holds: one cached read.
-		$listed = get_option( self::RECENT, [] );
-		$named  = false;
-		foreach ( is_array( $listed ) ? $listed : [] as $list ) {
-			if ( [] !== array_intersect_key( array_flip( array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ), $gone ) ) {
-				$named = true;
-				break;
-			}
+		if ( self::$defer_depth > 0 ) {
+			self::$recent_gone = array_merge( self::$recent_gone, $meta_ids );
+			return;
 		}
-		if ( ! $named ) {
+		self::write_recent( [], $meta_ids );
+	}
+
+	/**
+	 * Writes the newest-records list once: entries just recorded go first
+	 * on their type's list, at most Subtree::count_cap() kept, and deleted
+	 * ones leave it. With only deletes, nothing is read past the cache or
+	 * written unless the list names one. A full list that deletes leave
+	 * short has the rebuild brought forward, quietly: the tab says nothing
+	 * for it.
+	 *
+	 * @param array<string,int[]> $pending Meta IDs recorded, by post type, oldest first.
+	 * @param int[]               $gone    Meta IDs deleted.
+	 */
+	private static function write_recent( array $pending, array $gone ): void {
+		$gone = array_flip( array_map( 'intval', $gone ) );
+		if ( [] === $pending && ( [] === $gone || ! self::names_any( $gone ) ) ) {
 			return;
 		}
 
@@ -952,7 +993,18 @@ final class Ledger {
 		$supported = Post_Types::supported();
 		$changed   = false;
 		$short     = false;
-		foreach ( $all as $type => $list ) {
+		foreach ( $pending as $type => $meta_ids ) {
+			$list = is_array( $all[ $type ] ?? null ) ? $all[ $type ] : [];
+			$ids  = array_values( array_unique( array_merge( array_map( 'intval', $meta_ids ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
+			// Newest first, so the cap's slice keeps the newest entries whatever order the list was in.
+			rsort( $ids );
+			$all[ $type ] = [
+				'ids'  => array_slice( $ids, 0, $cap ),
+				'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
+			];
+			$changed      = true;
+		}
+		foreach ( [] !== $gone ? $all : [] as $type => $list ) {
 			$had  = array_map( 'intval', (array) ( $list['ids'] ?? [] ) );
 			$left = array_values( array_filter( $had, static fn( int $id ): bool => ! isset( $gone[ $id ] ) ) );
 			if ( count( $left ) !== count( $had ) ) {
@@ -964,10 +1016,26 @@ final class Ledger {
 		if ( $changed ) {
 			update_option( self::RECENT, $all, false );
 		}
-		// Older entries the full list left out are read back in by the next cron run, quietly: the tab says nothing for it.
 		if ( $short ) {
 			self::rebuild_soon();
 		}
+	}
+
+	/**
+	 * Whether the newest-records list, as this request caches it, names any
+	 * of these meta IDs: most deletes name none, for one cached read.
+	 *
+	 * @param array<int,mixed> $gone Meta IDs, as keys.
+	 * @return bool
+	 */
+	private static function names_any( array $gone ): bool {
+		$listed = get_option( self::RECENT, [] );
+		foreach ( is_array( $listed ) ? $listed : [] as $list ) {
+			if ( [] !== array_intersect_key( array_flip( array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ), $gone ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -1016,18 +1084,7 @@ final class Ledger {
 			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
 			return;
 		}
-		$all  = self::fresh_recent();
-		$list = is_array( $all[ $post_type ] ?? null ) ? $all[ $post_type ] : [];
-		$ids  = array_values( array_unique( array_merge( array_map( 'intval', $meta_ids ), array_map( 'intval', (array) ( $list['ids'] ?? [] ) ) ) ) );
-		// Newest first, so the cap's slice keeps the newest entries whatever order the list was in.
-		rsort( $ids );
-		$cap = Subtree::count_cap();
-
-		$all[ $post_type ] = [
-			'ids'  => array_slice( $ids, 0, $cap ),
-			'more' => ! empty( $list['more'] ) || count( $ids ) > $cap,
-		];
-		update_option( self::RECENT, $all, false );
+		self::write_recent( [ $post_type => $meta_ids ], [] );
 	}
 
 	/**
