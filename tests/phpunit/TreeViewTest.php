@@ -89,6 +89,39 @@ final class TreeViewTest extends WP_UnitTestCase {
 		return $GLOBALS['wp_query'];
 	}
 
+	/**
+	 * Hands this test's view a page of top-level rows, as core's main query holds them.
+	 *
+	 * @param int[] $ids   Top-level post IDs on the page.
+	 * @param int   $total Core's item count.
+	 * @param int   $paged Page number.
+	 * @return array<int,mixed> The rows core prints.
+	 */
+	private function open_levels( array $ids, int $total, int $paged = 1 ): array {
+		$query = new WP_Query();
+		$query->set( 'post_type', 'page' );
+		$query->set( 'paged', $paged );
+		$query->found_posts      = $total;
+		$GLOBALS['wp_the_query'] = $query;
+		return (array) $this->tree->open_levels( array_map( 'get_post', $ids ), $query );
+	}
+
+	/**
+	 * Gives a page many subpages, named so they sort in creation order.
+	 *
+	 * @param int    $parent_id Parent page.
+	 * @param int    $count     How many.
+	 * @param string $prefix    Slug and title prefix.
+	 * @return int[] Their IDs, in menu order then title.
+	 */
+	private function subpages( int $parent_id, int $count, string $prefix = 'sub' ): array {
+		$ids = [];
+		for ( $i = 1; $i <= $count; $i++ ) {
+			$ids[] = $this->page( sprintf( '%s-%03d', $prefix, $i ), $parent_id );
+		}
+		return $ids;
+	}
+
 	public function test_the_view_is_the_tree_only_when_asked_on_a_supported_list(): void {
 		$this->assertSame( 'tree', $this->tree->mode( 'page' ) );
 
@@ -286,7 +319,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 	public function test_the_plugin_hooks_the_view_into_core(): void {
 		global $wp_filter;
 		$found = [];
-		foreach ( [ 'request', 'load-edit.php' ] as $hook ) {
+		foreach ( [ 'request', 'the_posts', 'load-edit.php' ] as $hook ) {
 			foreach ( $wp_filter[ $hook ]->callbacks[10] ?? [] as $callback ) {
 				if ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Tree_View ) {
 					$found[] = $hook;
@@ -294,6 +327,225 @@ final class TreeViewTest extends WP_UnitTestCase {
 			}
 		}
 
-		$this->assertSame( [ 'request', 'load-edit.php' ], $found );
+		$this->assertSame( [ 'request', 'the_posts', 'load-edit.php' ], $found );
+	}
+
+	public function test_without_an_opened_page_the_rows_are_core_s_with_their_places(): void {
+		$rows = $this->open_levels( [ $this->ids['company'] ], 7, 2 );
+
+		$this->assertSame( [ $this->ids['company'] ], wp_list_pluck( $rows, 'ID' ) );
+		$this->assertSame(
+			[
+				'level'    => 0,
+				'parent'   => 0,
+				'position' => 21,
+				'setsize'  => 7,
+				'page'     => 1,
+				'open'     => false,
+				'shown'    => 0,
+				'more'     => false,
+				'capped'   => false,
+			],
+			$this->tree->row( $this->ids['company'] ),
+			'Page 2 of 20 a page starts at 21; the size is core’s item count.'
+		);
+	}
+
+	public function test_an_opened_page_s_levels_follow_their_parents_in_core_s_results(): void {
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+		$lonely                      = $this->page( 'lonely' );
+
+		$rows = $this->open_levels( [ $this->ids['company'], $lonely ], 2 );
+
+		$this->assertSame(
+			[ 'company', 'about', 'team', 'leadership', 'lonely' ],
+			wp_list_pluck( $rows, 'post_name' ),
+			'The levels above the opened page show only the path down to it: History, beside Team, is left out.'
+		);
+		$this->assertTrue( $this->tree->row( $this->ids['about'] )['open'] );
+		$this->assertSame( 3, $this->tree->row( $this->ids['leadership'] )['level'], 'Leadership sits three levels down.' );
+		$this->assertSame( $this->ids['team'], $this->tree->row( $this->ids['leadership'] )['parent'] );
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['position'], 'History, then Team.' );
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['setsize'] );
+		$this->assertSame( 2, $this->tree->row( $lonely )['position'], 'The top level keeps its places around the opened levels.' );
+	}
+
+	public function test_core_prints_the_opened_levels_with_its_own_level_class(): void {
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['about'];
+
+		$query = $this->list_query();
+
+		$this->assertSame( [ 'company', 'about', 'history', 'team' ], wp_list_pluck( $query->posts, 'post_name' ) );
+		$this->assertSame( 4, $query->post_count );
+		$this->assertSame( 1, (int) $query->found_posts, 'Core still counts and pages only the top level.' );
+		$this->assertContains( 'level-2', get_post_class( 'level-' . count( get_post_ancestors( $this->ids['team'] ) ), $this->ids['team'] ) );
+	}
+
+	public function test_each_level_above_shows_only_the_page_that_leads_down_however_far_in_it_is(): void {
+		$many = $this->subpages( $this->ids['about'], 58 );
+		// About's subpages sort as history, sub-001 … sub-058, team: team is the 60th, on page 2.
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		$this->assertSame( [ 'company', 'about', 'team', 'leadership' ], wp_list_pluck( $rows, 'post_name' ), 'The depth plus one page of the opened page’s subpages, never 50 rows a level.' );
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['page'], 'A trash from Team comes back to About’s page 2.' );
+		$this->assertSame( 60, $this->tree->row( $this->ids['team'] )['position'] );
+		$this->assertSame( 60, $this->tree->row( $this->ids['team'] )['setsize'] );
+		$this->assertTrue( $this->tree->row( $this->ids['about'] )['open'] );
+		$this->assertFalse( $this->tree->row( $this->ids['about'] )['more'], 'A level on the path has no Show more.' );
+		$this->assertNotContains( $many[0], wp_list_pluck( $rows, 'ID' ) );
+	}
+
+	public function test_a_deep_opened_page_costs_its_depth_plus_one_page(): void {
+		$parent = $this->ids['leadership'];
+		$chain  = [];
+		for ( $depth = 1; $depth <= 8; $depth++ ) {
+			$this->subpages( $parent, 3, "side{$depth}" );
+			$parent  = $this->page( "deep-{$depth}", $parent );
+			$chain[] = $parent;
+		}
+		$this->subpages( $parent, 60, 'leaf' );
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $parent;
+
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		// Company, About, Team, Leadership, the eight deep pages, then 50 of the 60 leaves.
+		$this->assertCount( 4 + 8 + 50, $rows );
+		$this->assertSame( array_slice( $chain, 0, 7 ), array_slice( wp_list_pluck( $rows, 'ID' ), 4, 7 ) );
+		$this->assertSame( 12, $this->tree->row( (int) $rows[ count( $rows ) - 1 ]->ID )['level'] );
+	}
+
+	public function test_the_opened_page_shows_the_children_page_it_asks_for_and_says_when_more_follow(): void {
+		$this->subpages( $this->ids['team'], 120 );
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+
+		$first = $this->open_levels( [ $this->ids['company'] ], 1 );
+		$this->assertCount( 3 + 50, $first, 'Company, About, Team, and 50 of Team’s 121.' );
+		$this->assertTrue( $this->tree->row( $this->ids['team'] )['more'] );
+		$this->assertSame( 1, $this->tree->row( $this->ids['team'] )['shown'] );
+
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '3';
+		$third                                = $this->open_levels( [ $this->ids['company'] ], 1 );
+		$this->assertCount( 3 + 21, $third, 'Leadership and 120 more: page 3 holds the last 21.' );
+		$this->assertFalse( $this->tree->row( $this->ids['team'] )['more'] );
+
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '99';
+		$this->assertCount( 3 + 21, $this->open_levels( [ $this->ids['company'] ], 1 ), 'A page past the end shows the last one.' );
+	}
+
+	public function test_past_the_cap_the_opened_page_says_only_the_first_are_shown(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 60 );
+		$this->subpages( $this->ids['team'], 70 );
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['team'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		$this->assertCount( 3 + 10, $rows, 'Paging stops at the cap: page 2 holds the 51st to the 60th.' );
+		$row = $this->tree->row( $this->ids['team'] );
+		$this->assertFalse( $row['more'] );
+		$this->assertTrue( $row['capped'] );
+		$this->assertNull( $this->tree->row( (int) end( $rows )->ID )['setsize'], 'No set size past the cap.' );
+	}
+
+	public function test_a_level_the_user_may_not_edit_stays_closed(): void {
+		$closed = $this->ids['about'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $closed ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $closed === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		$this->assertSame( [ 'company', 'about' ], wp_list_pluck( $rows, 'post_name' ), 'Company opens; About, which the route would refuse, does not.' );
+	}
+
+	public function test_a_page_of_another_type_or_in_the_trash_opens_nothing(): void {
+		$_GET[ Tree_View::OPEN_VAR ] = (string) self::factory()->post->create();
+		$this->assertCount( 1, $this->open_levels( [ $this->ids['company'] ], 1 ) );
+
+		$this->trash_raw( $this->ids['history'] );
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['history'];
+		$this->assertCount( 1, $this->open_levels( [ $this->ids['company'] ], 1 ) );
+	}
+
+	public function test_a_crafted_open_or_children_page_opens_nothing_and_warns_nothing(): void {
+		foreach ( [ 'abc', '-5', '0', '', [ (string) $this->ids['about'] ] ] as $value ) {
+			$_GET[ Tree_View::OPEN_VAR ]          = $value;
+			$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = [ '2' ];
+
+			$this->assertSame( [ 'company' ], wp_list_pluck( $this->open_levels( [ $this->ids['company'] ], 1 ), 'post_name' ) );
+		}
+
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['company'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '-3';
+		$this->assertSame( [ 'company', 'about' ], wp_list_pluck( $this->open_levels( [ $this->ids['company'] ], 1 ), 'post_name' ), 'A page number below 1 is the first page.' );
+	}
+
+	public function test_the_posts_filter_leaves_the_front_end_and_an_array_post_type_alone(): void {
+		$posts = [ get_post( $this->ids['company'] ) ];
+		$query = new WP_Query();
+		$query->set( 'post_type', [ 'post', 'page' ] );
+		$GLOBALS['wp_the_query'] = $query;
+		$this->assertSame( $posts, $this->tree->open_levels( $posts, $query ) );
+
+		set_current_screen( 'front' );
+		$GLOBALS['pagenow'] = 'index.php';
+		$this->assertSame( $posts, $this->tree->open_levels( $posts, $query ), 'A theme’s array post type on the front end is never read.' );
+		$query->set( 'post_type', 'page' );
+		$this->assertSame( $posts, $this->tree->open_levels( $posts, $query ) );
+		$this->assertNull( $this->tree->row( $this->ids['company'] ) );
+	}
+
+	public function test_a_page_past_the_last_gets_the_view_s_own_count_so_core_sends_it_to_the_last_page(): void {
+		update_user_option( get_current_user_id(), 'edit_page_per_page', 1 );
+		$this->page( 'alpha' );
+		$last = $this->page( 'zeta' );
+		wp_trash_post( $last );
+		$_GET['paged'] = '3';
+
+		$query = $this->list_query();
+
+		$this->assertSame( [], $query->posts, 'Zeta was the only row on page 3.' );
+		$this->assertSame( 2, (int) $query->found_posts, 'Alpha and Company: core’s list then redirects to page 2 instead of counting every page.' );
+	}
+
+	public function test_opening_a_level_costs_the_same_queries_whatever_its_size(): void {
+		$small = $this->page( 'small' );
+		$big   = $this->page( 'big' );
+		$this->subpages( $small, 3, 's' );
+		$this->subpages( $big, 150, 'b' );
+		$cost = function ( int $root ): int {
+			$_GET[ Tree_View::OPEN_VAR ] = (string) $root;
+			wp_cache_flush();
+			$before = get_num_queries();
+			$this->open_levels( [ $root ], 1 );
+			return get_num_queries() - $before;
+		};
+
+		$cost( $small ); // The first run also reads the plugin's settings.
+
+		$this->assertSame( $cost( $small ), $cost( $big ), 'One page of 50 per opened level, read the same way.' );
+	}
+
+	public function test_the_place_keeps_only_the_view_s_own_arguments(): void {
+		$_GET += [
+			'paged'                      => '2',
+			'm'                          => '202610',
+			'orderby'                    => 'title',
+			'order'                      => 'sideways',
+			'trashed'                    => '1',
+			'ids'                        => '7',
+			Tree_View::CHILDREN_PAGE_VAR => '4',
+		];
+
+		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&orderby=title&m=202610&paged=2' ), Tree_View::place_url( 'page' ) );
+		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&orderby=title&m=202610&paged=2&hierarchy_guard_open=5&hierarchy_guard_children_page=2' ), Tree_View::place_url( 'page', 5, 2 ) );
 	}
 }
