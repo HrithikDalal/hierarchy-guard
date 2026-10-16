@@ -169,7 +169,8 @@ final class List_Table {
 		$mode   = null !== $this->tree ? $this->tree->mode( $type ) : '';
 
 		if ( 'search' === $mode && $above instanceof WP_Post ) {
-			$parts[] = '<span class="screen-reader-text">' . esc_html( _n( 'Parent page:', 'Parent pages:', count( get_post_ancestors( $post ) ), 'hierarchy-guard' ) ) . ' </span>' . $this->trail( $post );
+			$ancestors = get_post_ancestors( $post );
+			$parts[]   = '<span class="screen-reader-text">' . esc_html( _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) ) . ' </span>' . $this->trail( $type, $ancestors );
 		} elseif ( '' === $mode && $above instanceof WP_Post ) {
 			$title = _draft_or_post_title( $parent );
 			// Core refuses to edit a page in the Trash.
@@ -224,7 +225,8 @@ final class List_Table {
 
 		if ( $count > 0 && current_user_can( 'edit_post', $id ) ) {
 			$this->signal();
-			$href = $open ? Tree_View::place_url( $type, null !== $row ? $row['parent'] : 0, null !== $row ? $row['page'] : 1 ) : Tree_View::place_url( $type, $id );
+			// An opened row closes to its parent, at the page of subpages it is on.
+			$href = $open ? Tree_View::place_url( $type, $row['parent'], $row['page'] ) : Tree_View::place_url( $type, $id );
 			array_unshift(
 				$parts,
 				sprintf(
@@ -290,13 +292,13 @@ final class List_Table {
 	 * A search row's parent path, top level first, each ancestor a link to its
 	 * own subtree. The screen's ancestors were loaded together with its counts.
 	 *
-	 * @param WP_Post $post Row's post.
+	 * @param string $type      Post type name.
+	 * @param int[]  $ancestors The row's ancestor IDs, nearest first, as get_post_ancestors() returns them.
 	 * @return string
 	 */
-	private function trail( WP_Post $post ): string {
-		$type   = (string) $post->post_type;
+	private function trail( string $type, array $ancestors ): string {
 		$crumbs = [];
-		foreach ( array_reverse( get_post_ancestors( $post ) ) as $ancestor_id ) {
+		foreach ( array_reverse( $ancestors ) as $ancestor_id ) {
 			$ancestor_id = (int) $ancestor_id;
 			if ( ! current_user_can( 'read_post', $ancestor_id ) ) {
 				$crumbs[] = esc_html__( '(private page)', 'hierarchy-guard' );

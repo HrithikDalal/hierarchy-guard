@@ -48,6 +48,9 @@ final class ListTableTest extends WP_UnitTestCase {
 		unset( $_GET[ List_Table::QUERY_VAR ], $_GET[ Tree_View::QUERY_VAR ], $_GET[ Tree_View::OPEN_VAR ], $_GET['s'], $GLOBALS['pagenow'] );
 		$GLOBALS['wp_query']     = new WP_Query();
 		$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+		if ( isset( $GLOBALS['wp_locale'] ) ) {
+			$GLOBALS['wp_locale']->text_direction = 'ltr';
+		}
 		set_current_screen( 'front' );
 		parent::tear_down();
 	}
@@ -559,10 +562,47 @@ final class ListTableTest extends WP_UnitTestCase {
 		$GLOBALS['wp_locale']->text_direction = 'rtl';
 		$this->tree_table( [ $this->ids['company'] ] );
 
-		$cell                                 = $this->cell( $this->ids['company'] );
-		$GLOBALS['wp_locale']->text_direction = 'ltr';
+		$this->assertStringContainsString( 'dashicons-arrow-left-alt2', $this->cell( $this->ids['company'] ), 'tear_down() sets the direction back.' );
+	}
 
-		$this->assertStringContainsString( 'dashicons-arrow-left-alt2', $cell );
+	public function test_an_opened_top_level_row_closes_to_the_tree_with_nothing_opened(): void {
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['company'] );
+
+		$this->assertStringContainsString( '<a class="hierarchy-guard-toggle" href="' . esc_url( Tree_View::place_url( 'page' ) ) . '"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span>', $this->cell( $this->ids['company'] ), 'No hierarchy_guard_open and no children page.' );
+	}
+
+	public function test_a_tree_search_names_a_parent_in_the_trash_without_a_link(): void {
+		$this->trash_raw( $this->ids['about'] );
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'team';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['team'] ] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span>About (in the Trash)<span aria-hidden="true"> · </span>', $cell );
+		$this->assertStringNotContainsString( 'href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '"', $cell, 'A page in the Trash is no filter.' );
+	}
+
+	public function test_a_tree_search_hides_a_parent_the_user_may_not_read(): void {
+		$private = $this->ids['about'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $private ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $private === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'team';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['team'] ] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span>(private page)<span aria-hidden="true"> · </span>', $cell );
+		$this->assertStringNotContainsString( 'About', $cell, 'Neither its title nor a link to it.' );
 	}
 
 	public function test_a_tree_search_loads_the_screen_s_ancestors_one_level_at_a_time(): void {
