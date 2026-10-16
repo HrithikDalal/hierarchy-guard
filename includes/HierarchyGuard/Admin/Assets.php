@@ -1,6 +1,7 @@
 <?php
 /**
- * Scripts for the editor panel, the list screen and the classic editor.
+ * Scripts for the editor panel, the list screen, the classic editor and the
+ * Redirects tab of Settings › Hierarchy Guard.
  *
  * @package HierarchyGuard
  */
@@ -18,11 +19,14 @@ use HierarchyGuard\Subtree;
 use WP_Screen;
 
 /**
- * Enqueues the compiled bundles from build/, each with the dependencies its
- * .asset.php file lists, its translations, and the plugin's settings. A
- * bundle that was never built is skipped, so a checkout without npm still runs.
- * The list-screen bundle loads only when the screen prints something it acts
- * on: a row with subpages, the breadcrumb, a URLs notice or the nudge.
+ * Enqueues the compiled bundles from build/ for the editor panel, the list
+ * screen, the classic editor and the Redirects tab of Settings › Hierarchy
+ * Guard, each with the dependencies its .asset.php file lists and, except
+ * the Redirects tab's, which reads only the questions the page prints, its
+ * translations and the plugin's settings. A bundle that was never built is
+ * skipped, so a checkout without npm still runs. The list-screen bundle
+ * loads only when the screen prints something it acts on: a row with
+ * subpages, the breadcrumb, a URLs notice or the nudge.
  */
 final class Assets {
 
@@ -109,7 +113,8 @@ final class Assets {
 	 */
 	public function enqueue_admin( $hook_suffix ): void {
 		if ( 'settings_page_' . Settings_Page::SLUG === $hook_suffix && 'redirects' === Settings_Page::current_tab() ) {
-			$this->enqueue( 'redirects' );
+			// It reads only the questions the page prints: no settings, no strings.
+			$this->enqueue( 'redirects', [], false );
 			return;
 		}
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
@@ -123,13 +128,15 @@ final class Assets {
 	}
 
 	/**
-	 * Enqueues one bundle with its styles, translations and settings.
+	 * Enqueues one bundle with its styles and, unless it needs neither, its
+	 * translations and settings.
 	 *
-	 * @param string   $name  Bundle name, as in build/{name}.js.
-	 * @param string[] $extra Script handles the bundle uses without importing them.
+	 * @param string   $name     Bundle name, as in build/{name}.js.
+	 * @param string[] $extra    Script handles the bundle uses without importing them.
+	 * @param bool     $settings Whether the bundle has strings and reads window.hierarchyGuard.
 	 * @return bool Whether the bundle was built and enqueued.
 	 */
-	public function enqueue( string $name, array $extra = [] ): bool {
+	public function enqueue( string $name, array $extra = [], bool $settings = true ): bool {
 		$asset_file = $this->dir . '/build/' . $name . '.asset.php';
 		if ( ! is_readable( $asset_file ) ) {
 			return false;
@@ -145,8 +152,10 @@ final class Assets {
 		$url     = plugins_url( 'build/' . $name . '.js', $this->dir . '/hierarchy-guard.php' );
 
 		wp_enqueue_script( $handle, $url, $deps, $version, true );
-		wp_set_script_translations( $handle, 'hierarchy-guard' );
-		wp_add_inline_script( $handle, 'window.hierarchyGuard = ' . wp_json_encode( $this->config() ) . ';', 'before' );
+		if ( $settings ) {
+			wp_set_script_translations( $handle, 'hierarchy-guard' );
+			wp_add_inline_script( $handle, 'window.hierarchyGuard = ' . wp_json_encode( $this->config() ) . ';', 'before' );
+		}
 
 		$styles = in_array( 'wp-components', $deps, true ) ? [ 'wp-components' ] : [];
 		if ( is_readable( $this->dir . '/build/' . $name . '.css' ) ) {

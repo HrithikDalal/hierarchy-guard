@@ -145,6 +145,9 @@ final class AssetsTest extends WP_UnitTestCase {
 		$_GET['tab'] = 'redirects';
 		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
 		$this->assertTrue( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ) );
+		$script = wp_scripts()->registered['hierarchy-guard-redirects'];
+		$this->assertStringNotContainsString( 'window.hierarchyGuard', implode( '', (array) ( $script->extra['before'] ?? [] ) ), 'It reads only the questions the page prints: no settings, and no REST nonce.' );
+		$this->assertEmpty( $script->textdomain ?? '', 'It has no strings of its own.' );
 
 		wp_dequeue_script( 'hierarchy-guard-redirects' );
 		$assets->enqueue_admin( 'options-general.php' );
