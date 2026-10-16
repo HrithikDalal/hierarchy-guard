@@ -3,7 +3,7 @@
  * The rows the Tree view adds: a loaded subpage reads as one core prints.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { childRow, placeUrl, subtreeUrl } from '../rows';
+import { childRow, placeUrl, statusRow, subtreeUrl } from '../rows';
 import { child, coreRow, mountScreen } from './fixture';
 
 const PLACE =
@@ -261,10 +261,110 @@ describe( 'a loaded subpage’s row', () => {
 		);
 	} );
 
+	it( 'has no “Show more details” without row actions, as core prints none', () => {
+		const row = childRow(
+			template,
+			child( 7, 'Press', {
+				edit_link: null,
+				view_link: null,
+				trash_link: null,
+			} ),
+			context()
+		);
+
+		expect( row.querySelector( '.row-actions' ) ).toBe( null );
+		expect( row.querySelector( '.toggle-row' ) ).toBe( null );
+	} );
+
+	it( 'says whose child it is on a page the user may not edit', () => {
+		const row = childRow(
+			template,
+			child( 7, 'Press', {
+				edit_link: null,
+				view_link: null,
+				trash_link: null,
+			} ),
+			context( { parentTitle: 'Company' } )
+		);
+
+		const description = row.querySelector( '#post-hierarchy-7' );
+		expect( description.className ).toBe( 'screen-reader-text' );
+		expect( description.textContent ).toBe( ' (Child of Company)' );
+		expect( description.parentElement.parentElement.tagName ).toBe(
+			'STRONG'
+		);
+		expect( row.querySelector( '[aria-describedby]' ) ).toBe( null );
+		expect( row.querySelector( 'strong' ).textContent ).toBe(
+			'Press (Child of Company)'
+		);
+	} );
+
+	it( 'prints no place among siblings that the caller left out', () => {
+		const place = context();
+		delete place.position;
+		delete place.setsize;
+		const row = childRow( template, child( 5, 'About' ), place );
+
+		const cell = row.querySelector( '.hierarchy-guard-cell' );
+		expect( cell.hasAttribute( 'data-position' ) ).toBe( false );
+		expect( cell.hasAttribute( 'data-setsize' ) ).toBe( false );
+		expect(
+			childRow(
+				template,
+				child( 6, 'History' ),
+				context()
+			).querySelector( '.hierarchy-guard-cell' ).dataset
+		).toMatchObject( { position: '2', setsize: '3' } );
+	} );
+
+	it( 'leaves another plugin’s column in its place, empty', () => {
+		const seo = document.createElement( 'td' );
+		seo.className = 'seo column-seo';
+		seo.dataset.colname = 'SEO';
+		seo.textContent = 'Good';
+		const plain = document.createElement( 'td' );
+		plain.className = 'plain';
+		plain.textContent = 'Note';
+		template.append( seo, plain );
+		const row = childRow( template, child( 5, 'About' ), context() );
+
+		expect(
+			Array.from( row.children )
+				.slice( 5 )
+				.map( ( cell ) => [
+					cell.className,
+					cell.dataset.colname,
+					cell.innerHTML,
+				] )
+		).toEqual( [
+			[ 'seo column-seo', 'SEO', '' ],
+			[ 'plain', undefined, '' ],
+		] );
+	} );
+
 	it( 'keeps the tree’s place when nothing is opened', () => {
 		expect( placeUrl( PLACE, 0 ) ).toBe( PLACE );
 		expect( placeUrl( PLACE, 9 ) ).toBe(
 			PLACE + '&hierarchy_guard_open=9'
 		);
+	} );
+} );
+
+describe( 'a status row under an opened page', () => {
+	it( 'is one cell across the visible columns, at its subpages’ level', () => {
+		mountScreen( coreRow( { id: 4, title: 'Company', children: 3 } ) );
+		const { row, cell } = statusRow(
+			document.getElementById( 'post-4' ),
+			4,
+			1
+		);
+
+		expect( row.className ).toBe( 'level-1 hierarchy-guard-status' );
+		expect( row.dataset.parent ).toBe( '4' );
+		expect( Array.from( row.children ) ).toEqual( [ cell ] );
+		expect( cell.tagName ).toBe( 'TD' );
+		expect( cell.className ).toBe( 'colspanchange' );
+		// Five columns, one hidden in Screen Options.
+		expect( cell.colSpan ).toBe( 4 );
 	} );
 } );

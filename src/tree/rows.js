@@ -108,13 +108,13 @@ function rowActions( doc, actions ) {
  * The title cell's content as core prints it: the edit lock, the title with
  * its "Child of" description and its post states, and the row actions.
  *
- * @param {Document} doc     The document.
- * @param {Object}   child   The subpage from the route.
- * @param {Object}   context Where it goes.
+ * @param {Document}              doc     The document.
+ * @param {Object}                child   The subpage from the route.
+ * @param {Object}                context Where it goes.
+ * @param {Object<string,string>} labels  The row's labels, from treeRowLabels().
  * @return {DocumentFragment} Content.
  */
-function titleContent( doc, child, context ) {
-	const labels = treeRowLabels( child.title );
+function titleContent( doc, child, context, labels ) {
 	const out = doc.createDocumentFragment();
 	const described = `post-hierarchy-${ child.id }`;
 	if ( child.edit_link ) {
@@ -226,14 +226,14 @@ function titleContent( doc, child, context ) {
 	}
 	if ( actions.length ) {
 		out.appendChild( rowActions( doc, actions ) );
+		// Core prints "Show more details" with the row actions, and neither without them.
+		const details = el( doc, 'button', 'toggle-row' );
+		details.type = 'button';
+		details.appendChild(
+			el( doc, 'span', 'screen-reader-text', labels.details )
+		);
+		out.appendChild( details );
 	}
-
-	const details = el( doc, 'button', 'toggle-row' );
-	details.type = 'button';
-	details.appendChild(
-		el( doc, 'span', 'screen-reader-text', labels.details )
-	);
-	out.appendChild( details );
 	return out;
 }
 
@@ -241,13 +241,13 @@ function titleContent( doc, child, context ) {
  * The Hierarchy cell: the subpage count as a link to the subtree, with the
  * row's place in the tree for the script, as the server prints it.
  *
- * @param {Document} doc     The document.
- * @param {Object}   child   The subpage from the route.
- * @param {Object}   context Where it goes.
+ * @param {Document}              doc     The document.
+ * @param {Object}                child   The subpage from the route.
+ * @param {Object}                context Where it goes.
+ * @param {Object<string,string>} labels  The row's labels, from treeRowLabels().
  * @return {HTMLElement} Cell content.
  */
-function hierarchyContent( doc, child, context ) {
-	const labels = treeRowLabels( child.title );
+function hierarchyContent( doc, child, context, labels ) {
 	const cell = el( doc, 'span', 'hierarchy-guard-cell' );
 	const count = child.children_count;
 	const data = {
@@ -258,10 +258,11 @@ function hierarchyContent( doc, child, context ) {
 		parent: context.parent,
 		page: context.page,
 	};
-	if ( null !== context.position ) {
+	// A place left out or null is not printed, as the server leaves it off.
+	if ( undefined !== context.position && null !== context.position ) {
 		data.position = context.position;
 	}
-	if ( null !== context.setsize ) {
+	if ( undefined !== context.setsize && null !== context.setsize ) {
 		data.setsize = context.setsize;
 	}
 	Object.entries( data ).forEach( ( [ key, value ] ) => {
@@ -290,18 +291,18 @@ function hierarchyContent( doc, child, context ) {
 /**
  * Fills one cell of a loaded row.
  *
- * @param {Document}    doc     The document.
- * @param {HTMLElement} cell    The new cell.
- * @param {string}      column  Column name.
- * @param {Object}      child   The subpage from the route.
- * @param {Object}      context Where it goes.
+ * @param {Document}              doc     The document.
+ * @param {HTMLElement}           cell    The new cell.
+ * @param {string}                column  Column name.
+ * @param {Object}                child   The subpage from the route.
+ * @param {Object}                context Where it goes.
+ * @param {Object<string,string>} labels  The row's labels, from treeRowLabels().
  */
-function fill( doc, cell, column, child, context ) {
-	const labels = treeRowLabels( child.title );
+function fill( doc, cell, column, child, context, labels ) {
 	if ( 'title' === column ) {
-		cell.appendChild( titleContent( doc, child, context ) );
+		cell.appendChild( titleContent( doc, child, context, labels ) );
 	} else if ( 'hierarchy_guard' === column ) {
-		cell.appendChild( hierarchyContent( doc, child, context ) );
+		cell.appendChild( hierarchyContent( doc, child, context, labels ) );
 	} else if ( 'author' === column ) {
 		if ( child.author ) {
 			cell.textContent = child.author;
@@ -331,11 +332,12 @@ function fill( doc, cell, column, child, context ) {
  *
  * @param {HTMLTableRowElement} template A row core printed.
  * @param {Object}              child    The subpage from the route.
- * @param {Object}              context  Where it goes: level (from 0), parent, parentTitle, page, position and setsize (or null), place, type.
+ * @param {Object}              context  Where it goes: level (from 0), parent, parentTitle, page, position and setsize (or null, or left out), place, type.
  * @return {HTMLTableRowElement} Row.
  */
 export function childRow( template, child, context ) {
 	const doc = template.ownerDocument;
+	const labels = treeRowLabels( child.title );
 	const row = el(
 		doc,
 		'tr',
@@ -359,7 +361,7 @@ export function childRow( template, child, context ) {
 			// WordPress 7.1 names the row by its title alone.
 			cell.setAttribute( 'aria-label', child.title );
 		}
-		fill( doc, cell, column || '', child, context );
+		fill( doc, cell, column || '', child, context, labels );
 		row.appendChild( cell );
 	} );
 	return row;
