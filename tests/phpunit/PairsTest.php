@@ -1256,7 +1256,7 @@ final class PairsTest extends WP_UnitTestCase {
 	public function test_an_old_url_a_type_s_rewrite_rule_takes_is_not_listed(): void {
 		$lines = $this->lines( $this->pairs->collect_change( $this->docs_beside_pages( true ) ) );
 
-		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines, 'WordPress hands /docs/guide/ to the type\'s rule, which finds no doc there; the server then tries the type first, and its record answers.' );
+		$this->assertSame( [ '/docs/ -> /documentation/' ], $lines, 'WordPress hands /docs/guide/ to the type\'s rule, which the 404 model does not look into.' );
 		$this->assertSame( '/docs/handbook/', $this->served_on_request( 'docs/guide' ) );
 	}
 

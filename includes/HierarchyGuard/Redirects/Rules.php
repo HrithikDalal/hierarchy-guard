@@ -10,7 +10,6 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Paths;
-use HierarchyGuard\Post_Types;
 use WP_MatchesMapRegex;
 use WP_Post;
 use WP_Rewrite;
@@ -208,13 +207,10 @@ final class Rules {
 	 *   narrows it;
 	 * - `attachment`: an attachment, by its slug;
 	 * - `category`, `tag`: the archive of a category or tag, by its slug;
-	 * - `type:{name}`: a post of another supported hierarchical type, by
-	 *   the path its own rule names: its query variable, or its `post_type`
-	 *   with `pagename`;
 	 * - `none`: no rule matches, so the request is a 404;
-	 * - `other`: any other rule, as a taxonomy's, an author's, a date's, a
-	 *   feed's, a verbose page rule for part of the path or one this type
-	 *   cannot answer for. What it shows is not looked into.
+	 * - `other`: any other rule, as another type's, a taxonomy's, an
+	 *   author's, a date's, a feed's, a verbose page rule for part of the path
+	 *   or one this type cannot answer for. What it shows is not looked into.
 	 *
 	 * @param string $post_type Post type the request is for.
 	 * @param string $path      Normalized path, without the type's rewrite prefix.
@@ -268,7 +264,7 @@ final class Rules {
 	 *
 	 * @param array{0:bool,1:string,2:string} $route  From route().
 	 * @param WP_Post|null                    $at     The post at the path, as the page rule finds it.
-	 * @param callable                        $exists Whether what a rule asks for is there: fn( string $kind, string $slug ): bool, for a kind of `post`, `attachment`, `category` or `tag`, a post anyone can view or a term; for `type:{name}`, the post get_page_by_path( $slug, OBJECT, $name ) finds, when anyone can view it.
+	 * @param callable                        $exists Whether what a rule asks for is there: fn( string $kind, string $slug ): bool, for a kind of `post`, `attachment`, `category` or `tag`, a post anyone can view or a term.
 	 * @return bool
 	 */
 	public static function is_404( array $route, ?WP_Post $at, callable $exists ): bool {
@@ -287,21 +283,7 @@ final class Rules {
 			case 'tag':
 				return ! $exists( $kind, $slug );
 		}
-		return str_starts_with( $kind, 'type:' ) ? ! $exists( $kind, $slug ) : false;
-	}
-
-	/**
-	 * Whether is_404() knows what WordPress answers for the route: false for
-	 * a rule it does not look into, which it takes to show something. Such a
-	 * path reads, on the Redirects tab, as one the server can't send to.
-	 *
-	 * @param array{0:bool,1:string,2:string} $route From route().
-	 * @param WP_Post|null                    $at    The post at the path, as the page rule finds it.
-	 * @return bool
-	 */
-	public static function tells( array $route, ?WP_Post $at ): bool {
-		[ $page, $kind ] = $route;
-		return ( $page && $at instanceof WP_Post && self::page_rule_matches( $at ) ) || 'other' !== $kind;
+		return false;
 	}
 
 	/**
@@ -333,26 +315,13 @@ final class Rules {
 		if ( isset( $vars['pagename'] ) ) {
 			// The page rule with no verbose check, or a hierarchical type's own rule when the type has no query variable.
 			$type = $vars['post_type'] ?? 'page';
-			if ( ! $only( 'pagename', 'post_type' ) ) {
-				return $other;
-			}
-			if ( $type === $post_type ) {
-				return $path === $vars['pagename'] ? [ 'own', '' ] : $other;
-			}
-			return self::another( $type ) ? [ 'type:' . $type, $vars['pagename'] ] : $other;
+			$own  = $type === $post_type && $only( 'pagename', 'post_type' );
+			return $own && $path === $vars['pagename'] ? [ 'own', '' ] : $other;
 		}
 		$object = 'page' !== $post_type ? get_post_type_object( $post_type ) : null;
 		$var    = null !== $object && is_string( $object->query_var ) ? $object->query_var : '';
 		if ( '' !== $var && isset( $vars[ $var ] ) ) {
 			return $only( $var ) && $path === $vars[ $var ] ? [ 'own', '' ] : $other;
-		}
-		// Another supported type's own rule, by its query variable, as a type's rewrite base can start a page's path.
-		foreach ( Post_Types::supported() as $type ) {
-			$object = $type !== $post_type && self::another( $type ) ? get_post_type_object( $type ) : null;
-			$var    = null !== $object && is_string( $object->query_var ) ? $object->query_var : '';
-			if ( '' !== $var && isset( $vars[ $var ] ) ) {
-				return $only( $var ) ? [ 'type:' . $type, $vars[ $var ] ] : $other;
-			}
 		}
 		if ( isset( $vars['attachment'] ) ) {
 			return $only( 'attachment' ) ? [ 'attachment', $vars['attachment'] ] : $other;
@@ -368,17 +337,6 @@ final class Rules {
 			return $only( 'tag' ) ? [ 'tag', $vars['tag'] ] : $other;
 		}
 		return $other;
-	}
-
-	/**
-	 * Whether a type is one route() names by `type:{name}`: supported and
-	 * hierarchical, so its own rule finds a post by its path.
-	 *
-	 * @param string $type Post type name.
-	 * @return bool
-	 */
-	private static function another( string $type ): bool {
-		return Post_Types::is_supported( $type ) && is_post_type_hierarchical( $type );
 	}
 
 	/**

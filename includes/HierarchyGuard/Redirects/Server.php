@@ -160,6 +160,10 @@ final class Server {
 		if ( $here && self::same_path( $url, $this->request_uri() ) ) {
 			return null;
 		}
+		// Nor to another old URL this plugin redirects: that is how a loop of any length forms.
+		if ( null === $post && $here && self::redirected( $this->resolver, $url ) ) {
+			return null;
+		}
 
 		return [
 			'url'    => $url,
@@ -178,6 +182,44 @@ final class Server {
 	 */
 	public static function same_path( string $url, string $other ): bool {
 		return Paths::normalize( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === Paths::normalize( (string) wp_parse_url( $other, PHP_URL_PATH ) );
+	}
+
+	/**
+	 * Whether a URL on this site is another old URL this plugin redirects:
+	 * the resolver answers its path through a record, and no published
+	 * post, page or attachment is shown there, which would win over the
+	 * redirect. A URL target is never sent to one, so redirects that send
+	 * each other round, however many and however they came about, stop at a
+	 * plain 404. One resolve per same-site URL target sent.
+	 *
+	 * @param Resolver $resolver Resolver.
+	 * @param string   $url      A URL on this site.
+	 * @return bool
+	 */
+	public static function redirected( Resolver $resolver, string $url ): bool {
+		$path = self::request_path( $url );
+		if ( '' === $path ) {
+			return false;
+		}
+		foreach ( self::candidates( $path ) as [ $type, $candidate ] ) {
+			if ( null !== $resolver->resolve( $type, $candidate ) ) {
+				return ! self::shows_post( $url );
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether a published post, page or attachment of any public type that
+	 * anyone can view is at a URL, as url_to_postid() finds it.
+	 *
+	 * @param string $url A URL on this site.
+	 * @return bool
+	 */
+	public static function shows_post( string $url ): bool {
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.url_to_postid_url_to_postid -- On the front end only for a same-site URL target whose path another record answers, once; in wp-admin for the 20 rows of a page.
+		$id = url_to_postid( $url );
+		return $id > 0 && is_post_publicly_viewable( $id );
 	}
 
 	/**

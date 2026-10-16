@@ -622,6 +622,42 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( $other, $this->server->target_for_current_request()['url'] ?? null, 'Another port is another site.' );
 	}
 
+	public function test_url_targets_that_send_each_other_round_are_stopped_however_long_the_loop(): void {
+		$ledger = new Ledger();
+		foreach ( [ 2, 7 ] as $length ) {
+			for ( $i = 1; $i <= $length; $i++ ) {
+				$holder = self::factory()->post->create(
+					[
+						'post_type' => 'page',
+						'post_name' => "holder-$length-$i",
+					]
+				);
+				$ledger->record( $holder, "loop-$length-$i" );
+				$ledger->set_target( 'page', "loop-$length-$i", $holder, home_url( '/loop-' . $length . '-' . ( $i % $length + 1 ) . '/' ), 0 );
+			}
+			for ( $i = 1; $i <= $length; $i++ ) {
+				$this->go_to( "/loop-$length-$i/" );
+				$this->assertTrue( is_404() );
+				$this->assertNull( $this->server->target_for_current_request(), "A loop of $length: /loop-$length-$i/ sends nothing, so it is a plain 404." );
+			}
+		}
+	}
+
+	public function test_a_url_target_on_this_site_at_a_live_page_or_post_is_still_sent(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->about, 'old-about' );
+		$this->go_to( '/old-about/' );
+
+		$ledger->set_target( 'page', 'old-about', $this->about, home_url( '/company/about/team/' ), 0 );
+		$this->assertSame( home_url( '/company/about/team/' ), $this->server->target_for_current_request()['url'] ?? null );
+
+		// A blog post now shows at a path a page's record still holds: the post wins there, so it is no loop.
+		self::factory()->post->create( [ 'post_name' => 'news' ] );
+		$ledger->record( $this->team, 'news' );
+		$ledger->set_target( 'page', 'old-about', $this->about, home_url( '/news/' ), 0 );
+		$this->assertSame( home_url( '/news/' ), $this->server->target_for_current_request()['url'] ?? null );
+	}
+
 	public function test_a_url_target_at_the_requested_path_in_another_script_is_not_sent(): void {
 		$ledger = new Ledger();
 		$ledger->record( $this->about, 'café' );

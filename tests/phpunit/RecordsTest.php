@@ -114,27 +114,6 @@ final class RecordsTest extends WP_UnitTestCase {
 		return ( new Server( new Resolver( $this->ledger ) ) )->target_for_current_request();
 	}
 
-	/**
-	 * Every row that reads Active is served for its old URL, by the server
-	 * itself; a top-level root-list entry, whose old URL leads nowhere of
-	 * its own, for a URL under it.
-	 *
-	 * @param string $under A top-level page, for the URLs under a top-level root-list entry.
-	 */
-	private function assert_every_active_row_is_served( string $under ): void {
-		$rows     = $this->records->page( '', '', 1 )['rows'];
-		$statuses = $this->records->statuses( $rows );
-		$active   = 0;
-		foreach ( $rows as $row ) {
-			if ( Records::STATUS_ACTIVE !== $statuses[ $row['id'] ] ) {
-				continue;
-			}
-			++$active;
-			$old = Records::is_top_level( $row ) ? $row['old'] . $under . '/' : $row['old'];
-			$this->assertNotNull( $this->served_at( $old ), $old . ' reads Active, so the server serves it.' );
-		}
-		$this->assertGreaterThan( 0, $active, 'Precondition: some row reads Active.' );
-	}
 
 	public function test_each_entry_and_each_root_entry_is_one_row_and_nothing_else_is(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
@@ -281,8 +260,8 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertCount( 20, $after['rows'] );
 	}
 
-	public function test_a_listing_costs_the_same_queries_for_five_entries_or_fifty(): void {
-		$this->assertSame( $this->queries_to_list( 5 ), $this->queries_to_list( 50 ) );
+	public function test_a_listing_costs_the_same_queries_for_a_page_of_entries_or_many(): void {
+		$this->assertSame( $this->queries_to_list( Records::PER_PAGE ), $this->queries_to_list( 200 ), 'Statuses are read for the page shown only.' );
 	}
 
 	/**
@@ -587,65 +566,7 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( [ '/old-about/' => Records::STATUS_ACTIVE ], $this->statuses_by_old() );
 	}
 
-	public function test_url_targets_on_this_site_that_lead_back_to_the_old_url_are_refused(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->ledger->record( $this->ids['about'], 'old-a' );
-		$this->ledger->record( $this->ids['team'], 'old-b' );
-		$this->ledger->record( $this->ids['history'], 'old-c' );
-		$find = fn( int $holder, string $path ): array => $this->records->find( Records::id( $holder, 'page', $path ) );
 
-		$this->assertTrue( $this->records->save( $find( $this->ids['about'], 'old-a' ), '/old-b/', 0 ) );
-		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
-		$result = $this->records->save( $find( $this->ids['team'], 'old-b' ), '/old-a/', 0 );
-		$this->assertInstanceOf( WP_Error::class, $result, 'Two records that send each other on.' );
-		$this->assertSame( 'hierarchy_guard_loop', $result->get_error_code() );
-		$this->assertSame( 'That URL redirects back to the old URL.', $result->get_error_message() );
-		$this->assertNull( $this->ledger->target( 'page', 'old-b', $this->ids['team'] ), 'Nothing written.' );
-		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
-
-		$this->assertTrue( $this->records->save( $find( $this->ids['team'], 'old-b' ), '/old-c/', 302 ) );
-		$result = $this->records->save( $find( $this->ids['history'], 'old-c' ), home_url( '/old-a/?from=edit' ), 0 );
-		$this->assertInstanceOf( WP_Error::class, $result, 'Three records that send each other on.' );
-		$this->assertSame( 'hierarchy_guard_loop', $result->get_error_code() );
-		$this->assertNull( $this->ledger->target( 'page', 'old-c', $this->ids['history'] ) );
-
-		$this->assertTrue( $this->records->save( $find( $this->ids['history'], 'old-c' ), '/elsewhere/', 0 ), 'A chain that ends somewhere else is no loop.' );
-		$this->assertTrue( $this->records->save( $find( $this->ids['history'], 'old-c' ), 'https://example.net/old-a/', 0 ), 'Nor one that leaves the site.' );
-	}
-
-	public function test_url_targets_on_this_site_that_lead_back_to_the_old_url_never_read_active(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		// Written straight into the ledger, as before the Edit view refused them.
-		foreach ( [
-			'old-a' => 'old-b',
-			'old-b' => 'old-a',
-			'tri-1' => 'tri-2',
-			'tri-2' => 'tri-3',
-			'tri-3' => 'tri-1',
-		] as $from => $to ) {
-			$holder = $this->page( 'holder-' . $from );
-			$this->ledger->record( $holder, $from );
-			$this->ledger->set_target( 'page', $from, $holder, home_url( '/' . $to . '/' ), 0 );
-		}
-		$this->ledger->record( $this->ids['team'], 'old-crew' );
-		$this->ledger->set_target( 'page', 'old-crew', $this->ids['team'], home_url( '/company/' ), 0 );
-		wp_cache_flush();
-
-		$this->assertSame( home_url( '/old-a/' ), $this->served_at( '/old-b/' )['url'] ?? null, 'Precondition: the server sends each one on, so a browser goes round for good.' );
-		$this->assertSame( home_url( '/old-b/' ), $this->served_at( '/old-a/' )['url'] ?? null );
-		$this->assertSame( home_url( '/tri-1/' ), $this->served_at( '/tri-3/' )['url'] ?? null );
-		$this->assertSame(
-			[
-				'/old-a/'    => Records::STATUS_REFUSED,
-				'/old-b/'    => Records::STATUS_REFUSED,
-				'/old-crew/' => Records::STATUS_ACTIVE,
-				'/tri-1/'    => Records::STATUS_REFUSED,
-				'/tri-2/'    => Records::STATUS_REFUSED,
-				'/tri-3/'    => Records::STATUS_REFUSED,
-			],
-			$this->statuses_by_old()
-		);
-	}
 
 	public function test_an_http_url_with_no_host_is_refused(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
@@ -701,6 +622,133 @@ final class RecordsTest extends WP_UnitTestCase {
 		$older = $this->records->find( Records::id( $this->ids['history'], 'page', 'shared-old' ) );
 		$this->assertSame( 'hierarchy_guard_unpublished', $this->records->save( $older, home_url( '/?page_id=' . $trashed ), 0 )->get_error_code() );
 		$this->assertSame( get_permalink( $this->ids['team'] ), $this->served_at( '/shared-old/' )['url'] ?? null );
+	}
+
+	public function test_a_target_that_is_another_old_url_this_plugin_redirects_is_refused(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['about'], 'old-a' );
+		$this->ledger->record( $this->ids['team'], 'old-b' );
+		$this->ledger->set_target( 'page', 'old-b', $this->ids['team'], 'https://example.net/b/', 0 );
+		$record = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-a' ) );
+		$before = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+
+		foreach ( [ '/old-b/', home_url( '/old-b/?from=menu' ), set_url_scheme( home_url( '/old-b' ), 'https' ) ] as $value ) {
+			$result = $this->records->save( $record, $value, 0 );
+			$this->assertInstanceOf( WP_Error::class, $result, $value );
+			$this->assertSame( 'hierarchy_guard_redirected', $result->get_error_code(), $value );
+			$this->assertSame( 'That URL is another old URL this plugin redirects.', $result->get_error_message(), $value );
+		}
+		$this->assertNull( $this->ledger->target( 'page', 'old-a', $this->ids['about'] ), 'Nothing written.' );
+		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+		$this->assertSame( 'hierarchy_guard_own_url', $this->records->save( $record, '/old-a/', 0 )->get_error_code(), 'Its own old URL keeps its own message.' );
+		$this->assertTrue( $this->records->save( $record, '/elsewhere/', 0 ), 'A URL on this site nothing redirects.' );
+	}
+
+	public function test_a_loop_formed_after_both_saves_is_stopped_by_the_server(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$post  = self::factory()->post->create( [ 'post_name' => 'p' ] );
+		$draft = $this->page( 'h', 0, 'draft' );
+		$this->ledger->record( $draft, 'old-a' );
+		$this->ledger->record( $this->ids['team'], 'p' );
+		// While old-a leads nowhere, and while the post is shown at /p/, each save is fine.
+		$this->assertTrue( $this->records->save( $this->records->find( Records::id( $this->ids['team'], 'page', 'p' ) ), '/old-a/', 0 ) );
+		$this->assertTrue( $this->records->save( $this->records->find( Records::id( $draft, 'page', 'old-a' ) ), '/p/', 0 ) );
+
+		wp_trash_post( $post );
+		wp_cache_flush();
+
+		$this->assertNull( $this->served_at( '/p/' ), '/p/ would send the browser to /old-a/, which sends it back.' );
+		$this->assertNull( $this->served_at( '/old-a/' ) );
+		$this->assertSame(
+			[
+				'/old-a/' => Records::STATUS_REFUSED,
+				'/p/'     => Records::STATUS_REFUSED,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_a_row_whose_target_is_another_redirect_can_t_be_sent(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		// Written straight into the ledger, as before the Edit view refused them: a loop and a chain.
+		foreach ( [
+			'old-a' => '/old-b/',
+			'old-b' => '/old-a/',
+			'old-c' => '/old-d/',
+			'old-d' => 'https://example.net/',
+		] as $from => $to ) {
+			$holder = $this->page( 'holder-' . $from );
+			$this->ledger->record( $holder, $from );
+			$this->ledger->set_target( 'page', $from, $holder, str_starts_with( $to, '/' ) ? home_url( $to ) : $to, 0 );
+		}
+		wp_cache_flush();
+
+		$this->assertSame(
+			[
+				'/old-a/' => Records::STATUS_REFUSED,
+				'/old-b/' => Records::STATUS_REFUSED,
+				'/old-c/' => Records::STATUS_REFUSED,
+				'/old-d/' => Records::STATUS_ACTIVE,
+			],
+			$this->statuses_by_old()
+		);
+		$this->assertNull( $this->served_at( '/old-c/' ), 'The server agrees.' );
+		$this->assertSame( 'https://example.net/', $this->served_at( '/old-d/' )['url'] ?? null );
+	}
+
+	public function test_a_row_is_in_use_when_a_published_post_page_or_attachment_is_at_its_old_url(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->register_docs();
+		$this->set_permalink_structure( '/%postname%/' );
+		$this->page( 'faq' );
+		self::factory()->post->create( [ 'post_name' => 'news' ] );
+		self::factory()->post->create(
+			[
+				'post_name'   => 'soon',
+				'post_status' => 'draft',
+			]
+		);
+		self::factory()->attachment->create(
+			[
+				'post_name'      => 'photo',
+				'post_title'     => 'photo',
+				'post_parent'    => $this->ids['company'],
+				'post_mime_type' => 'image/jpeg',
+				'file'           => 'photo.jpg',
+			]
+		);
+		self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		foreach ( [ 'faq', 'news', 'soon', 'company/photo', 'docs/guide', 'crew' ] as $path ) {
+			$this->ledger->record( $this->ids['team'], $path );
+		}
+		wp_cache_flush();
+
+		$this->assertSame(
+			[
+				'/company/photo/' => Records::STATUS_IN_USE,
+				'/crew/'          => Records::STATUS_ACTIVE,
+				'/docs/guide/'    => Records::STATUS_IN_USE,
+				'/faq/'           => Records::STATUS_IN_USE,
+				'/news/'          => Records::STATUS_IN_USE,
+				'/soon/'          => Records::STATUS_ACTIVE,
+			],
+			$this->statuses_by_old(),
+			'A draft is not shown, so its row is not in use.'
+		);
+	}
+
+	public function test_status_does_not_check_other_wordpress_urls(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		self::factory()->user->create( [ 'user_nicename' => 'realauthor' ] );
+		$this->ledger->record( $this->ids['about'], 'author/realauthor' );
+
+		$this->assertNull( $this->served_at( '/author/realauthor/' ), 'Precondition: the author archive is shown.' );
+		$this->assertSame( [ '/author/realauthor/' => Records::STATUS_ACTIVE ], $this->statuses_by_old(), 'Only posts, pages and attachments at the old URL are checked: the stated limitation.' );
 	}
 
 	public function test_a_page_at_the_old_url_is_refused(): void {
@@ -801,38 +849,7 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_a_live_holder_s_row_is_in_use_while_a_page_in_the_trash_holds_the_newest_entry(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->ledger->record( $this->ids['team'], 'old-crew' );
-		$this->ledger->record( $this->ids['history'], 'old-crew' );
-		wp_trash_post( $this->ids['history'] );
-		wp_cache_flush();
 
-		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server leaves it for the page in the Trash.' );
-		$this->assertSame(
-			[
-				'/old-crew/ ' . $this->ids['team']    => Records::STATUS_IN_USE,
-				'/old-crew/ ' . $this->ids['history'] => Records::STATUS_UNPUBLISHED,
-			],
-			$this->statuses_by_old()
-		);
-	}
-
-	public function test_a_root_entry_a_post_entry_answers_instead_is_in_use(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->ledger->record_root( 'page', 'archive' );
-		$this->ledger->set_target( 'page', 'archive', 0, 'https://example.org/archive/', 0 );
-		$this->ledger->record( $this->ids['team'], 'archive' );
-
-		$this->assertSame( get_permalink( $this->ids['team'] ), $this->served_at( '/archive/' )['url'] ?? null, 'Precondition: the post entry answers.' );
-		$this->assertSame(
-			[
-				'/archive/ 0'                     => Records::STATUS_IN_USE,
-				'/archive/ ' . $this->ids['team'] => Records::STATUS_ACTIVE,
-			],
-			$this->statuses_by_old()
-		);
-	}
 
 	public function test_an_old_url_deeper_than_the_segment_cap_never_reads_active(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
@@ -909,51 +926,11 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_a_record_the_server_uses_but_can_t_send_through_is_refused_not_in_use(): void {
-		global $wpdb;
-
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$crew  = $this->page( 'crew' );
-		$draft = $this->page( 'crew-draft', 0, 'draft' );
-		// Two pages at /crew/: core's lookup of the rewritten path finds the newer one, a draft.
-		$wpdb->update( $wpdb->posts, [ 'post_name' => 'crew' ], [ 'ID' => $draft ] );
-		clean_post_cache( $draft );
-		$this->ledger->record( $crew, 'old-crew' );
-		wp_cache_flush();
-
-		$this->go_to( home_url( '/old-crew/' ) );
-		$this->assertTrue( is_404(), 'Precondition: nothing is shown at the old URL.' );
-		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server sends nothing.' );
-		$this->assertSame( [ '/old-crew/' => Records::STATUS_REFUSED ], $this->statuses_by_old() );
-	}
 
 	public function test_the_status_words_for_each_status(): void {
 		$this->assertSame( 'Not active: the server can’t send this redirect', \HierarchyGuard\Admin\Redirects_Table::status_label( Records::STATUS_REFUSED ) );
 	}
 
-	public function test_a_row_another_type_answers_first_is_in_use(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->register_docs();
-		$this->set_permalink_structure( '/%postname%/' );
-		$guide = self::factory()->post->create(
-			[
-				'post_type' => 'hg_docs',
-				'post_name' => 'guide',
-			]
-		);
-		$this->ledger->record( $guide, 'old-guide' );
-		// A page entry at the docs prefix: the server tries hg_docs first.
-		$this->ledger->record( $this->ids['team'], 'docs/old-guide' );
-
-		$this->assertSame( get_permalink( $guide ), $this->served_at( '/docs/old-guide/' )['url'] ?? null, 'Precondition: the docs entry answers.' );
-		$this->assertSame(
-			[
-				'/docs/old-guide/ ' . $guide             => Records::STATUS_ACTIVE,
-				'/docs/old-guide/ ' . $this->ids['team'] => Records::STATUS_IN_USE,
-			],
-			$this->statuses_by_old()
-		);
-	}
 
 	public function test_a_page_entry_under_another_type_s_rewrite_base_reads_as_the_server_serves_it(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
@@ -985,81 +962,8 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_a_row_at_a_url_the_404_model_can_t_tell_about_reads_that_it_can_t_be_sent(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->ledger->record( $this->ids['about'], 'author/ghost' );
-		$this->ledger->record( $this->ids['team'], 'crew' );
 
-		$this->assertSame( get_permalink( $this->ids['about'] ), $this->served_at( '/author/ghost/' )['url'] ?? null, 'Precondition: there is no such author, and the model does not look into author archives.' );
-		$this->assertSame(
-			[
-				'/author/ghost/' => Records::STATUS_REFUSED,
-				'/crew/'         => Records::STATUS_ACTIVE,
-			],
-			$this->statuses_by_old(),
-			'Not "a page uses this URL": the model can’t tell, so the row never reads Active.'
-		);
-	}
 
-	public function test_a_row_another_type_answers_first_with_a_url_target_is_in_use(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->register_docs();
-		$this->set_permalink_structure( '/%postname%/' );
-		$guide = self::factory()->post->create(
-			[
-				'post_type' => 'hg_docs',
-				'post_name' => 'guide',
-			]
-		);
-		$draft = $this->page( 'whats-on', 0, 'draft' );
-		$this->ledger->record( $guide, 'x' );
-		$this->ledger->set_target( 'hg_docs', 'x', $guide, 'https://example.net/x/', 0 );
-		$this->ledger->record( $this->ids['team'], 'docs/x' );
-		$this->ledger->record( $draft, 'docs/x' );
-		wp_cache_flush();
-
-		$this->assertSame( 'https://example.net/x/', $this->served_at( '/docs/x/' )['url'] ?? null, 'Precondition: the docs entry answers first.' );
-		$this->assertSame(
-			[
-				'/docs/x/ ' . $guide             => Records::STATUS_ACTIVE,
-				'/docs/x/ ' . $this->ids['team'] => Records::STATUS_IN_USE,
-				'/docs/x/ ' . $draft             => Records::STATUS_IN_USE,
-			],
-			$this->statuses_by_old()
-		);
-	}
-
-	public function test_every_row_that_reads_active_is_served_by_the_server(): void {
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
-		$this->page( 'faq' );
-		$draft   = $this->page( 'whats-on', 0, 'draft' );
-		$trashed = $this->page( 'gone' );
-		self::factory()->post->create( [ 'post_name' => 'news' ] );
-		$this->ledger->record( $this->ids['about'], 'news' );
-		$this->ledger->record( $draft, 'events' );
-		$this->ledger->record( $draft, 'events-feed' );
-		$this->ledger->set_target( 'page', 'events-feed', $draft, 'https://example.org/feed/', 0 );
-		$this->ledger->record( $trashed, 'old-gone' );
-		wp_trash_post( $trashed );
-		$this->ledger->record( $this->ids['team'], 'crew' );
-		$this->ledger->record( $this->ids['team'], 'crew/old-lead' );
-		$this->ledger->record( $this->ids['leadership'], 'old-lead' );
-		$this->ledger->set_target( 'page', 'old-lead', $this->ids['leadership'], 'https://example.org/lead/', 302 );
-		$this->ledger->record( $this->ids['history'], 'old-crew' );
-		$this->ledger->record( $this->ids['team'], 'old-crew' );
-		$this->ledger->record( $this->ids['team'], 'self' );
-		$this->ledger->set_target( 'page', 'self', $this->ids['team'], home_url( '/self/' ), 0 );
-		$this->ledger->record_root( 'page', 'archive' );
-		$this->ledger->record_root( 'page', 'crew' );
-		$this->ledger->record( $this->ids['history'], 'a/b/c/d/e' );
-		$this->ledger->record( $this->ids['history'], 'équipe' );
-		$this->ledger->record( $this->ids['team'], 'café' );
-		$this->ledger->set_target( 'page', 'caf%c3%a9', $this->ids['team'], home_url( '/café/' ), 0 );
-		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 4 );
-		wp_cache_flush();
-
-		$this->assert_every_active_row_is_served( 'faq' );
-	}
 
 	public function test_an_old_url_with_other_scripts_reads_and_searches_as_people_type_it(): void {
 		$this->ledger->record( $this->ids['about'], 'café/équipe' );

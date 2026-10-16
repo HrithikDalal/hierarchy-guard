@@ -33,10 +33,6 @@ final class Live_Model {
 			$there instanceof WP_Post ? $there : null,
 			static function ( string $kind, string $slug ): bool {
 				global $wpdb;
-				if ( str_starts_with( $kind, 'type:' ) ) {
-					$post = get_page_by_path( $slug, OBJECT, substr( $kind, 5 ) );
-					return $post instanceof WP_Post && is_post_publicly_viewable( $post );
-				}
 				if ( 'category' === $kind || 'tag' === $kind ) {
 					return get_term_by( 'slug', $slug, 'category' === $kind ? 'category' : 'post_tag' ) instanceof WP_Term;
 				}
