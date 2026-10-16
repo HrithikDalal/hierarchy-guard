@@ -384,7 +384,7 @@ final class Records {
 			}
 			// Nor to another old URL this plugin redirects: the server never sends that, as redirects that send each other round would loop.
 			if ( Server::is_here( $clean ) && Server::redirected( new Resolver( $this->ledger ), $clean ) ) {
-				return new WP_Error( 'hierarchy_guard_redirected', __( 'That URL is another old URL this plugin redirects.', 'hierarchy-guard' ) );
+				return new WP_Error( 'hierarchy_guard_redirected', __( 'That URL is another old URL this plugin recorded.', 'hierarchy-guard' ) );
 			}
 			// Another type's page, or any other URL: the record stays where it is.
 			$this->ledger->set_target( $type, $path, $record['holder'], $clean, $code );

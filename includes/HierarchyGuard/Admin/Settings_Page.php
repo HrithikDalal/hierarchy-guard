@@ -278,7 +278,8 @@ final class Settings_Page {
 		echo '</form>';
 		$checks = __( 'Status checks posts and pages at each old URL.', 'hierarchy-guard' );
 		$others = __( 'Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked.', 'hierarchy-guard' );
-		printf( '<p class="description">%s</p>', esc_html( $checks . ' ' . $others ) );
+		$shared = __( 'When two recorded redirects share an old URL, only one is served, and both can read Active.', 'hierarchy-guard' );
+		printf( '<p class="description">%s</p>', esc_html( $checks . ' ' . $others . ' ' . $shared ) );
 	}
 
 	/**

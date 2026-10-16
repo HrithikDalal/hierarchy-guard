@@ -636,7 +636,7 @@ final class RecordsTest extends WP_UnitTestCase {
 			$result = $this->records->save( $record, $value, 0 );
 			$this->assertInstanceOf( WP_Error::class, $result, $value );
 			$this->assertSame( 'hierarchy_guard_redirected', $result->get_error_code(), $value );
-			$this->assertSame( 'That URL is another old URL this plugin redirects.', $result->get_error_message(), $value );
+			$this->assertSame( 'That URL is another old URL this plugin recorded.', $result->get_error_message(), $value );
 		}
 		$this->assertNull( $this->ledger->target( 'page', 'old-a', $this->ids['about'] ), 'Nothing written.' );
 		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
