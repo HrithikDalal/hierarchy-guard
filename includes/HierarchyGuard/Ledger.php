@@ -630,49 +630,67 @@ final class Ledger {
 	}
 
 	/**
-	 * Schedules the daily rebuild of the newest-records list, on activation
-	 * and on admin_init while it is missing. Until the list was first built
-	 * for the types supported now, the list reads as being built and the
-	 * rebuild runs on the next cron run. It never runs in a web request, and
-	 * once built a page load only reads autoloaded options here.
+	 * Makes sure the daily rebuild of the newest-records list is scheduled,
+	 * on activation and on admin_init: one single event, which schedules
+	 * the next one a day later when it runs, so on a site where the plugin
+	 * is no longer active nothing schedules it again. Until a first build
+	 * has completed, the list reads as being built and the rebuild runs on
+	 * the next cron run. A type supported later is built by the next daily
+	 * run, with no notice. It never runs in a web request, and once built a
+	 * page load only reads autoloaded options here.
 	 */
 	public static function schedule_rebuild(): void {
-		if ( self::done_state( Post_Types::supported() ) === get_option( self::RECENT_STATE ) ) {
-			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) ) {
+		$state = (string) get_option( self::RECENT_STATE );
+		if ( str_starts_with( $state, 'done' ) ) {
+			// Missing, or a recurring event from an earlier build: one single run, a day ahead.
+			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) || false !== wp_get_schedule( self::REBUILD_HOOK ) ) {
 				self::clear_leftovers();
-				wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', self::REBUILD_HOOK );
+				wp_schedule_single_event( time() + DAY_IN_SECONDS, self::REBUILD_HOOK );
 			}
 			return;
 		}
-		if ( 'building' !== get_option( self::RECENT_STATE ) ) {
+		if ( 'building' !== $state ) {
 			update_option( self::RECENT_STATE, 'building', true );
 		}
 		self::rebuild_soon();
 	}
 
 	/**
-	 * Brings the daily rebuild forward to the next cron run, where it stays
-	 * daily, unless it is due within a minute already.
+	 * Brings the rebuild forward to the next cron run, the one event moved
+	 * rather than another added, unless it is due within a minute already.
 	 */
 	private static function rebuild_soon(): void {
-		$next = wp_next_scheduled( self::REBUILD_HOOK );
-		if ( false !== $next && $next <= time() + MINUTE_IN_SECONDS ) {
+		$next  = wp_next_scheduled( self::REBUILD_HOOK );
+		$older = false !== $next && false !== wp_get_schedule( self::REBUILD_HOOK );
+		if ( false !== $next && ! $older && $next <= time() + MINUTE_IN_SECONDS ) {
 			return;
 		}
-		if ( false === $next ) {
+		if ( false === $next || $older ) {
 			self::clear_leftovers();
 		}
 		wp_clear_scheduled_hook( self::REBUILD_HOOK );
-		wp_schedule_event( time(), 'daily', self::REBUILD_HOOK );
+		wp_schedule_single_event( time(), self::REBUILD_HOOK );
 	}
 
 	/**
-	 * Upgrade cleanup, once, when the daily rebuild is first scheduled on a
-	 * site: the one-time backfill's event and the list's lock and queue rows
-	 * that development builds before the daily rebuild left behind.
+	 * Schedules the next daily run, from the rebuild itself, unless one is
+	 * scheduled already.
+	 */
+	private static function schedule_next(): void {
+		if ( false === wp_next_scheduled( self::REBUILD_HOOK ) ) {
+			wp_schedule_single_event( time() + DAY_IN_SECONDS, self::REBUILD_HOOK );
+		}
+	}
+
+	/**
+	 * Upgrade cleanup, when the rebuild is first scheduled on a site: the
+	 * one-time backfill's event, the list's lock and queue rows, and a
+	 * recurring rebuild event, which development builds before the single
+	 * daily event left behind.
 	 */
 	private static function clear_leftovers(): void {
 		wp_clear_scheduled_hook( 'hierarchy_guard_backfill_recent' );
+		wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		delete_option( 'hierarchy_guard_recent_lock' );
 		delete_option( 'hierarchy_guard_recent_queue' );
 	}
@@ -701,7 +719,8 @@ final class Ledger {
 	}
 
 	/**
-	 * Whether the newest-records list is still being built for the first time.
+	 * Whether the newest-records list is still being built for the first
+	 * time: no first build has completed, whatever types it covered.
 	 *
 	 * @return bool
 	 */
@@ -716,13 +735,17 @@ final class Ledger {
 	 * one, which also tells whether older entries exist. So an entry a lost
 	 * update dropped comes back, and one whose row was deleted without its
 	 * hook goes, within a day; meanwhile a search for a full old URL finds
-	 * any record. Entries recorded while the queries ran are kept. Running
-	 * it again changes nothing. The first build marks the list as built
-	 * for those types; when a query fails, that type's list is left as it
-	 * was and the list is not marked built.
+	 * any record. Entries recorded while the queries ran are kept, and a
+	 * write another request made while the rebuild wrote is merged with it.
+	 * Running it again changes nothing. It first schedules the next daily
+	 * run. The first build marks the list as built, for those types; when
+	 * a query fails, that type's list is left as it was and the list is
+	 * not marked built.
 	 */
 	public static function rebuild_recent(): void {
 		global $wpdb;
+
+		self::schedule_next();
 
 		$cap    = Subtree::count_cap();
 		$types  = Post_Types::supported();
@@ -762,9 +785,41 @@ final class Ledger {
 			];
 		}
 		update_option( self::RECENT, $kept, false );
+		self::merge_back( $kept, array_keys( $found ), $cap );
 		if ( ! $failed ) {
 			update_option( self::RECENT_STATE, self::done_state( $types ), true );
 		}
+	}
+
+	/**
+	 * After the rebuild wrote the list: when another request read the list
+	 * before that write and wrote it after, the rebuilt entries are merged
+	 * back into what it wrote, and the list written once more. Entries both
+	 * lists hold stay; any other is kept while its row exists, in one
+	 * primary-key lookup; newest first, at most the cap.
+	 *
+	 * @param array<string,array{ids:int[],more:bool}> $built What the rebuild wrote.
+	 * @param string[]                                 $types The types it read.
+	 * @param int                                      $cap   Most entries per type.
+	 */
+	private static function merge_back( array $built, array $types, int $cap ): void {
+		$now = self::fresh_recent();
+		if ( $now === $built ) {
+			return;
+		}
+		foreach ( $types as $type ) {
+			$mine   = array_map( 'intval', (array) ( $built[ $type ]['ids'] ?? [] ) );
+			$theirs = array_map( 'intval', (array) ( $now[ $type ]['ids'] ?? [] ) );
+			$both   = array_values( array_intersect( $mine, $theirs ) );
+			$ids    = array_values( array_unique( array_merge( $both, self::existing( array_diff( array_merge( $mine, $theirs ), $both ) ) ) ) );
+			rsort( $ids );
+
+			$now[ $type ] = [
+				'ids'  => array_slice( $ids, 0, $cap ),
+				'more' => ! empty( $built[ $type ]['more'] ) || ! empty( $now[ $type ]['more'] ) || count( $ids ) > $cap,
+			];
+		}
+		update_option( self::RECENT, $now, false );
 	}
 
 	/**

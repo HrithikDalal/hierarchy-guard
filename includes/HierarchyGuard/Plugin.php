@@ -58,7 +58,7 @@ final class Plugin {
 
 		// The newest-records list drops an entry whenever its row goes, however it goes.
 		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
-		// Records made before the list existed reach it once, from WP-Cron.
+		// The newest-records list is rebuilt daily from WP-Cron; admin_init makes sure the run is scheduled.
 		add_action( 'admin_init', [ Ledger::class, 'schedule_rebuild' ] );
 		add_action( Ledger::REBUILD_HOOK, [ Ledger::class, 'rebuild_recent' ] );
 
