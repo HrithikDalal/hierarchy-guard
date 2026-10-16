@@ -796,7 +796,9 @@ final class Ledger {
 	 * before that write and wrote it after, the rebuilt entries are merged
 	 * back into what it wrote, and the list written once more. Entries both
 	 * lists hold stay; any other is kept while its row exists, in one
-	 * primary-key lookup; newest first, at most the cap.
+	 * primary-key lookup; newest first, at most the cap. Whether older
+	 * entries exist is the rebuild's own reading, or the merged list
+	 * overflowing the cap: the other request's may be stale.
 	 *
 	 * @param array<string,array{ids:int[],more:bool}> $built What the rebuild wrote.
 	 * @param string[]                                 $types The types it read.
@@ -807,6 +809,7 @@ final class Ledger {
 		if ( $now === $built ) {
 			return;
 		}
+		$fresh = $now;
 		foreach ( $types as $type ) {
 			$mine   = array_map( 'intval', (array) ( $built[ $type ]['ids'] ?? [] ) );
 			$theirs = array_map( 'intval', (array) ( $now[ $type ]['ids'] ?? [] ) );
@@ -816,16 +819,21 @@ final class Ledger {
 
 			$now[ $type ] = [
 				'ids'  => array_slice( $ids, 0, $cap ),
-				'more' => ! empty( $built[ $type ]['more'] ) || ! empty( $now[ $type ]['more'] ) || count( $ids ) > $cap,
+				// The other request's `more` may be stale: the rebuild's own reading decides.
+				'more' => ! empty( $built[ $type ]['more'] ) || count( $ids ) > $cap,
 			];
 		}
+		// The cache still holds what the rebuild wrote; with the row as it is now, update_option() writes even a list equal to that.
+		wp_cache_set( self::RECENT, $fresh, 'options' );
 		update_option( self::RECENT, $now, false );
 	}
 
 	/**
-	 * The meta IDs whose rows exist: one primary-key lookup, none for no IDs.
+	 * The meta IDs whose rows exist: one prepared query on the primary key,
+	 * none for no IDs. From WP-Cron only; it can take up to twice the cap,
+	 * from the merge-back.
 	 *
-	 * @param int[] $ids Meta IDs, a few at most.
+	 * @param int[] $ids Meta IDs, up to twice Subtree::count_cap().
 	 * @return int[]
 	 */
 	private static function existing( array $ids ): array {

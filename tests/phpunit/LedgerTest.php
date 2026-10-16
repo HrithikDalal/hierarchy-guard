@@ -684,6 +684,86 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertFalse( $events[0]['schedule'] ?? false );
 	}
 
+	/**
+	 * Runs the rebuild while another request writes the list right after
+	 * the rebuild's own write: $write runs once then, and returns the list
+	 * that request writes.
+	 *
+	 * @param callable $write Returns the page list the other request writes: fn(): array{ids:int[],more:bool}.
+	 */
+	private function rebuild_with_a_write_after( callable $write ): void {
+		global $wpdb;
+
+		$after = static function () use ( $wpdb, $write ): void {
+			static $done = false;
+			if ( $done ) {
+				return;
+			}
+			$done = true;
+			$wpdb->update( $wpdb->options, [ 'option_value' => maybe_serialize( [ 'page' => $write() ] ) ], [ 'option_name' => Ledger::RECENT ] );
+		};
+		add_action( 'update_option_' . Ledger::RECENT, $after );
+		do_action( 'hierarchy_guard_rebuild_recent' );
+		remove_action( 'update_option_' . Ledger::RECENT, $after );
+		wp_cache_delete( Ledger::RECENT, 'options' );
+	}
+
+	public function test_the_merge_back_reads_more_from_the_rebuild_not_a_stale_write(): void {
+		$a = $this->old_entry( $this->about, 'a' );
+		$b = $this->old_entry( $this->about, 'b' );
+		update_option( Ledger::RECENT, [], false );
+
+		$this->rebuild_with_a_write_after(
+			static fn(): array => [
+				'ids'  => [ $b, $a ],
+				'more' => true,
+			]
+		);
+
+		$this->assertSame(
+			[
+				'ids'  => [ $b, $a ],
+				'more' => false,
+			],
+			$this->ledger->recent( [ 'page' ] ),
+			'Every entry fits: the other request’s more was read before the rebuild.'
+		);
+	}
+
+	public function test_the_merge_back_keeps_an_entry_only_the_other_write_holds_while_its_row_exists(): void {
+		$a = $this->old_entry( $this->about, 'a' );
+		update_option( Ledger::RECENT, [], false );
+		$late = 0;
+
+		$this->rebuild_with_a_write_after(
+			function () use ( $a, &$late ): array {
+				// Recorded after the rebuild's query read the entries.
+				$late = $this->old_entry( $this->about, 'late' );
+				return [
+					'ids'  => [ $late, $a ],
+					'more' => false,
+				];
+			}
+		);
+		$this->assertSame( [ $late, $a ], $this->ledger->recent( [ 'page' ] )['ids'], 'Kept: its row exists.' );
+
+		update_option( Ledger::RECENT, [], false );
+		$gone = 0;
+		$this->rebuild_with_a_write_after(
+			function () use ( $a, &$gone ): array {
+				global $wpdb;
+				$gone = $this->old_entry( $this->about, 'gone' );
+				$wpdb->delete( $wpdb->postmeta, [ 'meta_id' => $gone ] );
+				return [
+					'ids'  => [ $gone, $a ],
+					'more' => false,
+				];
+			}
+		);
+		$this->assertNotContains( $gone, $this->ledger->recent( [ 'page' ] )['ids'], 'Dropped: its row was deleted.' );
+		$this->assertContains( $late, $this->ledger->recent( [ 'page' ] )['ids'] );
+	}
+
 	public function test_a_write_made_while_the_rebuild_writes_does_not_undo_it(): void {
 		global $wpdb;
 
