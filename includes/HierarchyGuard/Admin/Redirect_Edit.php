@@ -54,7 +54,7 @@ final class Redirect_Edit {
 	 * The Edit view's link for a record, behind its own nonce, carrying the
 	 * list's search, filter and page so Save, Cancel and Delete return to it.
 	 *
-	 * @param string                    $id   Record ID.
+	 * @param string                    $id      Record ID.
 	 * @param array<string,string>|null $listing The list's arguments, from Redirects_Table::list_args(); null for the request's.
 	 * @return string
 	 */
@@ -66,7 +66,7 @@ final class Redirect_Edit {
 	 * The Delete link for a record, behind its own nonce, carrying the
 	 * list's search, filter and page so it returns to that list.
 	 *
-	 * @param string                    $id   Record ID.
+	 * @param string                    $id      Record ID.
 	 * @param array<string,string>|null $listing The list's arguments, from Redirects_Table::list_args(); null for the request's.
 	 * @return string
 	 */
@@ -77,10 +77,10 @@ final class Redirect_Edit {
 	/**
 	 * A link that runs an action on one record, behind the action's nonce.
 	 *
-	 * @param string                    $action edit or delete.
-	 * @param string                    $id     Record ID.
+	 * @param string                    $action  edit or delete.
+	 * @param string                    $id      Record ID.
 	 * @param array<string,string>|null $listing The list's arguments; null for the request's.
-	 * @param string                    $nonce  The action's nonce prefix.
+	 * @param string                    $nonce   The action's nonce prefix.
 	 * @return string
 	 */
 	private static function action_url( string $action, string $id, ?array $listing, string $nonce ): string {

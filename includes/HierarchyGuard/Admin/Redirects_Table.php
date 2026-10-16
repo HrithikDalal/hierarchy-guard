@@ -179,15 +179,16 @@ final class Redirects_Table extends WP_List_Table {
 	public function prepare_items(): void {
 		$this->_column_headers = [ $this->get_columns(), [], [], 'old' ];
 
-		$page = $this->records->page( self::post_type(), self::search(), $this->get_pagenum() );
 		if ( '' !== self::searched() && '' === self::search() ) {
-			// Nothing was left to search for: no record matches it.
+			// Nothing is left to search for once sanitized: no record matches it.
 			$page = [
 				'rows'   => [],
 				'total'  => 0,
 				'page'   => 1,
-				'capped' => $page['capped'],
+				'capped' => false,
 			];
+		} else {
+			$page = $this->records->page( self::post_type(), self::search(), $this->get_pagenum() );
 		}
 		$this->shown    = $page['page'];
 		$this->list     = self::list_args( $this->shown );
