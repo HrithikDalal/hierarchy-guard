@@ -807,6 +807,27 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The rebuild reads supported types only, so it is not brought forward for this one.' );
 	}
 
+	public function test_scheduling_the_daily_rebuild_clears_what_earlier_builds_left_once(): void {
+		Ledger::schedule_rebuild();
+		Ledger::rebuild_recent();
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+		// Left by a build of the plugin from before the daily rebuild.
+		wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'hierarchy_guard_backfill_recent' );
+		add_option( 'hierarchy_guard_recent_lock', (string) ( time() + 10 ), '', false );
+		add_option( 'hierarchy_guard_recent_queue', '["add","page",[1]]', '', false );
+
+		Ledger::schedule_rebuild();
+
+		$this->assertFalse( wp_next_scheduled( 'hierarchy_guard_backfill_recent' ) );
+		$this->assertFalse( get_option( 'hierarchy_guard_recent_lock' ) );
+		$this->assertFalse( get_option( 'hierarchy_guard_recent_queue' ) );
+		$this->assertSame( 'daily', wp_get_schedule( Ledger::REBUILD_HOOK ) );
+
+		$queries = get_num_queries();
+		Ledger::schedule_rebuild();
+		$this->assertSame( $queries, get_num_queries(), 'Once: with the daily run scheduled, nothing is cleared again.' );
+	}
+
 	public function test_the_daily_rebuild_restores_an_entry_a_lost_update_dropped(): void {
 		$this->ledger->record( $this->about, 'one' );
 		$this->ledger->record( $this->about, 'two' );

@@ -639,6 +639,7 @@ final class Ledger {
 	public static function schedule_rebuild(): void {
 		if ( self::done_state( Post_Types::supported() ) === get_option( self::RECENT_STATE ) ) {
 			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) ) {
+				self::clear_leftovers();
 				wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', self::REBUILD_HOOK );
 			}
 			return;
@@ -658,8 +659,22 @@ final class Ledger {
 		if ( false !== $next && $next <= time() + MINUTE_IN_SECONDS ) {
 			return;
 		}
+		if ( false === $next ) {
+			self::clear_leftovers();
+		}
 		wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		wp_schedule_event( time(), 'daily', self::REBUILD_HOOK );
+	}
+
+	/**
+	 * Upgrade cleanup, once, when the daily rebuild is first scheduled on a
+	 * site: the one-time backfill's event and the list's lock and queue rows
+	 * that development builds before the daily rebuild left behind.
+	 */
+	private static function clear_leftovers(): void {
+		wp_clear_scheduled_hook( 'hierarchy_guard_backfill_recent' );
+		delete_option( 'hierarchy_guard_recent_lock' );
+		delete_option( 'hierarchy_guard_recent_queue' );
 	}
 
 	/**
