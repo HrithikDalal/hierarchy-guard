@@ -129,8 +129,8 @@ final class Records {
 		$rows             += $this->roots( $types );
 		$search            = trim( $search );
 		if ( '' !== $search ) {
-			// A full URL is matched as the path the Old URL column shows.
-			$needle = '' !== (string) wp_parse_url( $search, PHP_URL_HOST ) ? rawurldecode( Paths::relative( $search ) ) : $search;
+			// A full URL is matched as the path the Old URL column shows; a URL or a path percent-encoded, decoded as that column is.
+			$needle = rawurldecode( '' !== (string) wp_parse_url( $search, PHP_URL_HOST ) ? Paths::relative( $search ) : $search );
 			$rows   = array_filter( $rows, static fn( array $row ): bool => false !== ( function_exists( 'mb_stripos' ) ? mb_stripos( $row['old'], $needle, 0, 'UTF-8' ) : stripos( $row['old'], $needle ) ) );
 			// Any entry is found by its exact old URL, whether the newest list holds it or not.
 			$rows += $this->exact( $types, $search );
@@ -201,7 +201,8 @@ final class Records {
 	 *   holder is in the Trash, which the resolver passes over;
 	 * - refused: the server can't send it, whether built-in redirects are on
 	 *   or off: a path deeper than its segment cap, which it refuses before
-	 *   it looks; a URL target at the old URL itself, a loop; one on this
+	 *   it looks, counting for a top-level root-list entry the segment of the
+	 *   URLs under it; a URL target at the old URL itself, a loop; one on this
 	 *   site that other records send back to the old URL, a loop a browser
 	 *   follows for good (cycles()); or a record
 	 *   the rules reach that leads nowhere the server sends, as when the
@@ -254,7 +255,8 @@ final class Records {
 			$answer = $served[ $type ][ $path ] ?? 0;
 			$first  = $used[ $type ][ $path ] ?? null;
 			$own    = null !== $first && $first[0] === $path && $first[1] === $row['holder'];
-			$cannot = self::too_deep( $type, $path ) || self::loops( $type, $path, $url ) || isset( $cycles[ $row['id'] ] );
+			// A top-level root-list entry serves only the URLs one segment under it.
+			$cannot = self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 ) || self::loops( $type, $path, $url ) || isset( $cycles[ $row['id'] ] );
 			$hidden = $holder instanceof WP_Post && ! self::reachable( $holder, $url );
 			if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
 				// Its own page is why it is not served, whatever else answers its old URL.
@@ -424,15 +426,17 @@ final class Records {
 
 	/**
 	 * Whether an old path is deeper than the server looks: its segments and
-	 * its type's rewrite prefix's, past Server::max_segments().
+	 * its type's rewrite prefix's, and any it serves only under it, past
+	 * Server::max_segments().
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized old path.
+	 * @param int    $under     Segments every URL it serves has past the path: 1 for a top-level root-list entry.
 	 * @return bool
 	 */
-	private static function too_deep( string $post_type, string $path ): bool {
+	private static function too_deep( string $post_type, string $path, int $under = 0 ): bool {
 		$prefix = self::prefix( $post_type );
-		return substr_count( $path, '/' ) + 1 + ( '' !== $prefix ? substr_count( $prefix, '/' ) + 1 : 0 ) > Server::max_segments();
+		return substr_count( $path, '/' ) + 1 + $under + ( '' !== $prefix ? substr_count( $prefix, '/' ) + 1 : 0 ) > Server::max_segments();
 	}
 
 	/**

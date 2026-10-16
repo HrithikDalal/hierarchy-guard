@@ -1078,6 +1078,36 @@ final class RecordsTest extends WP_UnitTestCase {
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 	}
 
+	public function test_a_percent_encoded_path_searches_as_the_same_text_as_a_full_url_does(): void {
+		$this->ledger->record( $this->ids['about'], 'café' );
+		$this->ledger->record( $this->ids['team'], 'café/équipe' );
+		$this->ledger->record( $this->ids['history'], 'other' );
+		$both = [ '/café/', '/café/équipe/' ];
+
+		$this->assertSame( $both, array_values( self::olds( $this->records->page( '', home_url( '/caf%C3%A9/' ), 1 ) ) ), 'Precondition: a full URL.' );
+		$this->assertSame( $both, array_values( self::olds( $this->records->page( '', '/caf%C3%A9/', 1 ) ) ), 'A path, as server logs show it.' );
+		$this->assertSame( $both, array_values( self::olds( $this->records->page( '', 'caf%c3%a9', 1 ) ) ), 'A segment.' );
+		$this->assertSame( $both, array_values( self::olds( $this->records->page( '', '/café/', 1 ) ) ) );
+	}
+
+	public function test_a_top_level_entry_at_the_segment_cap_never_reads_active(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->page( 'solo' );
+		$this->ledger->record_root( 'page', 'old/parent' );
+		$this->ledger->record_root( 'page', 'shallow' );
+		add_filter( 'hierarchy_guard_max_segments', static fn(): int => 2 );
+
+		$this->assertNull( $this->served_at( '/old/parent/solo/' ), 'Precondition: the URLs under it have three segments, past the cap.' );
+		$this->assertSame( get_permalink( get_page_by_path( 'solo' ) ), $this->served_at( '/shallow/solo/' )['url'] ?? null );
+		$this->assertSame(
+			[
+				'/old/parent/' => Records::STATUS_REFUSED,
+				'/shallow/'    => Records::STATUS_ACTIVE,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
 	public function test_under_plain_permalinks_no_row_reads_active(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->ledger->record( $this->ids['about'], 'old-about' );
