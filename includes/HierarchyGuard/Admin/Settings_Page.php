@@ -191,6 +191,8 @@ final class Settings_Page {
 		}
 		$tab    = self::current_tab();
 		$search = 'redirects' === $tab ? Redirects_Table::search() : '';
+		// A search sanitizing empties, as one of tags only, says what was searched, escaped.
+		$search = '' === $search && 'redirects' === $tab ? Redirects_Table::searched() : $search;
 		echo '<div class="wrap">';
 		if ( '' === $search ) {
 			echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';

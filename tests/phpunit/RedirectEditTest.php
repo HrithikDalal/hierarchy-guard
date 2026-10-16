@@ -62,7 +62,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		foreach ( [ 'tab', 'action', 'redirect', '_wpnonce', 'target', 'code' ] as $key ) {
+		foreach ( [ 'tab', 'action', 'redirect', '_wpnonce', 'target', 'code', 's', 'redirect_type', 'paged' ] as $key ) {
 			unset( $_GET[ $key ], $_POST[ $key ], $_REQUEST[ $key ] );
 		}
 		$GLOBALS['wp_settings_errors'] = [];
@@ -319,13 +319,45 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$html = $this->view();
 
-		$this->assertStringContainsString( '<td><p>Now redirects to the same page at the top level, for example <code>/about/team/</code> to <code>/team/</code>.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value=""', $html, 'The field starts empty.' );
+		$this->assertStringContainsString( '<td><p id="hierarchy-guard-target-now">Now redirects to the same page at the top level, for example <code>/about/team/</code> to <code>/team/</code>.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="" dir="ltr" aria-describedby="hierarchy-guard-target-now hierarchy-guard-target-description">', $html, 'The field starts empty, and is described by where it leads now too.' );
 		$this->assertStringContainsString( 'id="hierarchy-guard-target-description">Leave empty to keep this. Enter a URL to send these URLs somewhere else. A page on this site:', $html );
 
 		$this->submit( '', '302' );
 		$this->assertStringContainsString( 'settings-updated=true', $this->edit->handle() );
 		$this->assertSame( [ 'page' => [ 'archive' ] ], $this->ledger->root_paths(), 'Still top level.' );
 		$this->assertSame( 302, $this->ledger->target( 'page', 'archive', 0 )['code'] );
+	}
+
+	public function test_the_edit_view_keeps_the_list_s_search_filter_and_page_through_save_cancel_and_delete(): void {
+		$list = [
+			's'             => 'old about',
+			'redirect_type' => 'page',
+			'paged'         => '2',
+		];
+		foreach ( $list as $key => $value ) {
+			$_GET[ $key ]     = $value;
+			$_REQUEST[ $key ] = $value;
+		}
+		$back = admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=old%20about&redirect_type=page&paged=2' );
+		$this->assertStringContainsString( '&amp;s=old+about&amp;redirect_type=page&amp;paged=2', Redirect_Edit::edit_url( $this->id ), 'The row’s Edit link.' );
+		$this->follow( Redirect_Edit::edit_url( $this->id ) );
+
+		$html = $this->view();
+
+		$this->assertStringContainsString( '<input type="hidden" name="s" value="old about"><input type="hidden" name="redirect_type" value="page"><input type="hidden" name="paged" value="2">', $html, 'Save posts them back.' );
+		$this->assertStringContainsString( '<a class="button" href="' . esc_url( $back ) . '">Cancel</a>', $html );
+		$this->assertStringContainsString( '<a class="delete" href="' . esc_url( Redirect_Edit::delete_url( $this->id ) ) . '"', $html );
+		$this->assertStringContainsString( 's=old+about', Redirect_Edit::delete_url( $this->id ) );
+
+		foreach ( [ 'action', 'redirect', '_wpnonce' ] as $key ) {
+			unset( $_GET[ $key ] );
+		}
+		$this->submit( 'https://example.org/', '302' );
+		foreach ( $list as $key => $value ) {
+			$_POST[ $key ]    = $value;
+			$_REQUEST[ $key ] = $value;
+		}
+		$this->assertSame( $back . '&settings-updated=true', $this->edit->handle(), 'Save returns to the same list.' );
 	}
 
 	public function test_a_path_entered_is_saved_as_the_url_on_this_site(): void {

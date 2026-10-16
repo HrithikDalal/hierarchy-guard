@@ -156,9 +156,9 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<code>/old-about/</code> and the URLs under it', $html, 'In code, so it reads left to right in a right-to-left language too.' );
+		$this->assertStringContainsString( '<code>/old-about/</code></a> and the URLs under it', $html, 'In code, so it reads left to right in a right-to-left language too.' );
 		$this->assertStringContainsString( '<code>/careers/</code><', $html, 'A URL target covers its exact old URL only.' );
-		$this->assertStringContainsString( '<code>/archive/</code> and the URLs under it', $html );
+		$this->assertStringContainsString( '<code>/archive/</code></a> and the URLs under it', $html );
 		$this->assertStringContainsString( '<a href="' . esc_url( get_edit_post_link( $this->ids['about'] ) ) . '">About</a><br><span dir="ltr">/company/about/</span>', $html );
 		$this->assertStringContainsString( '">Whats-on</a> &mdash; <span class=\'post-state\'>Draft</span><br><span dir="ltr">/?page_id=' . $draft . '</span>', $html );
 		$this->assertStringContainsString( '<span dir="ltr">https://jobs.example.org/</span>', $html );
@@ -167,7 +167,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '>302<', $html );
 		$this->assertSame( 3, substr_count( $html, '>Active<' ) );
 		$this->assertStringContainsString( '>Not active: the page it points to isn’t published<', $html );
-		$this->assertStringContainsString( '<label class="screen-reader-text" for="cb-select-' . Records::id( $this->ids['about'], 'page', 'old-about' ) . '">Select the redirect from /old-about/</label>', $html );
+		$this->assertStringContainsString( '<input id="cb-select-' . Records::id( $this->ids['about'], 'page', 'old-about' ) . '" type="checkbox" name="redirect[]" value="' . Records::id( $this->ids['about'], 'page', 'old-about' ) . '" data-hierarchy-guard-confirm-one="Delete the redirect from /old-about/? This can’t be undone." /><label for="cb-select-' . Records::id( $this->ids['about'], 'page', 'old-about' ) . '"><span class="screen-reader-text">Select the redirect from /old-about/</span></label>', $html, 'Core’s markup: the label after the box fills the cell, so the whole cell ticks it.' );
 		$this->assertStringContainsString( 'aria-label="Delete the redirect from /old-about/" data-hierarchy-guard-confirm="Delete the redirect from /old-about/? This can’t be undone."', $html );
 		$this->assertStringContainsString( 'data-hierarchy-guard-confirm-one="Delete the redirect from /old-about/? This can’t be undone."', $html, 'A bulk Delete of one row asks about that row.' );
 		$this->assertStringContainsString( '<form method="get" id="hierarchy-guard-redirects" data-hierarchy-guard-confirm="Delete the selected redirects? This can’t be undone.">', $html );
@@ -517,6 +517,61 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertSame( 'Redirects ‹ Hierarchy Guard ‹ Site — WordPress', $this->page->admin_title( 'Hierarchy Guard ‹ Site — WordPress' ) );
 		$this->assertStringContainsString( '<hr class="wp-header-end">', $html );
 		remove_filter( 'admin_title', [ $this->page, 'admin_title' ] );
+	}
+
+	public function test_the_row_links_and_the_old_url_keep_the_list_s_search_filter_and_page(): void {
+		for ( $i = 1; $i <= 21; $i++ ) {
+			$this->recorded( $this->ids['about'], sprintf( 'old-%02d', $i ) );
+		}
+		$id = Records::id( $this->ids['about'], 'page', 'old-21' );
+		foreach ( [
+			's'             => 'old',
+			'redirect_type' => 'page',
+			'paged'         => '2',
+		] as $key => $value ) {
+			$_GET[ $key ]     = $value;
+			$_REQUEST[ $key ] = $value;
+		}
+
+		$html = $this->rendered();
+		$edit = Redirect_Edit::edit_url( $id );
+
+		foreach ( [ 's=old', 'redirect_type=page', 'paged=2' ] as $arg ) {
+			$this->assertStringContainsString( $arg, $edit );
+			$this->assertStringContainsString( $arg, Redirect_Edit::delete_url( $id ) );
+		}
+		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '" aria-label="Edit the redirect from /old-21/"><code>/old-21/</code></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do.' );
+		$this->assertStringContainsString( '<a href="' . esc_url( $edit ) . '" aria-label="Edit the redirect from /old-21/">Edit</a>', $html );
+		$this->assertStringContainsString( '<a href="' . esc_url( Redirect_Edit::delete_url( $id ) ) . '" class="submitdelete"', $html );
+
+		$this->follow( Redirect_Edit::delete_url( $id ) );
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=old&redirect_type=page&paged=2&settings-updated=true' ), ( new Redirect_Edit( $this->records ) )->handle(), 'A row’s Delete returns to the same list.' );
+	}
+
+	public function test_while_the_list_is_first_built_an_empty_table_says_so(): void {
+		update_option( Ledger::RECENT_STATE, 'building' );
+
+		$html = $this->rendered();
+
+		$this->assertStringContainsString( '<td class="colspanchange" colspan="5">The list of recorded redirects is still being built.</td>', $html );
+		$this->assertStringNotContainsString( 'No redirects have been recorded yet.', $html, 'Records may exist that the list does not hold yet.' );
+
+		update_option( Ledger::RECENT_STATE, 'done:page' );
+		$this->assertStringContainsString( 'No redirects have been recorded yet.', $this->rendered() );
+	}
+
+	public function test_a_search_that_sanitizing_empties_finds_nothing_and_says_what_was_searched(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+
+		foreach ( [ '<script>alert(1)</script>', '%e9' ] as $search ) {
+			$_REQUEST['s'] = $search;
+			$html          = $this->rendered();
+
+			$this->assertStringContainsString( 'No redirects match your search.', $html, $search );
+			$this->assertStringNotContainsString( '/old-about/', $html, $search . ': not the whole list.' );
+			$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong><span dir="ltr">' . esc_html( $search ) . '</span></strong></span>', $html, $search );
+			$this->assertStringNotContainsString( '<script>', $html );
+		}
 	}
 
 	public function test_while_the_newest_list_is_built_the_tab_says_so(): void {

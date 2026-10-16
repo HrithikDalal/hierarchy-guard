@@ -15,9 +15,10 @@ use HierarchyGuard\Redirects\Records;
  * The Edit view of a recorded redirect, and the Redirects tab's actions:
  * save an edit, delete one record from its row or the Edit view, or delete
  * in bulk. The view and every action check manage_options and a nonce. An
- * action ends on the Redirects tab with a core notice that core's options
- * header prints; a save the records refuse prints the form again, with
- * what was entered and why it was not saved.
+ * action ends on the Redirects tab, with the list's search, filter and page
+ * it came from, and a core notice that core's options header prints; a
+ * save the records refuse prints the form again, with what was entered and
+ * why it was not saved.
  */
 final class Redirect_Edit {
 
@@ -50,41 +51,44 @@ final class Redirect_Edit {
 	}
 
 	/**
-	 * The Edit view's link for a record, behind its own nonce.
+	 * The Edit view's link for a record, behind its own nonce, carrying the
+	 * list's search, filter and page so Save, Cancel and Delete return to it.
 	 *
-	 * @param string $id Record ID.
+	 * @param string                    $id   Record ID.
+	 * @param array<string,string>|null $listing The list's arguments, from Redirects_Table::list_args(); null for the request's.
 	 * @return string
 	 */
-	public static function edit_url( string $id ): string {
-		return wp_nonce_url(
-			add_query_arg(
-				[
-					'action'   => 'edit',
-					'redirect' => $id,
-				],
-				Settings_Page::url( 'redirects' )
-			),
-			self::NONCE_EDIT . $id
-		);
+	public static function edit_url( string $id, ?array $listing = null ): string {
+		return self::action_url( 'edit', $id, $listing, self::NONCE_EDIT );
 	}
 
 	/**
-	 * The Delete link for a record, behind its own nonce.
+	 * The Delete link for a record, behind its own nonce, carrying the
+	 * list's search, filter and page so it returns to that list.
 	 *
-	 * @param string $id Record ID.
+	 * @param string                    $id   Record ID.
+	 * @param array<string,string>|null $listing The list's arguments, from Redirects_Table::list_args(); null for the request's.
 	 * @return string
 	 */
-	public static function delete_url( string $id ): string {
-		return wp_nonce_url(
-			add_query_arg(
-				[
-					'action'   => 'delete',
-					'redirect' => $id,
-				],
-				Settings_Page::url( 'redirects' )
-			),
-			self::NONCE_DELETE . $id
-		);
+	public static function delete_url( string $id, ?array $listing = null ): string {
+		return self::action_url( 'delete', $id, $listing, self::NONCE_DELETE );
+	}
+
+	/**
+	 * A link that runs an action on one record, behind the action's nonce.
+	 *
+	 * @param string                    $action edit or delete.
+	 * @param string                    $id     Record ID.
+	 * @param array<string,string>|null $listing The list's arguments; null for the request's.
+	 * @param string                    $nonce  The action's nonce prefix.
+	 * @return string
+	 */
+	private static function action_url( string $action, string $id, ?array $listing, string $nonce ): string {
+		$args = [
+			'action'   => $action,
+			'redirect' => $id,
+		];
+		return wp_nonce_url( add_query_arg( $args + ( $listing ?? Redirects_Table::list_args() ), Settings_Page::url( 'redirects' ) ), $nonce . $id );
 	}
 
 	/**
@@ -182,17 +186,22 @@ final class Redirect_Edit {
 		printf( '<form method="post" action="%s">', esc_url( Settings_Page::url( 'redirects' ) ) );
 		echo '<input type="hidden" name="action" value="save">';
 		printf( '<input type="hidden" name="redirect" value="%s">', esc_attr( (string) $record['id'] ) );
+		// The list's search, filter and page, for Save to return to.
+		foreach ( Redirects_Table::list_args() as $key => $value ) {
+			printf( '<input type="hidden" name="%1$s" value="%2$s">', esc_attr( $key ), esc_attr( rawurldecode( $value ) ) );
+		}
 		wp_nonce_field( self::NONCE_SAVE . $record['id'] );
 		echo '<table class="form-table" role="presentation"><tbody>';
 		printf( '<tr><th scope="row">%1$s</th><td>%2$s</td></tr>', esc_html__( 'Old URL', 'hierarchy-guard' ), Redirects_Table::old_label( $record ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- old_label() escapes its parts.
 		/* translators: 1: an example old URL, /about/team/; 2: where it leads, /team/. */
-		$now = Records::is_top_level( $record ) ? '<p>' . sprintf( esc_html__( 'Now redirects to the same page at the top level, for example %1$s to %2$s.', 'hierarchy-guard' ), '<code>/about/team/</code>', '<code>/team/</code>' ) . '</p>' : '';
+		$now = Records::is_top_level( $record ) ? '<p id="hierarchy-guard-target-now">' . sprintf( esc_html__( 'Now redirects to the same page at the top level, for example %1$s to %2$s.', 'hierarchy-guard' ), '<code>/about/team/</code>', '<code>/team/</code>' ) . '</p>' : '';
 		printf(
-			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="hierarchy-guard-target-description"><p class="description" id="hierarchy-guard-target-description">%4$s</p></td></tr>',
+			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="%5$shierarchy-guard-target-description"><p class="description" id="hierarchy-guard-target-description">%4$s</p></td></tr>',
 			esc_html__( 'Redirect to', 'hierarchy-guard' ),
 			$now, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 			esc_attr( $url ),
-			implode( ' ', $help ) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Each sentence is escaped above; the old URL is escaped inside its <code>.
+			implode( ' ', $help ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Each sentence is escaped above; the old URL is escaped inside its <code>.
+			'' !== $now ? 'hierarchy-guard-target-now ' : ''
 		);
 		echo '<tr><th scope="row">' . esc_html__( 'Code', 'hierarchy-guard' ) . '</th><td><fieldset><legend class="screen-reader-text"><span>' . esc_html__( 'Code', 'hierarchy-guard' ) . '</span></legend>';
 		printf( '<label><input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description" %1$s> %2$s</label><p class="description" id="hierarchy-guard-code-automatic-description">%3$s</p>', checked( 0, $code, false ), esc_html__( 'Automatic', 'hierarchy-guard' ), esc_html__( '301, or 302 while restoring a page from the Trash could undo the move.', 'hierarchy-guard' ) );
@@ -202,7 +211,7 @@ final class Redirect_Edit {
 		echo '</tbody></table>';
 		echo '<p class="submit">';
 		submit_button( __( 'Save', 'hierarchy-guard' ), 'primary', 'submit', false );
-		printf( ' <a class="button" href="%1$s">%2$s</a>', esc_url( Settings_Page::url( 'redirects' ) ), esc_html__( 'Cancel', 'hierarchy-guard' ) );
+		printf( ' <a class="button" href="%1$s">%2$s</a>', esc_url( add_query_arg( Redirects_Table::list_args(), Settings_Page::url( 'redirects' ) ) ), esc_html__( 'Cancel', 'hierarchy-guard' ) );
 		printf( ' <span id="delete-link"><a class="delete" href="%1$s" data-hierarchy-guard-confirm="%2$s">%3$s</a></span>', esc_url( self::delete_url( (string) $record['id'] ) ), esc_attr( self::confirm_one( $old ) ), esc_html__( 'Delete', 'hierarchy-guard' ) );
 		echo '</p>';
 		echo '</form>';
@@ -354,16 +363,7 @@ final class Redirect_Edit {
 	 * @return string
 	 */
 	private function tab_url( bool $notice ): string {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Only carried into the next address.
-		$paged = isset( $_REQUEST['paged'] ) ? absint( wp_unslash( $_REQUEST['paged'] ) ) : 0;
-		$args  = array_filter(
-			[
-				's'                       => rawurlencode( Redirects_Table::search() ),
-				Redirects_Table::TYPE_ARG => Redirects_Table::post_type(),
-				'paged'                   => $paged > 1 ? $paged : '',
-				'settings-updated'        => $notice ? 'true' : '',
-			]
-		);
+		$args = Redirects_Table::list_args() + ( $notice ? [ 'settings-updated' => 'true' ] : [] );
 		return add_query_arg( $args, Settings_Page::url( 'redirects' ) );
 	}
 }

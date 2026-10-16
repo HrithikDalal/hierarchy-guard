@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Admin;
 
+use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Records;
@@ -62,6 +63,13 @@ final class Redirects_Table extends WP_List_Table {
 	private ?int $shown = null;
 
 	/**
+	 * The list's search, filter and page, which the row links carry.
+	 *
+	 * @var array<string,string>
+	 */
+	private array $list = [];
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Records $records Records.
@@ -85,8 +93,39 @@ final class Redirects_Table extends WP_List_Table {
 	 */
 	public static function search(): string {
 		// Decoded first: sanitize_text_field() strips percent-encoded octets, as a pasted URL has them.
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A search reads, it changes nothing; sanitize_text_field() runs on the decoded text.
-		return isset( $_REQUEST['s'] ) && is_string( $_REQUEST['s'] ) ? trim( sanitize_text_field( rawurldecode( wp_unslash( $_REQUEST['s'] ) ) ) ) : '';
+		return trim( sanitize_text_field( rawurldecode( self::searched() ) ) );
+	}
+
+	/**
+	 * The search as it was typed, unslashed and trimmed, not sanitized: ''
+	 * for no search. A search that search() empties, as one of tags only,
+	 * is still a search, which finds nothing. Escape it to print it.
+	 *
+	 * @return string
+	 */
+	public static function searched(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A search reads, it changes nothing; search() sanitizes it, and it is escaped wherever it prints.
+		return isset( $_REQUEST['s'] ) && is_string( $_REQUEST['s'] ) ? trim( wp_unslash( $_REQUEST['s'] ) ) : '';
+	}
+
+	/**
+	 * The list's search, filter and page from the request, as query
+	 * arguments, the search percent-encoded: what a link from the list
+	 * carries, so the list comes back as it was.
+	 *
+	 * @param int|null $page The page shown, or null for the request's.
+	 * @return array<string,string>
+	 */
+	public static function list_args( ?int $page = null ): array {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Only carried into the next address.
+		$page = $page ?? ( isset( $_REQUEST['paged'] ) && is_string( $_REQUEST['paged'] ) ? absint( wp_unslash( $_REQUEST['paged'] ) ) : 0 );
+		return array_filter(
+			[
+				's'            => rawurlencode( self::searched() ),
+				self::TYPE_ARG => self::post_type(),
+				'paged'        => $page > 1 ? (string) $page : '',
+			]
+		);
 	}
 
 	/**
@@ -140,8 +179,18 @@ final class Redirects_Table extends WP_List_Table {
 	public function prepare_items(): void {
 		$this->_column_headers = [ $this->get_columns(), [], [], 'old' ];
 
-		$page           = $this->records->page( self::post_type(), self::search(), $this->get_pagenum() );
+		$page = $this->records->page( self::post_type(), self::search(), $this->get_pagenum() );
+		if ( '' !== self::searched() && '' === self::search() ) {
+			// Nothing was left to search for: no record matches it.
+			$page = [
+				'rows'   => [],
+				'total'  => 0,
+				'page'   => 1,
+				'capped' => $page['capped'],
+			];
+		}
 		$this->shown    = $page['page'];
+		$this->list     = self::list_args( $this->shown );
 		$this->items    = $page['rows'];
 		$this->capped   = $page['capped'];
 		$this->statuses = $this->records->statuses( $this->items );
@@ -199,8 +248,13 @@ final class Redirects_Table extends WP_List_Table {
 			esc_html_e( 'No redirects found.', 'hierarchy-guard' );
 			return;
 		}
-		if ( '' !== self::search() ) {
+		if ( '' !== self::searched() ) {
 			esc_html_e( 'No redirects match your search.', 'hierarchy-guard' );
+			return;
+		}
+		if ( Ledger::building() ) {
+			// Records may exist that the list does not hold yet.
+			esc_html_e( 'The list of recorded redirects is still being built.', 'hierarchy-guard' );
 			return;
 		}
 		esc_html_e( 'No redirects have been recorded yet.', 'hierarchy-guard' );
@@ -231,7 +285,8 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * The row's checkbox.
+	 * The row's checkbox, in core's markup: the label after the box fills
+	 * the cell, so a click anywhere in it ticks the box.
 	 *
 	 * @param array<string,mixed> $item Record.
 	 * @return string
@@ -240,7 +295,7 @@ final class Redirects_Table extends WP_List_Table {
 		/* translators: %s: an old URL, such as /about/team/. */
 		$label = sprintf( __( 'Select the redirect from %s', 'hierarchy-guard' ), (string) $item['old'] );
 		return sprintf(
-			'<label class="screen-reader-text" for="cb-select-%1$s">%2$s</label><input id="cb-select-%1$s" type="checkbox" name="redirect[]" value="%1$s" data-hierarchy-guard-confirm-one="%3$s" />',
+			'<input id="cb-select-%1$s" type="checkbox" name="redirect[]" value="%1$s" data-hierarchy-guard-confirm-one="%3$s" /><label for="cb-select-%1$s"><span class="screen-reader-text">%2$s</span></label>',
 			esc_attr( (string) $item['id'] ),
 			esc_html( $label ),
 			esc_attr( Redirect_Edit::confirm_one( (string) $item['old'] ) )
@@ -248,13 +303,14 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * The old URL, and for a page target the URLs under it.
+	 * The old URL, linked to Edit as core's row titles are, and for a page
+	 * target the URLs under it.
 	 *
 	 * @param array<string,mixed> $item Record.
 	 * @return string
 	 */
 	protected function column_old( $item ): string {
-		return self::old_label( $item );
+		return self::old_label( $item, Redirect_Edit::edit_url( (string) $item['id'], $this->list ) );
 	}
 
 	/**
@@ -326,14 +382,13 @@ final class Redirects_Table extends WP_List_Table {
 			[
 				'edit'   => sprintf(
 					'<a href="%1$s" aria-label="%2$s">%3$s</a>',
-					esc_url( Redirect_Edit::edit_url( $id ) ),
-					/* translators: %s: an old URL, such as /about/team/. */
-					esc_attr( sprintf( __( 'Edit the redirect from %s', 'hierarchy-guard' ), $old ) ),
+					esc_url( Redirect_Edit::edit_url( $id, $this->list ) ),
+					esc_attr( self::edit_label( $old ) ),
 					esc_html__( 'Edit', 'hierarchy-guard' )
 				),
 				'delete' => sprintf(
 					'<a href="%1$s" class="submitdelete" aria-label="%2$s" data-hierarchy-guard-confirm="%3$s">%4$s</a>',
-					esc_url( Redirect_Edit::delete_url( $id ) ),
+					esc_url( Redirect_Edit::delete_url( $id, $this->list ) ),
 					esc_attr( $delete ),
 					esc_attr( Redirect_Edit::confirm_one( $old ) ),
 					esc_html__( 'Delete', 'hierarchy-guard' )
@@ -343,14 +398,30 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * A record's old URL as HTML, in code so it reads left to right in a
-	 * right-to-left language too, with "and the URLs under it" for a page target.
+	 * What a link to a record's Edit view says to a screen reader.
 	 *
-	 * @param array<string,mixed> $item Record.
+	 * @param string $old The record's old URL.
 	 * @return string
 	 */
-	public static function old_label( array $item ): string {
+	private static function edit_label( string $old ): string {
+		/* translators: %s: an old URL, such as /about/team/. */
+		return sprintf( __( 'Edit the redirect from %s', 'hierarchy-guard' ), $old );
+	}
+
+	/**
+	 * A record's old URL as HTML, in code so it reads left to right in a
+	 * right-to-left language too, with "and the URLs under it" for a page
+	 * target; linked, as a row title, when a link is given.
+	 *
+	 * @param array<string,mixed> $item Record.
+	 * @param string              $edit The record's Edit link, or '' for none.
+	 * @return string
+	 */
+	public static function old_label( array $item, string $edit = '' ): string {
 		$old = '<code>' . esc_html( (string) $item['old'] ) . '</code>';
+		if ( '' !== $edit ) {
+			$old = sprintf( '<a class="row-title" href="%1$s" aria-label="%2$s">%3$s</a>', esc_url( $edit ), esc_attr( self::edit_label( (string) $item['old'] ) ), $old );
+		}
 		if ( null !== $item['target'] && '' !== (string) $item['target']['url'] ) {
 			return $old;
 		}
