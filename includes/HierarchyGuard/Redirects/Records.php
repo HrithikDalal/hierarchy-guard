@@ -470,7 +470,9 @@ final class Records {
 	 * top-level root-list entry, whose field starts empty. A URL that
 	 * url_to_postid() resolves to a page of the record's own type makes a page
 	 * target: the record moves onto that page, out of the root list or off
-	 * its old holder, and its code goes with it. The holder's own URL makes it
+	 * its old holder, and its code goes with it, while the page is published
+	 * and anyone can view it, not under the Trash; a link to any other, a
+	 * draft's preview or a page in the Trash, is refused. The holder's own URL makes it
 	 * a page target again. Any other http(s) URL with a host makes a URL
 	 * target, stored beside the record, unless it is the old URL itself,
 	 * which the server would refuse as a loop, or a URL on this site that
@@ -537,6 +539,10 @@ final class Records {
 		if ( Paths::uri( $page ) === $path ) {
 			/* translators: %s: the old URL, such as /about/team/. */
 			return new WP_Error( 'hierarchy_guard_same_path', sprintf( __( 'That page is at %s, so it needs no redirect.', 'hierarchy-guard' ), $record['old'] ) );
+		}
+		// url_to_postid() reads ?page_id= whatever the page's status: the record would move where nothing is served from, a page in the Trash taking another holder's redirect with it.
+		if ( ! self::reachable( $page, '' ) ) {
+			return new WP_Error( 'hierarchy_guard_unpublished', __( 'That page isn’t published.', 'hierarchy-guard' ) );
 		}
 
 		$this->ledger->record( (int) $page->ID, $path );

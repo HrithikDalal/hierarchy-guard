@@ -668,6 +668,41 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_a_link_to_a_page_that_is_not_published_is_refused_and_the_record_stays(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['about'], 'old-about' );
+		$this->ledger->record( $this->ids['history'], 'shared-old' );
+		$this->ledger->record( $this->ids['team'], 'shared-old' );
+		$trashed = $this->page( 'gone' );
+		wp_trash_post( $trashed );
+		$draft   = $this->page( 'soon', 0, 'draft' );
+		$private = $this->page( 'staff', 0, 'private' );
+		$record  = $this->records->find( Records::id( $this->ids['about'], 'page', 'old-about' ) );
+		$before  = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+
+		$links = [
+			'a page in the Trash' => home_url( '/?page_id=' . $trashed ),
+			'a draft'             => home_url( '/?page_id=' . $draft ),
+			'a preview link'      => home_url( '/?page_id=' . $draft . '&preview=true' ),
+			'a private page'      => home_url( '/?page_id=' . $private ),
+		];
+		foreach ( $links as $label => $link ) {
+			$result = $this->records->save( $record, $link, 0 );
+			$this->assertInstanceOf( WP_Error::class, $result, $label );
+			$this->assertSame( 'hierarchy_guard_unpublished', $result->get_error_code(), $label );
+			$this->assertSame( 'That page isn’t published.', $result->get_error_message(), $label );
+		}
+		$this->assertSame( [ 'old-about' ], $this->ledger->paths_for( $this->ids['about'] ), 'The record stays on its holder.' );
+		$this->assertSame( [], $this->ledger->paths_for( $trashed ) );
+		$this->assertSame( $before, wp_cache_get_last_changed( Ledger::CACHE_GROUP ), 'Nothing written.' );
+		$this->assertSame( get_permalink( $this->ids['about'] ), $this->served_at( '/old-about/' )['url'] ?? null, 'Still served.' );
+
+		// An older holder's row moved into the Trash would take the newer holder's redirect with it.
+		$older = $this->records->find( Records::id( $this->ids['history'], 'page', 'shared-old' ) );
+		$this->assertSame( 'hierarchy_guard_unpublished', $this->records->save( $older, home_url( '/?page_id=' . $trashed ), 0 )->get_error_code() );
+		$this->assertSame( get_permalink( $this->ids['team'] ), $this->served_at( '/shared-old/' )['url'] ?? null );
+	}
+
 	public function test_a_page_at_the_old_url_is_refused(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
 		$draft  = $this->page( 'old-about', 0, 'draft' );
