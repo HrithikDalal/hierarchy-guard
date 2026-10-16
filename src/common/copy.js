@@ -780,6 +780,68 @@ export function pairsText( pairs ) {
 }
 
 /**
+ * The Tree view's toggle: "Show the subpages of “About”", or "Hide …" once open.
+ *
+ * @param {boolean} open  Whether the row is open.
+ * @param {string}  title Page title.
+ * @return {string} Label.
+ */
+export function treeToggleLabel( open, title ) {
+	return open
+		? sprintf(
+				/* translators: %s: page title. */
+				__( 'Hide the subpages of “%s”', 'hierarchy-guard' ),
+				title
+			)
+		: sprintf(
+				/* translators: %s: page title. */
+				__( 'Show the subpages of “%s”', 'hierarchy-guard' ),
+				title
+			);
+}
+
+/**
+ * The Tree view's "Show more" row: "50 of 128 subpages shown".
+ *
+ * @param {number}  shown  Subpages on the screen.
+ * @param {number}  total  Subpages in all, at most the cap.
+ * @param {boolean} capped Whether more than the cap exist.
+ * @return {string} Line.
+ */
+export function treeShownLine( shown, total, capped = false ) {
+	return sprintf(
+		/* translators: 1: subpages on the screen, such as 50, 2: subpages in all, such as 128 or 1,000+. */
+		_n(
+			'%1$s of %2$s subpage shown',
+			'%1$s of %2$s subpages shown',
+			total,
+			'hierarchy-guard'
+		),
+		formatCount( shown ),
+		formatCount( total, capped )
+	);
+}
+
+/**
+ * The Tree view's last row past the cap: "Only the first 1,000 subpages are shown."
+ *
+ * @param {number} cap The most subpages the tree shows.
+ * @return {string} Sentence.
+ */
+export function treeCappedSentence( cap ) {
+	return sprintf(
+		/* translators: %s: the most subpages the tree shows, such as 1,000. */
+		_n(
+			'Only the first %s subpage is shown.',
+			'Only the first %s subpages are shown.',
+			cap,
+			'hierarchy-guard'
+		),
+		formatCount( cap )
+	);
+}
+
+/**
  * The row actions and labels of a subpage the Tree view loaded, as core
  * words them for the rows it prints.
  *

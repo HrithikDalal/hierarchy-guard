@@ -44,3 +44,44 @@
 .fixed .column-hierarchy_guard {
 	width: 20%;
 }
+
+// The Tree view: each level indents its title by one step, and a row's
+// toggle sits in the step before its title, so titles line up by level.
+// A status row (Show more, loading, a failure, the cap) lines up with the
+// titles of the subpages it is about.
+.hierarchy-guard-tree-view #the-list {
+
+	.column-title {
+		padding-inline-start: 34px;
+	}
+
+	@for $level from 1 through 20 {
+		.level-#{$level} .column-title,
+		.level-#{$level}.hierarchy-guard-status > .colspanchange {
+			padding-inline-start: 34px + 24px * $level;
+		}
+	}
+
+	.column-title .hierarchy-guard-toggle {
+		display: inline-block;
+		width: 24px;
+		margin-inline-start: -24px;
+		vertical-align: top;
+		text-decoration: none;
+	}
+}
+
+// On a phone, at core's own breakpoint, the step halves and the indent
+// stops at half the row, so a deep title keeps its room.
+@media screen and (max-width: 782px) {
+
+	.hierarchy-guard-tree-view #the-list {
+
+		@for $level from 1 through 20 {
+			.level-#{$level} .column-title,
+			.level-#{$level}.hierarchy-guard-status > .colspanchange {
+				padding-inline-start: min(#{34px + 12px * $level}, 50%);
+			}
+		}
+	}
+}
