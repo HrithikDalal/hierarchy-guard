@@ -48,7 +48,14 @@
 // The Tree view: each level indents its title by one step, and a row's
 // toggle sits in the step before its title, so titles line up by level.
 // A status row (Show more, loading, a failure, the cap) lines up with the
-// titles of the subpages it is about.
+// titles of the subpages it is about. A row deeper than level 20 indents
+// as level 20: $deep matches a level class that is none of level-0 to 20.
+$deep: '[class*="level-"]';
+
+@for $level from 0 through 20 {
+	$deep: $deep + ":not(.level-#{$level})";
+}
+
 .hierarchy-guard-tree-view #the-list {
 
 	.column-title {
@@ -60,6 +67,11 @@
 		.level-#{$level}.hierarchy-guard-status > .colspanchange {
 			padding-inline-start: 34px + 24px * $level;
 		}
+	}
+
+	#{$deep} .column-title,
+	#{$deep}.hierarchy-guard-status > .colspanchange {
+		padding-inline-start: 34px + 24px * 20;
 	}
 
 	.column-title .hierarchy-guard-toggle {
@@ -82,6 +94,11 @@
 			.level-#{$level}.hierarchy-guard-status > .colspanchange {
 				padding-inline-start: min(#{34px + 12px * $level}, 50%);
 			}
+		}
+
+		#{$deep} .column-title,
+		#{$deep}.hierarchy-guard-status > .colspanchange {
+			padding-inline-start: min(#{34px + 12px * 20}, 50%);
 		}
 	}
 }
