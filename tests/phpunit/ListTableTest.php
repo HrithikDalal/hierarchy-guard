@@ -315,6 +315,13 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertSame( $vars, $this->table->filter_request( $vars ), 'The filtered ID is not a page.' );
 	}
 
+	public function test_an_array_post_type_is_left_alone_without_a_warning(): void {
+		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
+		$vars                          = [ 'post_type' => [ 'post', 'page' ] ];
+
+		$this->assertSame( $vars, $this->table->filter_request( $vars ) );
+	}
+
 	public function test_the_filter_stops_at_the_cap_and_says_so(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
 		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];

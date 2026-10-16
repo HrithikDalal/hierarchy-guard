@@ -64,7 +64,7 @@ final class Tree_View {
 	 */
 	public function mode( string $post_type ): string {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only list views, like core's own.
-		if ( ! is_admin() || 'edit.php' !== ( $GLOBALS['pagenow'] ?? '' ) || ! Post_Types::is_supported( $post_type ) ) {
+		if ( ! self::on_list() || ! Post_Types::is_supported( $post_type ) ) {
 			return '';
 		}
 		$view   = isset( $_GET[ self::QUERY_VAR ] ) ? sanitize_key( wp_unslash( $_GET[ self::QUERY_VAR ] ) ) : '';
@@ -81,8 +81,7 @@ final class Tree_View {
 	 * Hooks the Tree view's pieces into the list screen being loaded.
 	 */
 	public function load(): void {
-		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-		$type   = null !== $screen ? (string) $screen->post_type : '';
+		$type = self::screen_type();
 		if ( ! Post_Types::is_supported( $type ) ) {
 			return;
 		}
@@ -106,8 +105,7 @@ final class Tree_View {
 	 * @return mixed
 	 */
 	public function views( $views ) {
-		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-		$type   = null !== $screen ? (string) $screen->post_type : '';
+		$type = self::screen_type();
 		if ( ! is_array( $views ) || ! Post_Types::is_supported( $type ) ) {
 			return $views;
 		}
@@ -192,5 +190,15 @@ final class Tree_View {
 	 */
 	private static function on_list(): bool {
 		return is_admin() && 'edit.php' === ( $GLOBALS['pagenow'] ?? '' );
+	}
+
+	/**
+	 * The post type of the current screen, or ''.
+	 *
+	 * @return string
+	 */
+	private static function screen_type(): string {
+		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+		return null !== $screen ? (string) $screen->post_type : '';
 	}
 }

@@ -126,6 +126,13 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( 'tree', $this->tree->mode( 'page' ), 'A search or status that is not text is no search and no status.' );
 	}
 
+	public function test_a_crafted_subtree_filter_is_no_filter_and_warns_nothing(): void {
+		$_GET[ List_Table::QUERY_VAR ] = [ (string) $this->ids['about'] ];
+
+		$this->assertSame( 0, List_Table::under() );
+		$this->assertSame( 'tree', $this->tree->mode( 'page' ), 'A subtree filter that is not text is no filter.' );
+	}
+
 	public function test_the_request_filter_leaves_the_front_end_and_an_array_post_type_alone(): void {
 		$vars = [ 'post_type' => [ 'post', 'page' ] ];
 		$this->assertSame( $vars, $this->tree->filter_request( $vars ), 'An array post type in wp-admin is not one list.' );
@@ -248,6 +255,19 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertFalse( apply_filters( 'quick_edit_enabled_for_post_type', true, 'page' ), 'No Quick Edit in the tree.' );
 		$this->assertStringContainsString( 'hierarchy-guard-tree-view', apply_filters( 'admin_body_class', '' ) );
 		$this->assertArrayHasKey( 'hierarchy_guard_tree', apply_filters( 'views_edit-page', [] ) );
+		// phpcs:enable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound,WordPress.NamingConventions.ValidHookName.UseUnderscores
+	}
+
+	public function test_a_search_in_the_tree_keeps_the_tree_s_list_but_not_its_indents(): void {
+		$_GET['s'] = 'team';
+
+		$this->tree->load();
+
+		// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound,WordPress.NamingConventions.ValidHookName.UseUnderscores -- Core's own list filters.
+		$this->assertArrayNotHasKey( 'cb', apply_filters( 'manage_page_posts_columns', [ 'cb' => '' ] ) );
+		$this->assertSame( [], apply_filters( 'bulk_actions-edit-page', [ 'trash' => 'Move to Trash' ] ) );
+		$this->assertFalse( apply_filters( 'quick_edit_enabled_for_post_type', true, 'page' ) );
+		$this->assertStringNotContainsString( 'hierarchy-guard-tree-view', apply_filters( 'admin_body_class', '' ), 'A search is flat: no indents.' );
 		// phpcs:enable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound,WordPress.NamingConventions.ValidHookName.UseUnderscores
 	}
 

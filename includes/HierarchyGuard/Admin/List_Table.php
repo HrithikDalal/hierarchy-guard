@@ -100,7 +100,7 @@ final class List_Table {
 	 */
 	public static function under(): int {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- A read-only list filter, like core's own list filters.
-		return isset( $_GET[ self::QUERY_VAR ] ) ? absint( wp_unslash( $_GET[ self::QUERY_VAR ] ) ) : 0;
+		return isset( $_GET[ self::QUERY_VAR ] ) && is_string( $_GET[ self::QUERY_VAR ] ) ? absint( wp_unslash( $_GET[ self::QUERY_VAR ] ) ) : 0;
 	}
 
 	/**
@@ -216,7 +216,7 @@ final class List_Table {
 			return $vars;
 		}
 		$root = self::under();
-		$type = (string) ( $vars['post_type'] ?? '' );
+		$type = isset( $vars['post_type'] ) && is_string( $vars['post_type'] ) ? $vars['post_type'] : '';
 		if ( ! self::is_root( $root, $type ) ) {
 			return $vars;
 		}
