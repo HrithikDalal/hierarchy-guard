@@ -717,7 +717,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
 <section id="data">
   <span class="eyebrow sec-eyebrow">Persistence</span>
   <h2>Data model</h2>
-  <div class="prose"><p>Everything lives in core tables. Post meta is removed by core when a post is deleted, and <code>uninstall.php</code> removes the rest in batches of a thousand rows, per site on multisite. All plugin caches live in a <code>hierarchy_guard</code> cache group with its own last-changed key, bumped only by the plugin's own writes, because the posts key changes on every post or meta write anywhere on the site. Edits and deletes on the Redirects tab are plugin writes and bump it too.</p></div>
+  <div class="prose"><p>Everything lives in core tables. Post meta is removed by core when a post is deleted, and <code>uninstall.php</code> removes the rest in batches of a thousand rows, per site on multisite, and clears each site's <code>hierarchy_guard_rebuild_recent</code> event. All plugin caches live in a <code>hierarchy_guard</code> cache group with its own last-changed key, bumped only by the plugin's own writes, because the posts key changes on every post or meta write anywhere on the site. Edits and deletes on the Redirects tab are plugin writes and bump it too.</p></div>
   <div class="scroll">
   <table class="t">
     <thead><tr><th>Where</th><th>Key</th><th>Value</th><th>Purpose</th></tr></thead>
