@@ -191,7 +191,8 @@ final class Records {
 	 * row's exact old path (Batch_Resolver::served(), the rules the server
 	 * runs), the first that applies:
 	 *
-	 * - in use: something is shown at the old URL, a blog post or an archive
+	 * - in use: something is shown at the old URL, a blog post, an archive
+	 *   or another supported type's post at a path its rewrite base starts
 	 *   included, so the server never runs; or another record answers the
 	 *   path instead: a newer holder, a page in the Trash that holds the
 	 *   newest entry, a post entry over a root-list entry, or another type's
@@ -205,7 +206,8 @@ final class Records {
 	 *   follows for good (cycles()); or a record
 	 *   the rules reach that leads nowhere the server sends, as when the
 	 *   rewritten path is one several posts share and core finds one nobody
-	 *   can view, or the model cannot tell;
+	 *   can view, or the model cannot tell, as for a URL WordPress hands to
+	 *   an author's or a date's rule (Batch_Resolver::UNTOLD);
 	 * - off: built-in redirects are off, or the site has plain permalinks;
 	 * - active: the server serves the row's own record at its old URL. A
 	 *   top-level root-list entry leads nowhere at its own old URL, only for
@@ -259,11 +261,12 @@ final class Records {
 				$status = self::STATUS_UNPUBLISHED;
 			} elseif ( ! $pretty ) {
 				$status = $hidden ? self::STATUS_UNPUBLISHED : ( $cannot ? self::STATUS_REFUSED : self::STATUS_OFF );
-			} elseif ( Batch_Resolver::NOT_404 === $answer || ( 0 !== $answer && ! $own ) ) {
+			} elseif ( Batch_Resolver::NOT_404 === $answer || ( 0 !== $answer && Batch_Resolver::UNTOLD !== $answer && ! $own ) ) {
 				$status = self::STATUS_IN_USE;
 			} elseif ( $hidden ) {
 				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( $cannot ) {
+			} elseif ( $cannot || Batch_Resolver::UNTOLD === $answer ) {
+				// The model can't tell what WordPress shows there: never Active.
 				$status = self::STATUS_REFUSED;
 			} elseif ( ! $own && self::held_by_another( $facts[ $type ][ $path ] ?? null, $first, $row['holder'] ) ) {
 				$status = self::STATUS_IN_USE;

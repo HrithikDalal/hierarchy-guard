@@ -259,6 +259,19 @@ final class Prefetched_View implements Ledger_View {
 	}
 
 	/**
+	 * Whether the 404 model tells what WordPress shows at a request path
+	 * looked up (Rules::tells()): a path two pages share, which core was not
+	 * asked about, is taken as one of them showing there, which it tells.
+	 *
+	 * @param string $path Normalized path.
+	 * @return bool
+	 */
+	public function tells( string $path ): bool {
+		$there = $this->requests[ $path ] ?? 0;
+		return Batch_Resolver::UNKNOWN === $there || Rules::tells( $this->routes[ $path ] ?? [ false, 'other', '' ], $there > 0 ? $this->post( $there ) : null );
+	}
+
+	/**
 	 * Whether a request path was looked up.
 	 *
 	 * @param string $path Normalized path.

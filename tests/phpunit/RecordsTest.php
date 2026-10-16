@@ -955,6 +955,80 @@ final class RecordsTest extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_a_page_entry_under_another_type_s_rewrite_base_reads_as_the_server_serves_it(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->register_docs();
+		$this->set_permalink_structure( '/%postname%/' );
+		$draft = $this->page( 'whats-on', 0, 'draft' );
+		self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		// Page entries whose old URLs WordPress hands to the docs type's own rule.
+		$this->ledger->record( $this->ids['about'], 'docs/old-guide' );
+		$this->ledger->record( $draft, 'docs/old-draft' );
+		$this->ledger->record( $this->ids['team'], 'docs/guide' );
+		wp_cache_flush();
+
+		$this->assertSame( get_permalink( $this->ids['about'] ), $this->served_at( '/docs/old-guide/' )['url'] ?? null, 'Precondition: no doc is there, so the server serves the page entry.' );
+		$this->assertNull( $this->served_at( '/docs/old-draft/' ), 'Precondition: its page is a draft.' );
+		$this->assertNull( $this->served_at( '/docs/guide/' ), 'Precondition: the doc is shown.' );
+		$this->assertSame(
+			[
+				'/docs/guide/'     => Records::STATUS_IN_USE,
+				'/docs/old-draft/' => Records::STATUS_UNPUBLISHED,
+				'/docs/old-guide/' => Records::STATUS_ACTIVE,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
+	public function test_a_row_at_a_url_the_404_model_can_t_tell_about_reads_that_it_can_t_be_sent(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->ledger->record( $this->ids['about'], 'author/ghost' );
+		$this->ledger->record( $this->ids['team'], 'crew' );
+
+		$this->assertSame( get_permalink( $this->ids['about'] ), $this->served_at( '/author/ghost/' )['url'] ?? null, 'Precondition: there is no such author, and the model does not look into author archives.' );
+		$this->assertSame(
+			[
+				'/author/ghost/' => Records::STATUS_REFUSED,
+				'/crew/'         => Records::STATUS_ACTIVE,
+			],
+			$this->statuses_by_old(),
+			'Not "a page uses this URL": the model can’t tell, so the row never reads Active.'
+		);
+	}
+
+	public function test_a_row_another_type_answers_first_with_a_url_target_is_in_use(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$this->register_docs();
+		$this->set_permalink_structure( '/%postname%/' );
+		$guide = self::factory()->post->create(
+			[
+				'post_type' => 'hg_docs',
+				'post_name' => 'guide',
+			]
+		);
+		$draft = $this->page( 'whats-on', 0, 'draft' );
+		$this->ledger->record( $guide, 'x' );
+		$this->ledger->set_target( 'hg_docs', 'x', $guide, 'https://example.net/x/', 0 );
+		$this->ledger->record( $this->ids['team'], 'docs/x' );
+		$this->ledger->record( $draft, 'docs/x' );
+		wp_cache_flush();
+
+		$this->assertSame( 'https://example.net/x/', $this->served_at( '/docs/x/' )['url'] ?? null, 'Precondition: the docs entry answers first.' );
+		$this->assertSame(
+			[
+				'/docs/x/ ' . $guide             => Records::STATUS_ACTIVE,
+				'/docs/x/ ' . $this->ids['team'] => Records::STATUS_IN_USE,
+				'/docs/x/ ' . $draft             => Records::STATUS_IN_USE,
+			],
+			$this->statuses_by_old()
+		);
+	}
+
 	public function test_every_row_that_reads_active_is_served_by_the_server(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->page( 'faq' );

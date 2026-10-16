@@ -47,6 +47,14 @@ final class Batch_Resolver {
 	public const URL = -3;
 
 	/**
+	 * What served() answers for a path WordPress routes to a rule the 404
+	 * model does not look into (Rules::tells()), as an author's or a date's:
+	 * it is taken to show something, so no redirect reaches it, but whether
+	 * the server would serve a record there is not known.
+	 */
+	public const UNTOLD = -4;
+
+	/**
 	 * Most paths several posts share that core's own get_page_by_path() is asked about, per batch.
 	 */
 	public const FALLBACKS = 20;
@@ -59,7 +67,8 @@ final class Batch_Resolver {
 	 * served. A path with more segments than the server's cap is not served.
 	 * The server tries a type whose rewrite prefix starts the request before
 	 * this one, longest prefix first, so a path one of those resolves is that
-	 * post's. A path redirected to a post of this type is temporary when the
+	 * post's, and one a record of those answers with its URL target reads
+	 * NOT_404: no record of this type is reached there. A path redirected to a post of this type is temporary when the
 	 * server would answer it with a 302: a restore from the trash could still
 	 * undo the move the redirect follows. A record's override is honoured as
 	 * the server honours it: a URL target answers its exact old path with
@@ -73,7 +82,7 @@ final class Batch_Resolver {
 	 * @param array<string,true>|null                 $temporary Set to the paths redirected by this type's records that are temporary.
 	 * @param array<string,array{url:string,code:int}>|null $chosen Set to the URL target and the chosen code of each path this type's records answer with an override.
 	 * @param array<string,array{0:string,1:int}>|null $used Set to the prefix and the holder (Rules::ROOT for the root list) of the first record the rules use for each path, where no type the server tries first takes the path; a path the rules use no record for is absent.
-	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there, URL for a URL target.
+	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there, UNTOLD when the 404 model can't tell, URL for a URL target.
 	 */
 	public static function served( array $paths, string $post_type, array &$facts, ?array &$temporary = null, ?array &$chosen = null, ?array &$used = null ): array {
 		$prefix = Server::prefix( $post_type );
@@ -128,8 +137,8 @@ final class Batch_Resolver {
 			foreach ( $list as [ $type, $path ] ) {
 				$first = $resolved[ $type ][ $path ] ?? self::UNKNOWN;
 				if ( 0 !== $first ) {
-					// The server redirects there first, or may: not here.
-					$target = $first > 0 ? $first : 0;
+					// The server redirects there first, to that type's post or a record's URL target, or may: not here.
+					$target = $first > 0 ? $first : ( self::URL === $first ? self::NOT_404 : 0 );
 					break;
 				}
 			}
@@ -212,7 +221,7 @@ final class Batch_Resolver {
 	 * @param array<string,true>|null                 $held      Set to the paths led to a post or URL through a prefix a page in the trash holds.
 	 * @param array<string,array{url:string,code:int}>|null $answers Set to each answered path's URL target and chosen code, where it has either.
 	 * @param array<string,array{0:string,1:int}>|null $firsts Set to the prefix and holder of the first record the rules used for each path, where they used one.
-	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, URL for a URL target, UNKNOWN when it cannot be told.
+	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, UNTOLD when the 404 model can't tell, URL for a URL target, UNKNOWN when it cannot be told.
 	 */
 	private static function run( array $paths, string $post_type, array &$facts, bool $requests, ?array &$held = null, ?array &$answers = null, ?array &$firsts = null ): array {
 		$held    = [];
@@ -280,7 +289,8 @@ final class Batch_Resolver {
 						continue;
 					}
 					if ( null === $target ) {
-						$out[ $start ] = $view->knows( $start ) && ! $view->is_404( $start, $post_type ) ? self::NOT_404 : 0;
+						$visible       = $view->knows( $start ) && ! $view->is_404( $start, $post_type );
+						$out[ $start ] = $visible ? ( $view->tells( $start ) ? self::NOT_404 : self::UNTOLD ) : 0;
 						continue;
 					}
 				} catch ( OutOfBoundsException $unread ) {
@@ -452,8 +462,9 @@ final class Batch_Resolver {
 	 * that the path counts as UNKNOWN, as a request and as a candidate.
 	 * Each request path is routed by the rewrite rules (Rules::route()), and
 	 * what the rule after the page rule asks for is read too: blog posts and
-	 * attachments by slug in the same query, categories and tags in one more.
-	 * The posts found are primed.
+	 * attachments by slug, and a post of another type by its path as
+	 * get_page_by_path() finds it, in the same query; categories and tags in
+	 * one more. The posts found are primed.
 	 *
 	 * @param string[] $paths      Normalized paths, looked up as a request is.
 	 * @param string[] $candidates Normalized paths, looked up as the resolver does.
@@ -475,8 +486,16 @@ final class Batch_Resolver {
 			}
 		}
 
+		// Other types' posts the rules ask for, by path.
+		$by_type = [];
+		foreach ( $asked as $kind => $slugs ) {
+			if ( str_starts_with( (string) $kind, 'type:' ) ) {
+				$by_type[ substr( (string) $kind, 5 ) ] = array_map( 'strval', array_keys( $slugs ) );
+			}
+		}
+
 		$names = [];
-		foreach ( array_merge( $paths, $candidates ) as $path ) {
+		foreach ( array_merge( $paths, $candidates, ...array_values( $by_type ) ) as $path ) {
 			foreach ( explode( '/', (string) $path ) as $name ) {
 				$names[ $name ] = true;
 			}
@@ -491,9 +510,10 @@ final class Batch_Resolver {
 
 		$names        = array_map( 'strval', array_keys( $names ) );
 		$placeholders = implode( ',', array_fill( 0, count( $names ), '%s' ) );
-		$types        = [] !== $paths ? ( isset( $asked['post'] ) ? "%s, 'attachment', 'post'" : "%s, 'attachment'" ) : '%s';
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per segment of the paths and slug a rule asks for; $types is a fixed placeholder list; core's get_page_by_path() query for every path at once, on the post_name index.
-		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name, post_parent, post_type FROM {$wpdb->posts} WHERE post_name IN ( {$placeholders} ) AND post_type IN ( {$types} )", ...array_merge( $names, [ $post_type ] ) ), OBJECT_K );
+		$typed        = array_values( array_unique( array_merge( [ $post_type ], array_map( 'strval', array_keys( $by_type ) ) ) ) );
+		$types        = implode( ', ', array_fill( 0, count( $typed ), '%s' ) ) . ( [] !== $paths ? ( isset( $asked['post'] ) ? ", 'attachment', 'post'" : ", 'attachment'" ) : '' );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per segment of the paths and slug a rule asks for; $types holds only %s, one per type asked about, and fixed type names; core's get_page_by_path() query for every path at once, on the post_name index.
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name, post_parent, post_type FROM {$wpdb->posts} WHERE post_name IN ( {$placeholders} ) AND post_type IN ( {$types} )", ...array_merge( $names, $typed ) ), OBJECT_K );
 		// Core's own query reads one slug's rows by ID on the post_name index, and its loop keeps the first or the last.
 		ksort( $rows );
 
@@ -539,6 +559,26 @@ final class Batch_Resolver {
 			}
 		}
 
+		// The other types' posts at the paths the rules ask for, as get_page_by_path() finds them for a type.
+		foreach ( $by_type as $type => $slugs ) {
+			[ $found, $unsure ] = self::match( $slugs, $rows, $named, $type, true );
+			foreach ( $unsure as $slug ) {
+				unset( $found[ $slug ] );
+				if ( $budget-- > 0 ) {
+					$post = get_page_by_path( $slug, OBJECT, $type );
+					if ( $post instanceof WP_Post ) {
+						$found[ $slug ] = (int) $post->ID;
+					}
+				} else {
+					// Which one core finds is not known: taken to be shown.
+					$found[ $slug ] = self::UNKNOWN;
+				}
+			}
+			foreach ( $slugs as $slug ) {
+				$shown[ 'type:' . $type ][ $slug ] = isset( $found[ $slug ] ) ? [ $found[ $slug ] ] : [];
+			}
+		}
+
 		$ids = array_values( array_unique( array_filter( array_merge( array_values( $at ), array_values( $there ) ), static fn( int $id ): bool => $id > 0 ) ) );
 		if ( [] !== $ids ) {
 			_prime_post_caches( $ids, false, false );
@@ -547,7 +587,7 @@ final class Batch_Resolver {
 		$others = [];
 		foreach ( $shown as $by_slug ) {
 			foreach ( $by_slug as $list ) {
-				$others = array_merge( $others, $list );
+				$others = array_merge( $others, array_filter( $list, static fn( int $id ): bool => $id > 0 ) );
 			}
 		}
 		self::prime_with_ancestors( array_values( array_unique( $others ) ) );
@@ -555,7 +595,7 @@ final class Batch_Resolver {
 		$there_now = [];
 		foreach ( $shown as $kind => $by_slug ) {
 			foreach ( $by_slug as $slug => $list ) {
-				$there_now[ $kind ][ $slug ] = [] !== array_filter( $list, 'is_post_publicly_viewable' );
+				$there_now[ $kind ][ $slug ] = in_array( self::UNKNOWN, $list, true ) || [] !== array_filter( $list, static fn( int $id ): bool => $id > 0 && is_post_publicly_viewable( $id ) );
 			}
 		}
 		return [ $at, $there, $routes, $there_now + self::terms( $asked ) ];
