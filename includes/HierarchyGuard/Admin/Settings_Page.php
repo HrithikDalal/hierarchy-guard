@@ -189,10 +189,12 @@ final class Settings_Page {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$tab    = self::current_tab();
-		$search = 'redirects' === $tab ? Redirects_Table::search() : '';
+		$tab = self::current_tab();
+		// The search heading belongs to the list, not the Edit view, whose links carry the list's search.
+		$listing = 'redirects' === $tab && ! $this->edit->is_editing();
+		$search  = $listing ? Redirects_Table::search() : '';
 		// A search sanitizing empties, as one of tags only, says what was searched, escaped.
-		$search = '' === $search && 'redirects' === $tab ? Redirects_Table::searched() : $search;
+		$search = '' === $search && $listing ? Redirects_Table::searched() : $search;
 		echo '<div class="wrap">';
 		if ( '' === $search ) {
 			echo '<h1>' . esc_html__( 'Hierarchy Guard', 'hierarchy-guard' ) . '</h1>';
@@ -274,6 +276,9 @@ final class Settings_Page {
 		$table->search_box( __( 'Search Redirects', 'hierarchy-guard' ), 'hierarchy-guard-search' );
 		$table->display();
 		echo '</form>';
+		$checks = __( 'Status checks posts and pages at each old URL.', 'hierarchy-guard' );
+		$others = __( 'Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked.', 'hierarchy-guard' );
+		printf( '<p class="description">%s</p>', esc_html( $checks . ' ' . $others ) );
 	}
 
 	/**

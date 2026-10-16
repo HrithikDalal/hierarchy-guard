@@ -254,8 +254,8 @@ final class Redirects_Table extends WP_List_Table {
 			return;
 		}
 		if ( Ledger::building() ) {
-			// Records may exist that the list does not hold yet.
-			esc_html_e( 'The list of recorded redirects is still being built.', 'hierarchy-guard' );
+			// Records may exist that the list does not hold yet; the notice above says so.
+			esc_html_e( 'No redirects are listed yet.', 'hierarchy-guard' );
 			return;
 		}
 		esc_html_e( 'No redirects have been recorded yet.', 'hierarchy-guard' );
@@ -384,7 +384,8 @@ final class Redirects_Table extends WP_List_Table {
 				'edit'   => sprintf(
 					'<a href="%1$s" aria-label="%2$s">%3$s</a>',
 					esc_url( Redirect_Edit::edit_url( $id, $this->list ) ),
-					esc_attr( self::edit_label( $old ) ),
+					/* translators: %s: an old URL, such as /about/team/. */
+					esc_attr( sprintf( __( 'Edit the redirect from %s', 'hierarchy-guard' ), $old ) ),
 					esc_html__( 'Edit', 'hierarchy-guard' )
 				),
 				'delete' => sprintf(
@@ -399,17 +400,6 @@ final class Redirects_Table extends WP_List_Table {
 	}
 
 	/**
-	 * What a link to a record's Edit view says to a screen reader.
-	 *
-	 * @param string $old The record's old URL.
-	 * @return string
-	 */
-	private static function edit_label( string $old ): string {
-		/* translators: %s: an old URL, such as /about/team/. */
-		return sprintf( __( 'Edit the redirect from %s', 'hierarchy-guard' ), $old );
-	}
-
-	/**
 	 * A record's old URL as HTML, in code so it reads left to right in a
 	 * right-to-left language too, with "and the URLs under it" for a page
 	 * target; linked, as a row title, when a link is given.
@@ -421,7 +411,8 @@ final class Redirects_Table extends WP_List_Table {
 	public static function old_label( array $item, string $edit = '' ): string {
 		$old = '<code>' . esc_html( (string) $item['old'] ) . '</code>';
 		if ( '' !== $edit ) {
-			$old = sprintf( '<a class="row-title" href="%1$s" aria-label="%2$s">%3$s</a>', esc_url( $edit ), esc_attr( self::edit_label( (string) $item['old'] ) ), $old );
+			// Named by its own text, the old URL, as core's row titles are.
+			$old = sprintf( '<a class="row-title" href="%1$s">%2$s</a>', esc_url( $edit ), $old );
 		}
 		if ( null !== $item['target'] && '' !== (string) $item['target']['url'] ) {
 			return $old;

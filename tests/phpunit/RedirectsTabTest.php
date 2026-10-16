@@ -540,7 +540,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 			$this->assertStringContainsString( $arg, $edit );
 			$this->assertStringContainsString( $arg, Redirect_Edit::delete_url( $id ) );
 		}
-		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '" aria-label="Edit the redirect from /old-21/"><code>/old-21/</code></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do.' );
+		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '"><code>/old-21/</code></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do, named by its own text.' );
 		$this->assertStringContainsString( '<a href="' . esc_url( $edit ) . '" aria-label="Edit the redirect from /old-21/">Edit</a>', $html );
 		$this->assertStringContainsString( '<a href="' . esc_url( Redirect_Edit::delete_url( $id ) ) . '" class="submitdelete"', $html );
 
@@ -553,7 +553,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<td class="colspanchange" colspan="5">The list of recorded redirects is still being built.</td>', $html );
+		$this->assertStringContainsString( '<td class="colspanchange" colspan="5">No redirects are listed yet.</td>', $html, 'The notice above says why; the cell does not repeat it.' );
 		$this->assertStringNotContainsString( 'No redirects have been recorded yet.', $html, 'Records may exist that the list does not hold yet.' );
 
 		update_option( Ledger::RECENT_STATE, 'done:page' );
@@ -572,6 +572,13 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 			$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong><span dir="ltr">' . esc_html( $search ) . '</span></strong></span>', $html, $search );
 			$this->assertStringNotContainsString( '<script>', $html );
 		}
+	}
+
+	public function test_under_the_table_the_tab_says_what_status_checks(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+
+		$this->assertStringContainsString( '</table>', $this->rendered() );
+		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">Status checks posts and pages at each old URL. Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked.</p>#s', $this->rendered() );
 	}
 
 	public function test_while_the_newest_list_is_built_the_tab_says_so(): void {

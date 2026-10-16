@@ -343,6 +343,15 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->follow( Redirect_Edit::edit_url( $this->id ) );
 
 		$html = $this->view();
+		set_current_screen( 'settings_page_hierarchy-guard' );
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		ob_start();
+		( new Settings_Page( new Providers(), $this->records ) )->render();
+		$page = (string) ob_get_clean();
+		set_current_screen( 'front' );
+		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $page );
+		$this->assertStringNotContainsString( 'class="subtitle"', $page, 'The search heading belongs to the list, not the Edit view.' );
+		$this->assertStringContainsString( '<h1>Hierarchy Guard</h1>', $page );
 
 		$this->assertStringContainsString( '<input type="hidden" name="s" value="old about"><input type="hidden" name="redirect_type" value="page"><input type="hidden" name="paged" value="2">', $html, 'Save posts them back.' );
 		$this->assertStringContainsString( '<a class="button" href="' . esc_url( $back ) . '">Cancel</a>', $html );
