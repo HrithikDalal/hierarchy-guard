@@ -187,7 +187,7 @@ final class Tree_View {
 		}
 		if ( [] === $posts && (int) $query->get( 'paged' ) > 1 ) {
 			// Past the last page core finds nothing and counts every page of the type instead; one row of the view's own query gives its count.
-			$count              = new WP_Query(
+			$count                = new WP_Query(
 				array_merge(
 					$query->query_vars,
 					[
@@ -200,7 +200,9 @@ final class Tree_View {
 					]
 				)
 			);
-			$query->found_posts = (int) $count->found_posts;
+			$per_page             = (int) $query->get( 'posts_per_page' );
+			$query->found_posts   = (int) $count->found_posts;
+			$query->max_num_pages = $per_page > 0 ? (int) ceil( $query->found_posts / $per_page ) : 1;
 			return $posts;
 		}
 		if ( 'tree' !== $mode ) {
@@ -247,9 +249,9 @@ final class Tree_View {
 	public static function place_url( string $post_type, int $open = 0, int $children_page = 1 ): string {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only list arguments, carried over as core carries them.
 		$orderby = isset( $_GET['orderby'] ) && is_string( $_GET['orderby'] ) ? sanitize_text_field( wp_unslash( $_GET['orderby'] ) ) : '';
-		$order   = isset( $_GET['order'] ) && is_string( $_GET['order'] ) ? strtolower( sanitize_key( wp_unslash( $_GET['order'] ) ) ) : '';
-		$month   = isset( $_GET['m'] ) ? absint( wp_unslash( $_GET['m'] ) ) : 0;
-		$paged   = isset( $_GET['paged'] ) ? absint( wp_unslash( $_GET['paged'] ) ) : 0;
+		$order   = isset( $_GET['order'] ) && is_string( $_GET['order'] ) ? sanitize_key( wp_unslash( $_GET['order'] ) ) : '';
+		$month   = isset( $_GET['m'] ) && is_string( $_GET['m'] ) ? absint( wp_unslash( $_GET['m'] ) ) : 0;
+		$paged   = isset( $_GET['paged'] ) && is_string( $_GET['paged'] ) ? absint( wp_unslash( $_GET['paged'] ) ) : 0;
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$args = [
 			'orderby'               => '' !== $orderby ? $orderby : null,
@@ -295,23 +297,26 @@ final class Tree_View {
 	}
 
 	/**
-	 * The page hierarchy_guard_open names, or 0.
+	 * The page hierarchy_guard_open names, or 0. A negative number names
+	 * nothing: its sign is not stripped.
 	 *
 	 * @return int
 	 */
 	public static function opened(): int {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- A read-only list argument.
-		return isset( $_GET[ self::OPEN_VAR ] ) && is_string( $_GET[ self::OPEN_VAR ] ) ? absint( wp_unslash( $_GET[ self::OPEN_VAR ] ) ) : 0;
+		$open = isset( $_GET[ self::OPEN_VAR ] ) && is_string( $_GET[ self::OPEN_VAR ] ) ? intval( wp_unslash( $_GET[ self::OPEN_VAR ] ) ) : 0;
+		return max( 0, $open );
 	}
 
 	/**
-	 * The page of the opened page's subpages, from 1.
+	 * The page of the opened page's subpages, from 1; a number below 1 is
+	 * the first page.
 	 *
 	 * @return int
 	 */
 	public static function children_page(): int {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- A read-only list argument.
-		return isset( $_GET[ self::CHILDREN_PAGE_VAR ] ) && is_string( $_GET[ self::CHILDREN_PAGE_VAR ] ) ? max( 1, absint( wp_unslash( $_GET[ self::CHILDREN_PAGE_VAR ] ) ) ) : 1;
+		return isset( $_GET[ self::CHILDREN_PAGE_VAR ] ) && is_string( $_GET[ self::CHILDREN_PAGE_VAR ] ) ? max( 1, intval( wp_unslash( $_GET[ self::CHILDREN_PAGE_VAR ] ) ) ) : 1;
 	}
 
 	/**
@@ -380,7 +385,8 @@ final class Tree_View {
 		// The opened page, or a level whose next page lies past the cap: one page of 50.
 		$page = min( $next > 0 ? 1 : self::children_page(), max( 1, (int) ceil( count( $ordered ) / self::PER_PAGE ) ) );
 		$ids  = array_slice( $ordered, ( $page - 1 ) * self::PER_PAGE, self::PER_PAGE );
-		_prime_post_caches( $ids, false, false );
+		// Every row put in core's results, the path down included, with its meta and terms in one go, as core's own query reads its rows.
+		_prime_post_caches( array_merge( array_slice( $chain, 1, $level ), $ids ), true, true );
 		$this->rows[ $node ] = array_merge(
 			$fact,
 			[
