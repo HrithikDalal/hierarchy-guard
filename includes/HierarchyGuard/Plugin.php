@@ -56,8 +56,10 @@ final class Plugin {
 		add_action( 'delete_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 		add_action( 'switch_blog', [ Post_Types::class, 'reset' ] );
 
-		// The newest-records list drops an entry whenever its row goes, however it goes.
+		// The newest-records list drops an entry whenever its row goes, however it goes: a post deleted for good drops all of its entries at once.
 		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
+		add_action( 'before_delete_post', [ Ledger::class, 'on_delete_post' ], PHP_INT_MAX, 2 );
+		add_action( 'deleted_post', [ Ledger::class, 'on_deleted_post' ] );
 		// The newest-records list is rebuilt daily from WP-Cron; admin_init makes sure the run is scheduled.
 		add_action( 'admin_init', [ Ledger::class, 'schedule_rebuild' ] );
 		add_action( Ledger::REBUILD_HOOK, [ Ledger::class, 'rebuild_recent' ] );

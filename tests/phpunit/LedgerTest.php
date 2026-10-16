@@ -621,6 +621,13 @@ final class LedgerTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Runs the rebuild's WP-Cron event, as WP-Cron does.
+	 */
+	private static function run_rebuild(): void {
+		do_action( Ledger::REBUILD_HOOK ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_rebuild_recent.
+	}
+
+	/**
 	 * The rebuild's events scheduled now, single or recurring.
 	 *
 	 * @return array<int,array<string,mixed>> Each event, with its time.
@@ -646,7 +653,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertFalse( wp_get_schedule( Ledger::REBUILD_HOOK ), 'A single event, which schedules the next one when it runs.' );
 
 		$this->assertSame( 'hierarchy_guard_rebuild_recent', Ledger::REBUILD_HOOK );
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 
 		$this->assertSame( [ $second, $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
 		$this->assertFalse( Ledger::building() );
@@ -657,14 +664,14 @@ final class LedgerTest extends WP_UnitTestCase {
 	public function test_the_rebuild_schedules_its_own_next_run_a_day_later_and_only_one(): void {
 		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
 
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 
 		$events = self::rebuild_events();
 		$this->assertCount( 1, $events );
 		$this->assertFalse( $events[0]['schedule'] ?? false, 'A single event: once the plugin is inactive, nothing schedules it again.' );
 		$this->assertGreaterThan( time() + DAY_IN_SECONDS - MINUTE_IN_SECONDS, $events[0]['time'] );
 
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		Ledger::schedule_rebuild();
 		$this->ledger->record( $this->about, 'one' );
 		$this->ledger->forget( $this->about, 'one' );
@@ -703,7 +710,7 @@ final class LedgerTest extends WP_UnitTestCase {
 			$wpdb->update( $wpdb->options, [ 'option_value' => maybe_serialize( [ 'page' => $write() ] ) ], [ 'option_name' => Ledger::RECENT ] );
 		};
 		add_action( 'update_option_' . Ledger::RECENT, $after );
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		remove_action( 'update_option_' . Ledger::RECENT, $after );
 		wp_cache_delete( Ledger::RECENT, 'options' );
 	}
@@ -799,7 +806,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		};
 		add_action( 'update_option_' . Ledger::RECENT, $after );
 
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		remove_action( 'update_option_' . Ledger::RECENT, $after );
 		wp_cache_delete( Ledger::RECENT, 'options' );
 
@@ -881,7 +888,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$break  = static fn( string $query ): string => str_contains( $query, 'ORDER BY pm.meta_id DESC LIMIT' ) ? 'SELECT nope FROM nowhere' : $query;
 		add_filter( 'query', $break );
 		$errors = $wpdb->suppress_errors( true );
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		$wpdb->suppress_errors( $errors );
 		remove_filter( 'query', $break );
 
@@ -891,7 +898,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		Ledger::schedule_rebuild();
 		$this->assertLessThanOrEqual( time() + MINUTE_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The next admin load has it run again soon.' );
 
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		$this->assertFalse( Ledger::building() );
 		$this->assertSame( [ $first ], $this->ledger->recent( [ 'page' ] )['ids'] );
 	}
@@ -908,7 +915,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		add_filter( 'hierarchy_guard_post_types', $only );
 		Post_Types::reset();
 		Ledger::schedule_rebuild();
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		$this->assertFalse( Ledger::building() );
 		$this->assertSame( [], $this->ledger->recent( [ 'hg_docs' ] )['ids'], 'Precondition: the type was not supported then.' );
 
@@ -921,7 +928,7 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertFalse( Ledger::building(), 'A first build is done: no notice comes back for a type supported later.' );
 		$this->assertSame( $next, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The next daily run builds it.' );
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		remove_filter( 'hierarchy_guard_post_types', $both );
 		Post_Types::reset();
 		$this->assertSame( [ $entry ], $this->ledger->recent( [ 'hg_docs' ] )['ids'] );
@@ -935,7 +942,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		Post_Types::reset();
 		// WP-Cron takes a single event off before it runs it.
 		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		remove_filter( 'hierarchy_guard_post_types', $cron );
 
 		$admin = static fn(): array => [ 'page', 'hg_admin_only' ];
@@ -967,7 +974,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertLessThanOrEqual( time() + MINUTE_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The list fell below the cap with older entries left out: the rebuild runs soon.' );
 		$this->assertCount( 1, self::rebuild_events(), 'Brought forward, not added.' );
 		$this->assertFalse( Ledger::building(), 'Quietly: the tab does not say the list is being built for a refill.' );
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 		$this->assertSame(
 			[
@@ -1040,7 +1047,7 @@ final class LedgerTest extends WP_UnitTestCase {
 			false
 		);
 
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 
 		$this->assertSame( [ $this->meta_id( $this->about, 'two' ), $one ], $this->ledger->recent( [ 'page' ] )['ids'] );
 		$this->assertFalse( Ledger::building(), 'A daily rebuild is quiet.' );
@@ -1056,7 +1063,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$wpdb->delete( $wpdb->postmeta, [ 'meta_id' => $two ] );
 		$this->assertContains( $two, $this->ledger->recent( [ 'page' ] )['ids'], 'Precondition: still listed.' );
 
-		do_action( 'hierarchy_guard_rebuild_recent' );
+		self::run_rebuild();
 
 		$this->assertSame( [ $this->meta_id( $this->about, 'one' ) ], $this->ledger->recent( [ 'page' ] )['ids'] );
 	}
@@ -1142,5 +1149,81 @@ final class LedgerTest extends WP_UnitTestCase {
 		);
 
 		$this->assertSame( [ $kept ], $this->ledger->recent( [ 'page' ] )['ids'], 'Only the entry that still exists is listed.' );
+	}
+
+	public function test_a_post_deleted_for_good_leaves_the_newest_list_before_core_deletes_its_meta(): void {
+		global $wp_filter;
+		$hooked = static function ( string $hook, int $priority, string $method ) use ( $wp_filter ): bool {
+			foreach ( $wp_filter[ $hook ]->callbacks[ $priority ] ?? [] as $callback ) {
+				if ( [ Ledger::class, $method ] === $callback['function'] ) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		$this->assertTrue( $hooked( 'before_delete_post', PHP_INT_MAX, 'on_delete_post' ), 'Last on before_delete_post: core fires delete_post after the meta is gone.' );
+		$this->assertTrue( $hooked( 'deleted_post', 10, 'on_deleted_post' ) );
+	}
+
+	public function test_deleting_a_holder_reads_and_writes_the_newest_list_once_however_many_entries_it_holds(): void {
+		$this->assertSame( $this->queries_to_delete_a_holder( 5 ), $this->queries_to_delete_a_holder( 50 ), 'Core deletes the meta rows one by one; the list costs the same for each holder.' );
+	}
+
+	/**
+	 * Queries deleting a page with this many listed entries costs, beyond
+	 * deleting one with as many other meta rows.
+	 *
+	 * @param int $entries Entries on the page.
+	 * @return int
+	 */
+	private function queries_to_delete_a_holder( int $entries ): int {
+		global $wpdb;
+
+		$keep   = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$holder = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$plain  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$this->ledger->record( $keep, 'kept-' . $entries );
+		for ( $i = 1; $i <= $entries; $i++ ) {
+			$this->ledger->record( $holder, 'gone-' . $entries . '-' . $i );
+			add_post_meta( $plain, '_plain_' . $i, 'x' );
+		}
+		$kept = $this->meta_id( $keep, 'kept-' . $entries );
+
+		$queries = get_num_queries();
+		wp_delete_post( $holder, true );
+		$listed  = get_num_queries() - $queries;
+		$queries = get_num_queries();
+		wp_delete_post( $plain, true );
+		$other = get_num_queries() - $queries;
+
+		$ids = $this->ledger->recent( [ 'page' ] )['ids'];
+		$this->assertContains( $kept, $ids, 'Another page’s entry stays.' );
+		foreach ( $ids as $id ) {
+			$this->assertNotNull( $wpdb->get_var( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_id = %d", $id ) ), 'The deleted page’s entries left the list.' );
+		}
+		return $listed - $other;
+	}
+
+	public function test_the_merge_back_writes_the_list_again_when_another_request_deleted_its_row(): void {
+		global $wpdb;
+
+		$a = $this->old_entry( $this->about, 'a' );
+		$b = $this->old_entry( $this->about, 'b' );
+		update_option( Ledger::RECENT, [], false );
+		$after = static function () use ( $wpdb ): void {
+			static $done = false;
+			if ( $done ) {
+				return;
+			}
+			$done = true;
+			$wpdb->delete( $wpdb->options, [ 'option_name' => Ledger::RECENT ] );
+		};
+		add_action( 'update_option_' . Ledger::RECENT, $after );
+		self::run_rebuild();
+		remove_action( 'update_option_' . Ledger::RECENT, $after );
+		wp_cache_delete( Ledger::RECENT, 'options' );
+
+		$this->assertSame( [ $b, $a ], $this->ledger->recent( [ 'page' ] )['ids'], 'The merged list is written as a new row.' );
 	}
 }

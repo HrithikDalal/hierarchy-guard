@@ -55,6 +55,14 @@ final class Ledger {
 	private static array $recent_pending = [];
 
 	/**
+	 * Posts being deleted for good, from before_delete_post to deleted_post:
+	 * their entries left the newest-records list at once.
+	 *
+	 * @var array<int,true>
+	 */
+	private static array $deleting = [];
+
+	/**
 	 * Meta key for a (post type, path) pair.
 	 *
 	 * @param string $post_type Post type name.
@@ -805,7 +813,8 @@ final class Ledger {
 	 * @param int                                      $cap   Most entries per type.
 	 */
 	private static function merge_back( array $built, array $types, int $cap ): void {
-		$now = self::fresh_recent();
+		$exists = false;
+		$now    = self::fresh_recent( $exists );
 		if ( $now === $built ) {
 			return;
 		}
@@ -824,7 +833,12 @@ final class Ledger {
 			];
 		}
 		// The cache still holds what the rebuild wrote; with the row as it is now, update_option() writes even a list equal to that.
-		wp_cache_set( self::RECENT, $fresh, 'options' );
+		if ( $exists ) {
+			wp_cache_set( self::RECENT, $fresh, 'options' );
+		} else {
+			// Another request deleted the row: update_option() adds it again once the cache no longer says it is there.
+			wp_cache_delete( self::RECENT, 'options' );
+		}
 		update_option( self::RECENT, $now, false );
 	}
 
@@ -850,19 +864,67 @@ final class Ledger {
 
 	/**
 	 * Takes entries out of the newest-records list when their rows are
-	 * deleted, by forget(), prune(), claim() or core deleting their post:
-	 * hooked on deleted_post_meta. Other keys cost a prefix check.
+	 * deleted, by forget(), prune() or claim(): hooked on deleted_post_meta.
+	 * Other keys cost a prefix check. The rows of a post being deleted for
+	 * good left the list already, all at once (on_delete_post()).
 	 *
 	 * @param int[]  $meta_ids  Meta IDs deleted.
 	 * @param int    $object_id Post ID.
 	 * @param string $meta_key  Meta key.
 	 */
 	public static function on_deleted_meta( $meta_ids, $object_id, $meta_key ): void {
-		unset( $object_id );
-		if ( ! str_starts_with( (string) $meta_key, self::KEY_PREFIX ) ) {
+		if ( ! str_starts_with( (string) $meta_key, self::KEY_PREFIX ) || isset( self::$deleting[ (int) $object_id ] ) ) {
 			return;
 		}
-		$gone = array_flip( array_map( 'intval', (array) $meta_ids ) );
+		self::drop_recent( array_map( 'intval', (array) $meta_ids ) );
+	}
+
+	/**
+	 * Takes a supported post's entries out of the newest-records list at
+	 * once when it is deleted for good: hooked on before_delete_post, last,
+	 * which runs before core deletes the post's meta one row at a time (core
+	 * fires delete_post only after that). One query for the post's entry
+	 * IDs, and the list read and written once whatever their number, rather
+	 * than once per row; on_deleted_meta() then passes over the post's rows
+	 * until deleted_post.
+	 *
+	 * @param int          $post_id Post ID.
+	 * @param WP_Post|null $post    The post.
+	 */
+	public static function on_delete_post( $post_id, $post = null ): void {
+		global $wpdb;
+
+		$post_id = (int) $post_id;
+		if ( ! $post instanceof WP_Post || ! Post_Types::is_supported( (string) $post->post_type ) ) {
+			return;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the post_id index, once per post deleted for good.
+		$ids = (array) $wpdb->get_col( $wpdb->prepare( "SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s", $post_id, $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
+
+		self::$deleting[ $post_id ] = true;
+		if ( [] !== $ids ) {
+			self::drop_recent( array_map( 'intval', $ids ) );
+		}
+	}
+
+	/**
+	 * Ends what on_delete_post() began, on deleted_post.
+	 *
+	 * @param int $post_id Post ID.
+	 */
+	public static function on_deleted_post( $post_id ): void {
+		unset( self::$deleting[ (int) $post_id ] );
+	}
+
+	/**
+	 * Takes deleted entries out of the newest-records list: from what
+	 * deferred() holds, and, when the list names any, from the list as the
+	 * database holds it, written once.
+	 *
+	 * @param int[] $meta_ids Meta IDs of the entries deleted.
+	 */
+	private static function drop_recent( array $meta_ids ): void {
+		$gone = array_flip( $meta_ids );
 
 		// Entries recorded inside deferred() wait in memory: a row deleted in the same batch never reaches the list.
 		foreach ( self::$recent_pending as $type => $ids ) {
@@ -974,13 +1036,16 @@ final class Ledger {
 	 * request wrote meanwhile is kept. Two writes at the very same moment
 	 * can still lose one; the daily rebuild puts it back.
 	 *
+	 * @param bool|null $exists Set to whether the option's row exists.
 	 * @return array<string,array{ids:int[],more:bool}>
 	 */
-	private static function fresh_recent(): array {
+	private static function fresh_recent( ?bool &$exists = null ): array {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One read of one option row, right before it is written.
-		$all = maybe_unserialize( (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::RECENT ) ) );
+		$row    = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::RECENT ) );
+		$exists = null !== $row;
+		$all    = maybe_unserialize( (string) $row );
 		return is_array( $all ) ? $all : [];
 	}
 
