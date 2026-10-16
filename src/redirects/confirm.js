@@ -79,3 +79,26 @@ export function guard( event, question, ask ) {
 	event.preventDefault();
 	return false;
 }
+
+/**
+ * Asks before every Delete on the page: a click on a Delete link; a
+ * middle-click on one, which opens it in a new tab with an auxclick and no
+ * click; and a submit of the table's form. Another button, as the right
+ * one that opens a menu, asks nothing.
+ *
+ * @param {Object}                        doc The document.
+ * @param {(question: string) => boolean} ask Asks and answers true or false.
+ */
+export function listen( doc, ask ) {
+	doc.addEventListener( 'click', ( event ) => {
+		guard( event, linkQuestion( event.target ), ask );
+	} );
+	doc.addEventListener( 'auxclick', ( event ) => {
+		if ( 1 === event.button ) {
+			guard( event, linkQuestion( event.target ), ask );
+		}
+	} );
+	doc.addEventListener( 'submit', ( event ) => {
+		guard( event, bulkQuestion( event.target, event.submitter ), ask );
+	} );
+}

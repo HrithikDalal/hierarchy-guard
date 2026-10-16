@@ -2,7 +2,7 @@
  * What a Delete on the Redirects tab asks, and what Cancel does.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { bulkQuestion, guard, linkQuestion } from '../confirm';
+import { bulkQuestion, guard, linkQuestion, listen } from '../confirm';
 
 const ONE = 'Delete the redirect from /about/team/? This can’t be undone.';
 const MANY = 'Delete the selected redirects? This can’t be undone.';
@@ -159,5 +159,72 @@ describe( 'the answer', () => {
 		expect( guard( event, null, ask ) ).toBe( true );
 		expect( ask ).not.toHaveBeenCalled();
 		expect( event.preventDefault ).not.toHaveBeenCalled();
+	} );
+} );
+
+describe( 'the page', () => {
+	/**
+	 * A stand-in document that keeps its listeners.
+	 *
+	 * @return {Object} Document, with fire( type, event ).
+	 */
+	const page = () => {
+		const listeners = {};
+		return {
+			addEventListener: ( type, listener ) => {
+				listeners[ type ] = listener;
+			},
+			fire: ( type, event ) => listeners[ type ]( event ),
+		};
+	};
+	const link = {
+		closest: () => element( { 'data-hierarchy-guard-confirm': ONE } ),
+	};
+
+	it( 'asks before a middle-click opens a Delete link in a new tab, and stops it on Cancel', () => {
+		const doc = page();
+		const ask = vi.fn( () => false );
+		listen( doc, ask );
+		const event = { button: 1, target: link, preventDefault: vi.fn() };
+
+		doc.fire( 'auxclick', event );
+
+		expect( ask ).toHaveBeenCalledWith( ONE );
+		expect( event.preventDefault ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'lets a middle-click go on on OK, and asks nothing for another button', () => {
+		const doc = page();
+		const ask = vi.fn( () => true );
+		listen( doc, ask );
+		const middle = { button: 1, target: link, preventDefault: vi.fn() };
+		const right = { button: 2, target: link, preventDefault: vi.fn() };
+
+		doc.fire( 'auxclick', middle );
+		doc.fire( 'auxclick', right );
+
+		expect( ask ).toHaveBeenCalledTimes( 1 );
+		expect( middle.preventDefault ).not.toHaveBeenCalled();
+		expect( right.preventDefault ).not.toHaveBeenCalled();
+	} );
+
+	it( 'still asks on a click and on a bulk submit', () => {
+		const doc = page();
+		const ask = vi.fn( () => false );
+		listen( doc, ask );
+		const click = { target: link, preventDefault: vi.fn() };
+		const submit = {
+			target: form( { action: 'delete', ticked: 2 } ),
+			submitter: { id: 'doaction' },
+			preventDefault: vi.fn(),
+		};
+
+		doc.fire( 'click', click );
+		doc.fire( 'submit', submit );
+
+		expect( ask ).toHaveBeenNthCalledWith( 1, ONE );
+		expect( ask ).toHaveBeenNthCalledWith( 2, MANY );
+		expect( click.preventDefault ).toHaveBeenCalledTimes( 1 );
+		expect( submit.preventDefault ).toHaveBeenCalledTimes( 1 );
 	} );
 } );

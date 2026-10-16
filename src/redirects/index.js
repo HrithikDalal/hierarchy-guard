@@ -1,17 +1,9 @@
 /**
  * Settings › Hierarchy Guard › Redirects: Delete asks first, from a row, the
- * Edit view or in bulk, as core asks before deleting a term. Without
- * JavaScript the Delete runs, as in core.
+ * Edit view or in bulk, as core asks before deleting a term, a middle-click
+ * on a Delete link included. Without JavaScript the Delete runs, as in core.
  */
-import { bulkQuestion, guard, linkQuestion } from './confirm';
+import { listen } from './confirm';
 
 // eslint-disable-next-line no-alert
-const ask = ( question ) => window.confirm( question );
-
-window.document.addEventListener( 'click', ( event ) => {
-	guard( event, linkQuestion( event.target ), ask );
-} );
-
-window.document.addEventListener( 'submit', ( event ) => {
-	guard( event, bulkQuestion( event.target, event.submitter ), ask );
-} );
+listen( window.document, ( question ) => window.confirm( question ) );
