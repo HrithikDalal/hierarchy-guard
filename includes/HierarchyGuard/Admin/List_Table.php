@@ -475,7 +475,7 @@ final class List_Table {
 	 * @param string $post_type Post type name.
 	 * @return int
 	 */
-	private static function per_page( string $post_type ): int {
+	public static function per_page( string $post_type ): int {
 		$per_page = (int) get_user_option( "edit_{$post_type}_per_page" );
 		if ( $per_page < 1 ) {
 			$per_page = 20;
