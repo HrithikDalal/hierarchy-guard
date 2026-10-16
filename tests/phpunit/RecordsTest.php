@@ -746,6 +746,78 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( $main, $sent['url'] ?? null );
 	}
 
+	/**
+	 * The home path read in any case, as WordPress routes it: a target at
+	 * the old URL itself spelled so is refused and never sent, and a loop
+	 * of two records spelled so is refused at save and stopped by the
+	 * server.
+	 *
+	 * @param Ledger  $ledger  The site's ledger.
+	 * @param Records $records The site's records.
+	 * @param string  $upper   The home URL with its path in capitals, such as http://host/SUB.
+	 * @param string  $other   The home URL with its path in mixed case, such as http://host/Sub.
+	 */
+	private function assert_the_home_path_is_read_in_any_case( Ledger $ledger, Records $records, string $upper, string $other ): void {
+		$find = fn( int $holder, string $path ): array => $records->find( Records::id( $holder, 'page', $path ) );
+		$a    = $this->page( 'ha' );
+		$b    = $this->page( 'hb' );
+		$c    = $this->page( 'hc' );
+		$ledger->record( $a, 'old-a' );
+		$ledger->record( $b, 'old-b' );
+		$ledger->record( $c, 'old-c' );
+
+		$this->assertSame( 'hierarchy_guard_own_url', $records->save( $find( $a, 'old-a' ), $upper . '/old-a/', 0 )->get_error_code(), $upper . '/old-a/ is the old URL itself.' );
+		$this->assertSame( 'hierarchy_guard_redirected', $records->save( $find( $b, 'old-b' ), $other . '/old-c/', 0 )->get_error_code(), $other . '/old-c/ is another recorded old URL.' );
+
+		// Written straight into the ledger, as before the Edit view refused them.
+		$ledger->set_target( 'page', 'old-a', $a, $upper . '/old-a/', 0 );
+		$ledger->set_target( 'page', 'old-b', $b, $other . '/old-c/', 0 );
+		$ledger->set_target( 'page', 'old-c', $c, $upper . '/old-b/', 0 );
+		wp_cache_flush();
+		$rows     = $records->page( '', '', 1 )['rows'];
+		$statuses = $records->statuses( $rows );
+		foreach ( $rows as $row ) {
+			$this->assertSame( Records::STATUS_REFUSED, $statuses[ $row['id'] ], $row['old'] . ' can’t be sent.' );
+		}
+		foreach ( [ home_url( '/old-a/' ), $upper . '/old-a/', home_url( '/old-b/' ), $other . '/old-c/', $upper . '/old-b/' ] as $request ) {
+			$this->go_to( $request );
+			$this->assertTrue( is_404(), 'Precondition: ' . $request . ' is a 404.' );
+			$this->assertNull( ( new Server( new Resolver( $ledger ) ) )->target_for_current_request(), $request . ' sends nothing.' );
+		}
+	}
+
+	public function test_on_a_site_in_a_subdirectory_its_home_path_is_read_in_any_case(): void {
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$origin = untrailingslashit( home_url() );
+		$home   = static fn(): string => $origin . '/blog';
+		add_filter( 'pre_option_home', $home );
+		$this->set_permalink_structure( '/%postname%/' );
+
+		$this->assertTrue( Server::is_here( $origin . '/BLOG/about/' ) );
+		$this->assertSame( '/about/', \HierarchyGuard\Paths::relative( $origin . '/Blog/about/' ) );
+		$this->assert_the_home_path_is_read_in_any_case( $this->ledger, $this->records, $origin . '/BLOG', $origin . '/Blog' );
+		remove_filter( 'pre_option_home', $home );
+	}
+
+	public function test_on_a_subdirectory_subsite_its_home_path_is_read_in_any_case(): void {
+		if ( ! is_multisite() ) {
+			$this->markTestSkipped( 'Multisite only: run with WP_MULTISITE=1.' );
+		}
+		$origin = untrailingslashit( home_url() );
+		$blog   = self::factory()->blog->create( [ 'path' => '/sub/' ] );
+		switch_to_blog( $blog );
+		Post_Types::reset();
+		$this->set_permalink_structure( '/%postname%/' );
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$ledger = new Ledger();
+		try {
+			$this->assert_the_home_path_is_read_in_any_case( $ledger, new Records( $ledger ), $origin . '/SUB', $origin . '/Sub' );
+		} finally {
+			restore_current_blog();
+			Post_Types::reset();
+		}
+	}
+
 	public function test_a_row_is_in_use_when_a_published_post_page_or_attachment_is_at_its_old_url(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$this->register_docs();

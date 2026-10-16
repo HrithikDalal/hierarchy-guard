@@ -214,7 +214,8 @@ final class Paths {
 		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
 
-		if ( '' !== $home && '/' !== $home && str_starts_with( $path, $home ) ) {
+		// The home path in any case, as WP::parse_request() strips it.
+		if ( '' !== $home && '/' !== $home && 0 === stripos( $path, $home ) ) {
 			$path = '/' . substr( $path, strlen( $home ) );
 		}
 		if ( '' === $path ) {
