@@ -402,6 +402,147 @@ describe( 'the tree grid', () => {
 		expect( document.activeElement ).toBe( row( 9 ) );
 	} );
 
+	it( 'moves down from the Show more button to the next row', async () => {
+		mountScreen(
+			coreRow( { id: 9, title: 'Locations', children: 128 } ) +
+				coreRow( { id: 8, title: 'Contact', position: 2 } )
+		);
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+
+		press( more, 'ArrowDown' );
+
+		expect( document.activeElement ).toBe( row( 8 ) );
+	} );
+
+	it( 'leaves keys with Alt, Control or Command to the browser', () => {
+		bindTree( document, fetchChildren );
+		row( 8 ).focus();
+
+		const back = new window.KeyboardEvent( 'keydown', {
+			key: 'ArrowLeft',
+			altKey: true,
+			bubbles: true,
+			cancelable: true,
+		} );
+		row( 8 ).dispatchEvent( back );
+		const end = new window.KeyboardEvent( 'keydown', {
+			key: 'End',
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		} );
+		row( 8 ).dispatchEvent( end );
+
+		expect( back.defaultPrevented ).toBe( false );
+		expect( end.defaultPrevented ).toBe( false );
+		expect( document.activeElement ).toBe( row( 8 ) );
+	} );
+
+	it( 'opens a row afresh when it was closed and opened while Show more loaded', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const answer = fetchChildren.getMockImplementation();
+		let release;
+		fetchChildren.mockImplementationOnce(
+			( id, number ) =>
+				new Promise( ( resolve ) => {
+					release = () => resolve( answer( id, number ) );
+				} )
+		);
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+
+		tree.toggle( row( 9 ) );
+		const reopening = tree.toggle( row( 9 ) );
+		release();
+		await reopening;
+
+		expect( fetchChildren ).toHaveBeenLastCalledWith( 9, 1 );
+		expect( row( 9 ).nextElementSibling ).toBe( row( 1000 ) );
+		expect( row( 1000 ).getAttribute( 'aria-posinset' ) ).toBe( '1' );
+		expect( row( 1050 ) ).toBe( null );
+		expect(
+			document.querySelector( '.hierarchy-guard-more' ).textContent
+		).toBe( 'Show more · 50 of 128 subpages shown' );
+		expect( rows() ).toHaveLength( 54 );
+	} );
+
+	it( 'says a failure to a row closed and opened again while it loaded', async () => {
+		let fail;
+		const load = vi.fn(
+			() =>
+				new Promise( ( resolve, reject ) => {
+					fail = reject;
+				} )
+		);
+		const tree = bindTree( document, load );
+
+		tree.toggle( row( 4 ) );
+		tree.toggle( row( 4 ) );
+		const reopening = tree.toggle( row( 4 ) );
+		fail( new Error() );
+		await reopening;
+
+		expect( load ).toHaveBeenCalledTimes( 1 );
+		expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+		expect(
+			rows()[ 1 ].classList.contains( 'hierarchy-guard-failed' )
+		).toBe( true );
+		expect( rows()[ 1 ].textContent ).toBe(
+			'The subpages couldn’t be loaded. Try again'
+		);
+		expect( rows() ).toHaveLength( 4 );
+	} );
+
+	it( 'hands the keyboard from the loading row to the first subpage', async () => {
+		let answer;
+		const load = vi.fn(
+			() =>
+				new Promise( ( resolve ) => {
+					answer = resolve;
+				} )
+		);
+		bindTree( document, load );
+		row( 4 ).focus();
+
+		press( row( 4 ), 'ArrowRight' );
+		press( row( 4 ), 'ArrowRight' );
+		expect( document.activeElement ).toBe( rows()[ 1 ] );
+		answer( page( [ child( 5, 'About' ), child( 6, 'History' ) ], 2 ) );
+		await settle();
+
+		expect( document.activeElement ).toBe( row( 5 ) );
+		expect( tabStops() ).toEqual( [ 'post-5' ] );
+	} );
+
+	it( 'shows a row whose subpages have all gone as having none', async () => {
+		const tree = bindTree( document, () =>
+			Promise.resolve( page( [], 0 ) )
+		);
+		row( 4 ).querySelector( '.hierarchy-guard-toggle' ).focus();
+
+		await tree.toggle( row( 4 ) );
+
+		expect( rows().map( ( item ) => item.id ) ).toEqual( [
+			'post-4',
+			'post-8',
+			'post-9',
+		] );
+		expect( row( 4 ).hasAttribute( 'aria-expanded' ) ).toBe( false );
+		expect( row( 4 ).querySelector( '.hierarchy-guard-toggle' ) ).toBe(
+			null
+		);
+		const cell = row( 4 ).querySelector( '.hierarchy-guard-cell' );
+		expect( cell.innerHTML ).toBe(
+			'<span aria-hidden="true">—</span><span class="screen-reader-text">No subpages</span>'
+		);
+		expect( cell.dataset.children ).toBe( '0' );
+		expect( document.activeElement ).toBe( row( 4 ) );
+		expect( tabStops() ).toEqual( [ 'post-4' ] );
+	} );
+
 	it( 'says how many are shown only when some are held back', async () => {
 		const tree = bindTree( document, fetchChildren );
 		speak.mockClear();

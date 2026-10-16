@@ -105,7 +105,10 @@ function titleOf( row ) {
  */
 export function createTree( { body, data, cap, fetchChildren } ) {
 	const doc = body.ownerDocument;
-	const loading = new Set();
+	// The load in progress under each opened row: its promise, status row, page and open.
+	const pending = new Map();
+	// How many times each row has closed, so a load knows the open it was for.
+	const opens = new WeakMap();
 	let template = null;
 
 	// Children rather than rows and cells, which not every DOM keeps live.
@@ -233,7 +236,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			button.className = 'button-link';
 			button.textContent = __( 'Show more', 'hierarchy-guard' );
 			button.addEventListener( 'click', () => {
-				if ( loading.has( idOf( row ) ) ) {
+				if ( pending.has( row ) ) {
 					return;
 				}
 				button.setAttribute( 'aria-disabled', 'true' );
@@ -277,7 +280,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		retry.className = 'button-link';
 		retry.textContent = __( 'Try again', 'hierarchy-guard' );
 		retry.addEventListener( 'click', () => {
-			if ( ! loading.has( idOf( row ) ) ) {
+			if ( ! pending.has( row ) ) {
 				retry.setAttribute( 'aria-disabled', 'true' );
 				load( row, page, true, status );
 			}
@@ -318,48 +321,76 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	};
 
 	/**
-	 * Loads one page of a row's subpages under it.
+	 * Says under an opened row that its subpages are loading.
 	 *
-	 * @param {HTMLTableRowElement}                                         row       The opened row.
-	 * @param {number}                                                      page      Page of its subpages, from 1.
-	 * @param {boolean}                                                     moveFocus Whether the first new row takes the keyboard.
-	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}|null} reuse     The Show more or failure row to keep while it loads.
-	 * @return {Promise<void>} Done.
+	 * @param {HTMLTableRowElement} row The opened row.
+	 * @return {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} The status row.
 	 */
-	const load = async ( row, page, moveFocus = false, reuse = null ) => {
-		const id = idOf( row );
-		if ( loading.has( id ) ) {
-			return;
-		}
-		loading.add( id );
-		const status = reuse || addStatus( row );
+	const addLoading = ( row ) => {
+		const status = addStatus( row );
 		status.row.setAttribute( 'aria-busy', 'true' );
-		if ( ! reuse ) {
-			status.cell.textContent = __(
-				'Loading subpages…',
-				'hierarchy-guard'
-			);
+		status.cell.textContent = __( 'Loading subpages…', 'hierarchy-guard' );
+		return status;
+	};
+
+	/**
+	 * Shows a row whose subpages have all gone since the screen loaded as a
+	 * page without any: no toggle, and the cell's "No subpages" as the server prints it.
+	 *
+	 * @param {HTMLTableRowElement} row      The row.
+	 * @param {boolean}             hadFocus Whether a row removed under it had the keyboard.
+	 * @param {boolean}             hadStop  Whether a row removed under it was the one Tab reached.
+	 */
+	const showEmpty = ( row, hadFocus, hadStop ) => {
+		const button = row.querySelector( 'button.hierarchy-guard-toggle' );
+		const lost = hadFocus || ( !! button && button === doc.activeElement );
+		if ( button ) {
+			button.remove();
 		}
-		let result;
-		try {
-			result = await fetchChildren( id, page );
-		} catch {
-			if ( status.row.isConnected ) {
-				failed( row, page, status );
-			}
-			return;
-		} finally {
-			loading.delete( id );
+		row.removeAttribute( 'aria-expanded' );
+		const cell = row.querySelector( '.hierarchy-guard-cell' );
+		if ( cell ) {
+			cell.dataset.children = '0';
+			delete cell.dataset.open;
+			const dash = doc.createElement( 'span' );
+			dash.setAttribute( 'aria-hidden', 'true' );
+			dash.textContent = '—';
+			const text = doc.createElement( 'span' );
+			text.className = 'screen-reader-text';
+			text.textContent = __( 'No subpages', 'hierarchy-guard' );
+			cell.replaceChildren( dash, text );
 		}
+		if ( lost ) {
+			focus( row );
+		} else if ( hadStop ) {
+			setTabStop( row );
+		}
+	};
+
+	/**
+	 * Puts one loaded page of a row's subpages under it, in place of its
+	 * status row, which hands them the keyboard or the tab stop it held.
+	 *
+	 * @param {HTMLTableRowElement}                                    row       The opened row.
+	 * @param {number}                                                 page      Page of its subpages, from 1.
+	 * @param {Object}                                                 result    The route's answer.
+	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} status    Its status row.
+	 * @param {boolean}                                                moveFocus Whether the first new row takes the keyboard.
+	 */
+	const show = ( row, page, result, status, moveFocus ) => {
+		const hadFocus = status.row.contains( doc.activeElement );
+		const hadStop = '0' === status.row.getAttribute( 'tabindex' );
 		status.row.remove();
-		if ( 'true' !== row.getAttribute( 'aria-expanded' ) ) {
-			// Closed while it loaded.
+		const children = result.children || [];
+		if ( 1 === page && ! children.length ) {
+			showEmpty( row, hadFocus, hadStop );
 			return;
 		}
 
+		const id = idOf( row );
 		let anchor = lastOf( row );
 		let first = null;
-		( result.children || [] ).forEach( ( child, index ) => {
+		children.forEach( ( child, index ) => {
 			const node = childRow( template, child, {
 				level: levelOf( row ),
 				parent: id,
@@ -398,16 +429,95 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 				'polite'
 			);
 		}
-		if ( moveFocus ) {
+		if ( moveFocus || hadFocus ) {
 			focus( first || row );
+		} else if ( hadStop ) {
+			setTabStop( first || row );
 		}
 	};
 
+	/**
+	 * Loads one page of a row's subpages under it. While it loads the row has
+	 * no second load; the promise settles once what it loaded is shown.
+	 *
+	 * @param {HTMLTableRowElement}                                         row       The opened row.
+	 * @param {number}                                                      page      Page of its subpages, from 1.
+	 * @param {boolean}                                                     moveFocus Whether the first new row takes the keyboard.
+	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}|null} reuse     The Show more or failure row to keep while it loads.
+	 * @return {Promise<void>} Done.
+	 */
+	const load = ( row, page, moveFocus = false, reuse = null ) => {
+		if ( pending.has( row ) ) {
+			return pending.get( row ).promise;
+		}
+		let status = reuse;
+		if ( status ) {
+			status.row.setAttribute( 'aria-busy', 'true' );
+		} else {
+			status = addLoading( row );
+		}
+		const entry = { status, page, open: opens.get( row ) || 0 };
+		let request;
+		try {
+			request = Promise.resolve( fetchChildren( idOf( row ), page ) );
+		} catch ( error ) {
+			request = Promise.reject( error );
+		}
+		entry.promise = request.then(
+			( result ) => settle( row, entry, result, moveFocus ),
+			() => settle( row, entry, null, moveFocus )
+		);
+		pending.set( row, entry );
+		return entry.promise;
+	};
+
+	/**
+	 * Shows what a load brought, if the row still wants it.
+	 *
+	 * @param {HTMLTableRowElement} row       The opened row.
+	 * @param {Object}              entry     The load: its status row, page and open.
+	 * @param {Object|null}         result    The route's answer, or null when it failed.
+	 * @param {boolean}             moveFocus Whether the first new row takes the keyboard.
+	 * @return {Promise<void>|undefined} A fresh load, when one was needed.
+	 */
+	const settle = ( row, entry, result, moveFocus ) => {
+		pending.delete( row );
+		const { status, page } = entry;
+		if (
+			! row.isConnected ||
+			'true' !== row.getAttribute( 'aria-expanded' )
+		) {
+			// Closed while it loaded, or gone with a closed parent.
+			status.row.remove();
+			return;
+		}
+		if ( entry.open !== ( opens.get( row ) || 0 ) && page > 1 ) {
+			// Closed and opened again while a later page loaded: the new open starts at the first.
+			return load(
+				row,
+				1,
+				false,
+				status.row.isConnected ? status : null
+			);
+		}
+		if ( ! result ) {
+			failed( row, page, status );
+			return;
+		}
+		show( row, page, result, status, moveFocus );
+	};
+
 	const expand = ( row ) => {
+		const entry = pending.get( row );
 		if ( 'false' !== row.getAttribute( 'aria-expanded' ) ) {
-			return Promise.resolve();
+			return entry ? entry.promise : Promise.resolve();
 		}
 		setOpen( row, true );
+		if ( entry ) {
+			// Opened again before the last open's load came back: it waits for that one.
+			entry.status = addLoading( row );
+			return entry.promise;
+		}
 		return load( row, 1 );
 	};
 
@@ -423,6 +533,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			( other ) => '0' === other.getAttribute( 'tabindex' )
 		);
 		under.forEach( ( other ) => other.remove() );
+		opens.set( row, ( opens.get( row ) || 0 ) + 1 );
 		setOpen( row, false );
 		if ( lost ) {
 			focus( row );
@@ -520,6 +631,10 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	body.addEventListener( 'keydown', ( event ) => {
 		const row = event.target.closest( 'tr' );
 		if (
+			// Alt+Left is the browser's Back; Control and Command keys are the browser's too.
+			event.altKey ||
+			event.ctrlKey ||
+			event.metaKey ||
 			! row ||
 			row.parentNode !== body ||
 			( event.target !== row &&
