@@ -25,9 +25,11 @@ import {
 	subpagesLabel,
 	trashNote,
 	trashSentence,
+	treeRowLabels,
 	unresolvedSentence,
 	viewAllLabel,
 	viewRedirectsLabel,
+	viewSubpagesLabel,
 } from '../copy';
 
 const team = {
@@ -382,5 +384,33 @@ describe( 'what redirects the pairs', () => {
 			serving: true,
 			provider: null,
 		} );
+	} );
+} );
+
+describe( 'the Tree view', () => {
+	it( 'words a loaded row’s actions as core does', () => {
+		const labels = treeRowLabels( 'About' );
+		expect( [
+			labels.edit,
+			labels.editLabel,
+			labels.trash,
+			labels.trashLabel,
+			labels.view,
+			labels.viewLabel,
+			labels.subpages,
+			labels.subpagesLabel,
+		] ).toEqual( [
+			'Edit',
+			'Edit “About”',
+			'Trash',
+			'Move “About” to the Trash',
+			'View',
+			'View “About”',
+			'View subpages',
+			'View subpages of “About”',
+		] );
+		expect( viewSubpagesLabel( 1, false, 'About' ) ).toBe(
+			'View the 1 subpage of “About”'
+		);
 	} );
 } );
