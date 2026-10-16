@@ -49,6 +49,17 @@ final class Live_View implements Ledger_View {
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $prefix    Normalized path.
+	 * @param int    $hit       What find() answered.
+	 */
+	public function target( string $post_type, string $prefix, int $hit ): ?array {
+		return $this->ledger->target( $post_type, $prefix, $hit );
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
 	 */
 	public function held_in_trash( string $post_type, string $prefix ): bool {
 		return Ledger::held_in_trash( $post_type, $prefix );

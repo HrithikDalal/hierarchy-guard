@@ -56,12 +56,21 @@ final class Plugin {
 		add_action( 'delete_option_' . Settings::OPTION, [ Post_Types::class, 'reset' ] );
 		add_action( 'switch_blog', [ Post_Types::class, 'reset' ] );
 
+		// The newest-records list drops an entry whenever its row goes, however it goes: a post deleted for good writes it once, its entries and the paths moved off it together.
+		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
+		add_action( 'before_delete_post', [ Ledger::class, 'begin_delete' ], PHP_INT_MIN, 2 );
+		add_action( 'delete_post', [ Ledger::class, 'end_delete' ], PHP_INT_MAX );
+		// The newest-records list is rebuilt daily from WP-Cron; admin_init makes sure the run is scheduled.
+		add_action( 'admin_init', [ Ledger::class, 'schedule_rebuild' ] );
+		add_action( Ledger::REBUILD_HOOK, [ Ledger::class, 'rebuild_recent' ] );
+
 		$ledger    = new Ledger();
 		$log       = new Trash\Change_Log();
 		$providers = new Redirects\Providers();
 		( new Change_Listener( $ledger, $log ) )->register();
 		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
-		( new Admin\Settings_Section( $providers ) )->register();
+		add_action( 'init', [ Settings::class, 'register_option' ] );
+		( new Admin\Settings_Page( $providers, new Redirects\Records( $ledger ) ) )->register();
 		( new Trash\Markers() )->register();
 
 		$queue      = new Batch\Queue();

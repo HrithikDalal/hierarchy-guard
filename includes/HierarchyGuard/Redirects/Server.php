@@ -61,7 +61,7 @@ final class Server {
 			return;
 		}
 
-		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- URL passed through wp_validate_redirect() in target_for_current_request().
+		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- A page target passed wp_validate_redirect() in target_for_current_request(); a URL target, which only an administrator can set, passed esc_url_raw() as http(s).
 		if ( wp_redirect( $target['url'], $target['status'], 'Hierarchy Guard' ) ) {
 			exit;
 		}
@@ -88,7 +88,7 @@ final class Server {
 			return null;
 		}
 
-		$request = $this->parse_request( (string) $wp->request );
+		$request = self::parse_request( (string) $wp->request );
 		if ( '' === $request['path'] ) {
 			return null;
 		}
@@ -99,8 +99,9 @@ final class Server {
 
 		$target    = null;
 		$temporary = false;
+		$code      = 0;
 		foreach ( self::candidates( $request['path'] ) as [ $post_type, $path ] ) {
-			$target = $this->resolver->resolve( $post_type, $path, $temporary );
+			$target = $this->resolver->resolve( $post_type, $path, $temporary, $code );
 			if ( null !== $target ) {
 				break;
 			}
@@ -109,44 +110,58 @@ final class Server {
 			return null;
 		}
 
-		$url = get_permalink( $target );
-		if ( ! is_string( $url ) || '' === $url ) {
-			return null;
+		// A URL target is sent as it was set: the suffixes are re-applied to a page only.
+		$post = $target instanceof WP_Post ? $target : null;
+		if ( null !== $post ) {
+			$url = get_permalink( $post );
+			if ( ! is_string( $url ) || '' === $url ) {
+				return null;
+			}
+			$url = $this->reapply_suffixes( $url, $post, $request );
+		} else {
+			$url = (string) $target;
 		}
-		$url = $this->reapply_suffixes( $url, $target, $request );
 		$url = $this->append_query_string( $url );
 
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
 		 *
-		 * @param int     $status Status code: 301, or 302 while a restore from the trash could still undo the move the redirect follows.
-		 * @param WP_Post $target The post being redirected to.
-		 * @param string  $path   The requested path, normalized, suffixes removed.
+		 * @param int          $status Status code: the 301 or 302 chosen on the Redirects tab, or else 301, or 302 while a restore from the trash could still undo the move the redirect follows.
+		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
+		 * @param string       $path   The requested path, normalized, suffixes removed.
 		 */
-		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', $temporary ? 302 : 301, $target, $request['path'] );
+		$status = (int) apply_filters( 'hierarchy_guard_redirect_status', $code > 0 ? $code : ( $temporary ? 302 : 301 ), $post, $request['path'] );
 		if ( ! in_array( $status, [ 301, 302, 307, 308 ], true ) ) {
 			$status = 301;
 		}
 
 		/**
-		 * Filters the URL a hierarchy redirect sends visitors to.
+		 * Filters the URL a hierarchy redirect sends visitors to. A page
+		 * target's URL still passes wp_validate_redirect(); a URL target's is
+		 * sent only while it is http(s).
 		 *
-		 * @param string  $url    Target URL, with the request's query string appended.
-		 * @param WP_Post $target The post being redirected to.
-		 * @param string  $path   The requested path, normalized, suffixes removed.
+		 * @param string       $url    Target URL, with the request's query string appended.
+		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
+		 * @param string       $path   The requested path, normalized, suffixes removed.
 		 */
-		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $target, $request['path'] );
-		$url = wp_validate_redirect( $url, '' );
+		$url = (string) apply_filters( 'hierarchy_guard_redirect_url', $url, $post, $request['path'] );
+		$url = null !== $post ? wp_validate_redirect( $url, '' ) : self::external( $url );
 		if ( '' === $url ) {
 			return null;
 		}
 
 		// Never redirect to the URL being requested; that would loop. Compare the
-		// raw request path: on PATH_INFO permalinks $wp->request omits index.php
-		// while the target keeps it. The query string is carried over, so it is
-		// left out of the comparison.
-		$requested = untrailingslashit( (string) wp_parse_url( $this->request_uri(), PHP_URL_PATH ) );
-		if ( untrailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === $requested ) {
+		// raw request path, decoded and normalized as a request is read (/café/
+		// and /caf%C3%A9/ are one path): on PATH_INFO permalinks $wp->request
+		// omits index.php while the target keeps it. The query string is carried
+		// over, so it is left out of the comparison. A URL target on another
+		// host, or another port of this one, never loops.
+		$here = null !== $post || self::is_here( $url );
+		if ( $here && self::same_path( $url, $this->request_uri() ) ) {
+			return null;
+		}
+		// Nor to another old URL this plugin redirects: that is how a loop of any length forms.
+		if ( null === $post && $here && self::redirected( $this->resolver, $url ) ) {
 			return null;
 		}
 
@@ -154,6 +169,122 @@ final class Server {
 			'url'    => $url,
 			'status' => $status,
 		];
+	}
+
+	/**
+	 * Whether two URLs on this site name the same path as the server reads a
+	 * request: decoded and normalized, so `/café/`, `/caf%C3%A9/` and
+	 * `/caf%c3%a9` are one path. The query and any #fragment are left out.
+	 *
+	 * @param string $url   A URL or a request URI.
+	 * @param string $other Another.
+	 * @return bool
+	 */
+	public static function same_path( string $url, string $other ): bool {
+		return Paths::normalize( (string) wp_parse_url( $url, PHP_URL_PATH ) ) === Paths::normalize( (string) wp_parse_url( $other, PHP_URL_PATH ) );
+	}
+
+	/**
+	 * Whether a URL on this site is another old URL this plugin redirects:
+	 * the resolver answers its path through a record, and no published
+	 * post, page or attachment is shown there, which would win over the
+	 * redirect. A URL target is never sent to one, so redirects that send
+	 * each other round, however many and however they came about, stop at a
+	 * plain 404. One resolve per same-site URL target sent.
+	 *
+	 * @param Resolver $resolver Resolver.
+	 * @param string   $url      A URL on this site.
+	 * @return bool
+	 */
+	public static function redirected( Resolver $resolver, string $url ): bool {
+		$path = self::request_path( $url );
+		if ( '' === $path ) {
+			return false;
+		}
+		foreach ( self::candidates( $path ) as [ $type, $candidate ] ) {
+			if ( null !== $resolver->resolve( $type, $candidate ) ) {
+				// What is shown at the path itself: url_to_postid() reads ?p=, ?page_id= and ?attachment_id= first, and the request's query rides on the target.
+				return ! self::shows_post( (string) strtok( $url, '?#' ) );
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether a published post, page or attachment of any public type that
+	 * anyone can view is at a URL, as url_to_postid() finds it.
+	 *
+	 * @param string $url A URL on this site.
+	 * @return bool
+	 */
+	public static function shows_post( string $url ): bool {
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.url_to_postid_url_to_postid -- On the front end only for a same-site URL target whose path another record answers, once; in wp-admin for the 20 rows of a page.
+		$id = url_to_postid( $url );
+		return $id > 0 && is_post_publicly_viewable( $id );
+	}
+
+	/**
+	 * Whether a URL is on this site: its host and port are the home URL's,
+	 * and its path is under the home URL's path, read in any case as
+	 * WordPress routes it, so on a site in a
+	 * subdirectory, or a subdirectory multisite's subsite, a URL of the same
+	 * host outside it is another site. The scheme is left out, so http and
+	 * https on their own default ports are one site, and a port written out
+	 * that is its scheme's default counts as none; another port is another
+	 * site.
+	 *
+	 * @param string $url URL.
+	 * @return bool
+	 */
+	public static function is_here( string $url ): bool {
+		$home = (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH );
+		$path = trailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) );
+		// In any case, as WP::parse_request() strips the home path and multisite finds a subsite's path.
+		return self::origin( $url ) === self::origin( home_url() ) && 0 === stripos( $path, '' !== $home ? $home : '/' );
+	}
+
+	/**
+	 * A URL's host and port, as is_here() compares them: the host in lower
+	 * case, then a colon and the port unless it is the scheme's default.
+	 *
+	 * @param string $url URL.
+	 * @return string
+	 */
+	private static function origin( string $url ): string {
+		$parts   = wp_parse_url( $url );
+		$parts   = is_array( $parts ) ? $parts : [];
+		$port    = (int) ( $parts['port'] ?? 0 );
+		$default = 'https' === strtolower( (string) ( $parts['scheme'] ?? '' ) ) ? 443 : 80;
+		return strtolower( (string) ( $parts['host'] ?? '' ) ) . ( $port > 0 && $port !== $default ? ':' . $port : '' );
+	}
+
+	/**
+	 * The path the server resolves for a request of a URL on this site: the
+	 * home path removed, an index file and the suffixes core appends set
+	 * aside, normalized, as target_for_current_request() reads $wp->request.
+	 *
+	 * @param string $url A URL on this site.
+	 * @return string
+	 */
+	public static function request_path( string $url ): string {
+		return self::parse_request( (string) wp_parse_url( Paths::relative( $url ), PHP_URL_PATH ) )['path'];
+	}
+
+	/**
+	 * A URL target as it is sent: through esc_url_raw(), and only while it
+	 * is http(s), typed so (esc_url_raw() would read `example.org/x` as
+	 * http://example.org/x), and names a host, as Ledger::clean_target()
+	 * requires.
+	 *
+	 * @param string $url URL.
+	 * @return string The URL, or '' when it is not http(s).
+	 */
+	private static function external( string $url ): string {
+		if ( ! in_array( strtolower( (string) wp_parse_url( trim( $url ), PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) ) {
+			return '';
+		}
+		$url = esc_url_raw( $url, [ 'http', 'https' ] );
+		return in_array( strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) ), [ 'http', 'https' ], true ) && '' !== (string) wp_parse_url( $url, PHP_URL_HOST ) ? $url : '';
 	}
 
 	/**
@@ -200,7 +331,7 @@ final class Server {
 	 * @param string $request Home path removed, slashes trimmed, still percent-encoded.
 	 * @return array{path:string,page:int,paged:int,cpage:int,trackback:bool,feed:string,embed:bool}
 	 */
-	private function parse_request( string $request ): array {
+	private static function parse_request( string $request ): array {
 		global $wp_rewrite;
 
 		$index = $wp_rewrite instanceof WP_Rewrite ? $wp_rewrite->index : 'index.php';
@@ -322,9 +453,10 @@ final class Server {
 	}
 
 	/**
-	 * Carries the current request's query string over to the target URL. The
-	 * query is read from the request URI, as redirect_canonical() does, because
-	 * some servers rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
+	 * Carries the current request's query string over to the target URL,
+	 * before any #fragment a URL target has. The query is read from the
+	 * request URI, as redirect_canonical() does, because some servers
+	 * rewrite QUERY_STRING (nginx's `/index.php?q=$uri&$args`).
 	 *
 	 * @param string $url Target URL.
 	 * @return string
@@ -334,7 +466,10 @@ final class Server {
 		if ( '' === $query ) {
 			return $url;
 		}
-		return $url . ( str_contains( $url, '?' ) ? '&' : '?' ) . $query;
+		// A URL target may carry a #fragment: the query goes before it, or the browser never sends it.
+		$parts    = explode( '#', $url, 2 );
+		$parts[0] = $parts[0] . ( str_contains( $parts[0], '?' ) ? '&' : '?' ) . $query;
+		return implode( '#', $parts );
 	}
 
 	/**
@@ -343,7 +478,7 @@ final class Server {
 	 * @return string
 	 */
 	private function request_uri(): string {
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect().
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect(), for a page target, or through external(), esc_url_raw() and http(s) only, for a URL target.
 		return isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
 	}
 

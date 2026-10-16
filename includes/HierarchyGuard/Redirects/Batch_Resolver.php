@@ -41,6 +41,12 @@ final class Batch_Resolver {
 	public const UNKNOWN = -2;
 
 	/**
+	 * What served() answers for a path a record's URL target answers: the
+	 * URL is in the $chosen it sets.
+	 */
+	public const URL = -3;
+
+	/**
 	 * Most paths several posts share that core's own get_page_by_path() is asked about, per batch.
 	 */
 	public const FALLBACKS = 20;
@@ -55,15 +61,18 @@ final class Batch_Resolver {
 	 * this one, longest prefix first, so a path one of those resolves is that
 	 * post's. A path redirected to a post of this type is temporary when the
 	 * server would answer it with a 302: a restore from the trash could still
-	 * undo the move the redirect follows.
+	 * undo the move the redirect follows. A record's override is honoured as
+	 * the server honours it: a URL target answers its exact old path with
+	 * URL, and a chosen code is set in $chosen.
 	 *
 	 * @param string[]                                $paths     Normalized old paths, at most the count cap.
 	 * @param string                                  $post_type Post type name.
-	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts     Ledger facts read so far, by path; more are added, for every path.
-	 * @param array<string,true>|null                 $temporary Set to the paths redirected to a post of this type that are temporary.
-	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there.
+	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[],target?:array{url:string,code:int}|null}> $facts     Ledger facts read so far, by path; more are added, for every path.
+	 * @param array<string,true>|null                 $temporary Set to the paths redirected by this type's records that are temporary.
+	 * @param array<string,array{url:string,code:int}>|null $chosen Set to the URL target and the chosen code of each path this type's records answer with an override.
+	 * @return array<string,int> Post ID by path, a post of another type when the server tries that type first; 0 for none, NOT_404 when something is known to be shown there, URL for a URL target.
 	 */
-	public static function served( array $paths, string $post_type, array &$facts, ?array &$temporary = null ): array {
+	public static function served( array $paths, string $post_type, array &$facts, ?array &$temporary = null, ?array &$chosen = null ): array {
 		$prefix = Server::prefix( $post_type );
 		$room   = self::room( $post_type );
 		$out    = [];
@@ -77,15 +86,16 @@ final class Batch_Resolver {
 			}
 			$within[ $path ] = true;
 		}
-		$held  = [];
-		$found = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true, $held );
-		$ours  = $found;
+		$held    = [];
+		$answers = [];
+		$found   = self::run( array_map( 'strval', array_keys( $within ) ), $post_type, $facts, true, $held, $answers );
+		$ours    = $found;
 
 		// The candidates the server tries before this type's own, by path.
 		$before = [];
 		$asks   = [];
 		foreach ( $found as $start => $target ) {
-			if ( $target < 0 ) {
+			if ( $target < 0 && self::URL !== $target ) {
 				continue;
 			}
 			$start   = (string) $start;
@@ -123,13 +133,24 @@ final class Batch_Resolver {
 		}
 
 		$chains = [];
+		$chosen = [];
+		$urls   = [];
 		foreach ( $found as $start => $target ) {
-			$out[ (string) $start ] = self::UNKNOWN === $target ? 0 : $target;
-			if ( $target > 0 && $target === $ours[ $start ] ) {
-				$chains[ (string) $start ] = array_merge( [ $target ], array_map( 'intval', get_post_ancestors( $target ) ) );
+			$start         = (string) $start;
+			$out[ $start ] = self::UNKNOWN === $target ? 0 : $target;
+			if ( $target !== $ours[ $start ] ) {
+				continue;
+			}
+			if ( isset( $answers[ $start ] ) ) {
+				$chosen[ $start ] = $answers[ $start ];
+			}
+			if ( $target > 0 ) {
+				$chains[ $start ] = array_merge( [ $target ], array_map( 'intval', get_post_ancestors( $target ) ) );
+			} elseif ( self::URL === $target && isset( $held[ $start ] ) ) {
+				$urls[ $start ] = true;
 			}
 		}
-		$temporary = self::temporary( $chains, $held );
+		$temporary = self::temporary( $chains, $held ) + $urls;
 		return $out;
 	}
 
@@ -180,11 +201,13 @@ final class Batch_Resolver {
 	 * @param string                                  $post_type Post type name.
 	 * @param array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> $facts     Ledger facts read so far, by path; more are added.
 	 * @param bool                                    $requests  Whether each path is a request that must be a 404 first.
-	 * @param array<string,true>|null                 $held      Set to the paths led to a post through a prefix a page in the trash holds.
-	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, UNKNOWN when it cannot be told.
+	 * @param array<string,true>|null                 $held      Set to the paths led to a post or URL through a prefix a page in the trash holds.
+	 * @param array<string,array{url:string,code:int}>|null $answers Set to each answered path's URL target and chosen code, where it has either.
+	 * @return array<string,int> Post ID by path; 0 for none, NOT_404 when something is shown there, URL for a URL target, UNKNOWN when it cannot be told.
 	 */
-	private static function run( array $paths, string $post_type, array &$facts, bool $requests, ?array &$held = null ): array {
+	private static function run( array $paths, string $post_type, array &$facts, bool $requests, ?array &$held = null, ?array &$answers = null ): array {
 		$held    = [];
+		$answers = [];
 		$view    = new Prefetched_View( $post_type, $facts );
 		$out     = [];
 		$pending = [];
@@ -224,12 +247,20 @@ final class Batch_Resolver {
 				$start     = (string) $start;
 				$trace     = [];
 				$temporary = false;
+				$code      = 0;
 				$view->begin();
 				try {
 					// Only a 404 reaches the resolver.
-					$target = ! $requests || $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace ) : null;
+					$target = ! $requests || $view->is_404( $start, $post_type ) ? Rules::resolve( $view, $post_type, $start, $temporary, $trace, $code ) : null;
 					if ( null !== $target && ! $view->guessed() ) {
-						$out[ $start ] = (int) $target->ID;
+						$url           = is_string( $target ) ? $target : '';
+						$out[ $start ] = '' !== $url ? self::URL : (int) $target->ID;
+						if ( '' !== $url || $code > 0 ) {
+							$answers[ $start ] = [
+								'url'  => $url,
+								'code' => $code,
+							];
+						}
 						if ( $temporary ) {
 							$held[ $start ] = true;
 						}
@@ -262,38 +293,47 @@ final class Batch_Resolver {
 
 	/**
 	 * What the ledger says about each path, the way Ledger::find(),
-	 * Ledger::held_in_trash() and Ledger::newest_in_trash() read it: the
-	 * newest post of the type not in the trash that holds it, whether a post
-	 * in the trash holds it, whether the newest entry is one, and which posts
-	 * in the trash hold it. One query.
+	 * Ledger::held_in_trash(), Ledger::newest_in_trash() and
+	 * Ledger::target() read it: the newest post of the type not in the trash
+	 * that holds it, whether a post in the trash holds it, whether the newest
+	 * entry is one, which posts in the trash hold it, and the override beside
+	 * the live holder's record. One query.
 	 *
 	 * @param string[] $paths     Normalized paths, at most a few per pair listed.
 	 * @param string   $post_type Post type name.
-	 * @return array<string,array{live:int,held:bool,newest:bool,trashed:int[]}> Facts by path, for every path asked about.
+	 * @return array<string,array{live:int,held:bool,newest:bool,trashed:int[],target:array{url:string,code:int}|null}> Facts by path, for every path asked about.
 	 */
 	public static function ledger_facts( array $paths, string $post_type ): array {
 		global $wpdb;
 
-		$out  = [];
-		$keys = [];
+		$out     = [];
+		$keys    = [];
+		$targets = [];
 		foreach ( $paths as $path ) {
-			$out[ (string) $path ]                             = [
+			$out[ (string) $path ]                                       = [
 				'live'    => 0,
 				'held'    => false,
 				'newest'  => false,
 				'trashed' => [],
+				'target'  => null,
 			];
-			$keys[ Ledger::key( $post_type, (string) $path ) ] = (string) $path;
+			$keys[ Ledger::key( $post_type, (string) $path ) ]           = (string) $path;
+			$targets[ Ledger::target_key( $post_type, (string) $path ) ] = (string) $path;
 		}
 		if ( [] === $keys ) {
 			return [];
 		}
-		$placeholders = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per path listed or prefix of one, bounded by the count cap; a range on the meta_key index.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id, p.post_status FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY pm.meta_id DESC", ...array_merge( array_keys( $keys ), [ $post_type ] ) ), ARRAY_A );
+		$placeholders = implode( ',', array_fill( 0, count( $keys ) + count( $targets ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, two per path listed or prefix of one (its entry and its override), bounded by the count cap; a range on the meta_key index.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id, pm.meta_value, p.post_status FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY pm.meta_id DESC", ...array_merge( array_keys( $keys ), array_keys( $targets ), [ $post_type ] ) ), ARRAY_A );
 
-		$seen = [];
+		$seen      = [];
+		$overrides = [];
 		foreach ( (array) $rows as $row ) {
+			if ( isset( $targets[ (string) $row['meta_key'] ] ) ) {
+				$overrides[ $targets[ (string) $row['meta_key'] ] ][ (int) $row['post_id'] ] = maybe_unserialize( (string) $row['meta_value'] );
+				continue;
+			}
 			$path = $keys[ (string) $row['meta_key'] ] ?? '';
 			if ( '' === $path ) {
 				continue;
@@ -307,6 +347,12 @@ final class Batch_Resolver {
 				$out[ $path ]['trashed'][] = (int) $row['post_id'];
 			} elseif ( 0 === $out[ $path ]['live'] ) {
 				$out[ $path ]['live'] = (int) $row['post_id'];
+			}
+		}
+		foreach ( $overrides as $path => $by_holder ) {
+			$live = $out[ $path ]['live'];
+			if ( $live > 0 && isset( $by_holder[ $live ] ) ) {
+				$out[ $path ]['target'] = Ledger::clean_target( $by_holder[ $live ] );
 			}
 		}
 		return $out;

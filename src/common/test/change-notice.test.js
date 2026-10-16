@@ -138,7 +138,8 @@ describe( 'the notice after a save', () => {
 
 	it( 'says the old URLs redirect when the server serves them, with nothing to do', () => {
 		config.serving = true;
-		config.settingsUrl = '/wp-admin/options-writing.php';
+		config.settingsUrl =
+			'/wp-admin/options-general.php?page=hierarchy-guard#hierarchy-guard-redirects';
 		expect(
 			changeNotice( pairs( 12 ), { serving: true, provider: null } )
 		).toEqual( {
@@ -161,7 +162,8 @@ describe( 'the notice after a save', () => {
 	} );
 
 	it( 'names the redirect plugin and offers the redirects', () => {
-		config.settingsUrl = '/wp-admin/options-writing.php';
+		config.settingsUrl =
+			'/wp-admin/options-general.php?page=hierarchy-guard#hierarchy-guard-redirects';
 		expect(
 			changeNotice( pairs( 1000, true ), {
 				serving: false,
@@ -184,7 +186,8 @@ describe( 'the notice after a save', () => {
 			view: 'View redirects (1)',
 			setup: false,
 		} );
-		config.settingsUrl = '/wp-admin/options-writing.php';
+		config.settingsUrl =
+			'/wp-admin/options-general.php?page=hierarchy-guard#hierarchy-guard-redirects';
 		expect( changeNotice( pairs( 1 ), redirects ).setup ).toBe( true );
 	} );
 } );

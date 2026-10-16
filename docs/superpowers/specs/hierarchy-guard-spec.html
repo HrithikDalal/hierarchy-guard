@@ -170,6 +170,13 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
 .w-form label{display:flex;gap:8px;align-items:center;margin:0 0 8px}
 .w-form .w-muted{font-size:13px;margin-top:4px}
 @media (max-width:560px){.w-form th{display:block;width:auto;padding-bottom:0}.w-form td{display:block;padding-top:6px}}
+/* settings page: nav tabs, sub-heading, read-only value, delete link */
+.w-tabs{display:flex;flex-wrap:wrap;gap:0 4px;border-bottom:1px solid var(--w-line);margin:6px 0 14px}
+.wp .w-tab{display:inline-block;border:1px solid var(--w-line);border-bottom:0;background:var(--w-line-soft);color:#50575e;font-size:14px;font-weight:600;line-height:1.7;padding:5px 10px;margin-bottom:-1px;text-decoration:none}
+.wp .w-tab.cur{background:var(--w-bg);color:var(--w-text);border-bottom:1px solid var(--w-bg)}
+.w-h2{font-size:17px;font-weight:600;margin:0 0 4px}
+.w-value{display:inline-block;width:100%;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;color:var(--w-text)}
+.wp .w-del{color:var(--w-err);line-height:2.3}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 
@@ -179,8 +186,8 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <h1>Hierarchy Guard</h1>
   <p class="lede">Shows the parent and child structure of pages inside wp-admin, warns before a slug change, re-parenting, or trash breaks a subtree, and makes sure every old URL has somewhere to go.</p>
   <div class="meta">
-    <span>Status <b>Plans 1 and 2 built; plan 3 (admin UI) in review</b></span>
-    <span>Date <b>11 October 2026</b></span>
+    <span>Status <b>Plans 1–3 built; plan 4 (Settings › Hierarchy Guard) designed</b></span>
+    <span>Date <b>15 October 2026</b></span>
     <span>Slug <b>hierarchy-guard</b></span>
     <span>Requires <b>WordPress 6.6 · PHP 8.0</b></span>
     <span>Target <b>WordPress.org directory</b></span>
@@ -237,9 +244,10 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
       <tr><td>Ledger shape</td><td>One entry on the post whose slug or parent changed. When children move together through a trash or a delete, one entry on their new parent recording the old parent path, or in a small root list when they become top level, with a per-child entry only for a child whose slug had to change. Descendants are resolved at 404 time by longest-prefix match.</td><td>Write cost is independent of subtree size. Core's <code>get_page_by_path()</code> does the rest.</td></tr>
       <tr><td>Scale rule</td><td>No operation inside a web request may grow with subtree size. Counts cap at 1,000. Anything larger runs in background batches with visible progress.</td><td>The plugin must be safe to install on a site with a million posts without anyone noticing it in the dashboard.</td></tr>
       <tr><td>Trash policy</td><td>Ask when the plugin can intercept. Elsewhere apply the default policy, move subpages up to the grandparent, and offer Undo.</td><td>Never leave <code>__trashed</code> URLs live by default. Keep the editor in control where a dialog is possible.</td></tr>
-      <tr><td>Visibility surfaces</td><td>Editor sidebar panel, a Hierarchy column with a subtree filter, and a Tree view of the Pages list</td><td>Covers editing, bulk management, and overview without adding a menu item. No redirect log screen.</td></tr>
+      <tr><td>Visibility surfaces</td><td>Editor sidebar panel, a Hierarchy column with a subtree filter, and a Tree view of the Pages list</td><td>Covers editing, bulk management, and overview without adding a top-level menu.</td></tr>
+      <tr><td>Settings and recorded redirects</td><td>A Settings › Hierarchy Guard page with core nav tabs, Settings | Redirects. The Redirects tab lists, edits and deletes the redirects the plugin recorded, and nothing else. Nothing registers on Settings › Writing.</td><td>Hierarchy Guard is not a redirect plugin. It is a minimal add-on for sites with no redirect plugin, or whose owners don't want to mix manual redirects with the ones it generates. A recorded redirect still needs a place to be corrected or removed, and a list of them doesn't belong on Settings › Writing.</td></tr>
       <tr><td>UI rule</td><td>Core components and core admin classes only. No colours, radii or type sizes of our own. Status as text, not pills. "Subpages" is the word.</td><td>Inherits the user's admin colour scheme today and the design tokens and any dark mode core ships later.</td></tr>
-      <tr><td>Storage</td><td>Post meta and one option, no custom tables</td><td>Data travels with the post, works on VIP and multisite, cleaned up by core on delete.</td></tr>
+      <tr><td>Storage</td><td>Post meta and options, no custom tables or post types</td><td>Data travels with the post, works on VIP and multisite, cleaned up by core on delete. An edit to a recorded redirect lives next to the record it changes.</td></tr>
       <tr><td>Versions</td><td>WordPress 6.6 or newer, PHP 8.0 or newer</td><td>6.6 moved the document settings panel slot into the editor package. Modern PHP without excluding most hosts.</td></tr>
       <tr><td>Repository</td><td>Standalone git repo at <code>~/Work/hierarchy-guard</code>, symlinked into a Local site for manual testing</td><td>Clean for GitHub and the WordPress.org SVN. Sits beside your other plugin repos.</td></tr>
       <tr><td>Name</td><td>Hierarchy Guard, slug <code>hierarchy-guard</code></td><td>Describes the job, isn't page-only, and no directory plugin uses it.</td></tr>
@@ -254,7 +262,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <div class="cards">
     <div class="card"><span class="tag">See</span><h3>Visibility</h3><p>Parent and child pages in the editor, a Hierarchy column and subtree filter in the list, and a Tree view of the same list.</p></div>
     <div class="card"><span class="tag">Warn</span><h3>Guard rails</h3><p>A warning when the slug or parent changes on a page with subpages, and a one-sentence dialog before trashing a parent from the Pages list.</p></div>
-    <div class="card"><span class="tag">Recover</span><h3>Safety net</h3><p>Every URL change is recorded. The editor gets the exact redirects to add in their redirect plugin, or Hierarchy Guard serves them itself.</p></div>
+    <div class="card"><span class="tag">Recover</span><h3>Safety net</h3><p>Every URL change is recorded. The editor gets the exact redirects to add in their redirect plugin, or Hierarchy Guard serves them itself. Administrators can retarget or delete each one under Settings › Hierarchy Guard.</p></div>
   </div>
   <div class="prose"><p>Mockups below use the default "Modern" admin colour scheme. The real plugin sets no colours: React surfaces come from <code>@wordpress/components</code> and PHP surfaces use core admin classes, so they follow whatever scheme and tokens the site has.</p></div>
 
@@ -358,7 +366,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <div class="prose"><p>Bulk variant, titled "Move 5 pages to the Trash?": "3 of the selected pages have subpages, 19 in all. The subpages move up one level and get new URLs." When the current user can't edit (or, for the trash policy, delete) some of the subpages, the dialog says so and those subpages stay where they are. One preview covers at most 50 pages and one batch of capability checks, whatever the selection. In Quick Edit, a changed slug or parent shows the editor's warning in core's save bar instead of a modal: "Saving changes this page’s URL and the URLs of 12 subpages."</p></div>
 
   <h3>Outcome notice and redirects needed</h3>
-  <div class="prose"><p>After a trash, core's own notice on the Pages list says what happened to the subpages and keeps its Undo link. The URLs the trash changed get a notice of their own below it, styled by what handles them: a warning when nothing does. Trashing from the post editor lands on this Pages list, so the same notices cover it. A save that changed URLs gets the same sentence once, where it was made. A Quick Edit or block editor save gets it in place. A Bulk Edit gets it on the Pages list core redirects back to, below core's "pages updated" notice. A classic editor save gets it on the edit screen it lands on, and only there: a save made anywhere else never shows on a later classic visit. In the Site Editor's DataViews, which stay on screen, the message is a snackbar. The pairs live in a modal, computed on demand, cached for a few minutes and paged, where the provider-specific actions also live. The modal exists on the Pages list and in the block editor; on the classic editor's screen, and without JavaScript, the link is "Download redirects (CSV)" and downloads the CSV. The list notices are scoped to the post type's list screen, and the summary expires after thirty minutes or the next URL-changing action. A later change replaces the list an earlier notice offers, so a new notice on the Pages list takes the earlier ones' links, and an older list asked for says a later change replaced it. A trash's list is complete while its pages are in the Trash. Once a page a list has redirects for is deleted for good, the list is gone, and asking for it says a page they belong to was deleted for good: for a save, a page it moved or renamed; for a trash, a parent whose subpages moved up. A parent that moved nothing had nothing to list, so deleting it changes nothing.</p></div>
+  <div class="prose"><p>After a trash, core's own notice on the Pages list says what happened to the subpages and keeps its Undo link. The URLs the trash changed get a notice of their own below it, styled by what handles them: a warning when nothing does. Trashing from the post editor lands on this Pages list, so the same notices cover it. A save that changed URLs gets the same sentence once, where it was made. A Quick Edit or block editor save gets it in place. A Bulk Edit gets it on the Pages list core redirects back to, below core's "pages updated" notice. A classic editor save gets it on the edit screen it lands on, and only there: a save made anywhere else never shows on a later classic visit. In the Site Editor's DataViews, which stay on screen, the message is a snackbar. The pairs live in a modal, computed on demand, cached for a few minutes and paged, where the provider-specific actions also live. A pair's old URL and a page's new URL are relative to the home URL; a URL target set on Edit is listed as it was set, absolute, with its query and <code>#fragment</code>, so the modal, "Copy as text" and the CSV show what the server sends. The modal exists on the Pages list and in the block editor; on the classic editor's screen, and without JavaScript, the link is "Download redirects (CSV)" and downloads the CSV. The list notices are scoped to the post type's list screen, and the summary expires after thirty minutes or the next URL-changing action. A later change replaces the list an earlier notice offers, so a new notice on the Pages list takes the earlier ones' links, and an older list asked for says a later change replaced it. A trash's list is complete while its pages are in the Trash. Once a page a list has redirects for is deleted for good, the list is gone, and asking for it says a page they belong to was deleted for good: for a save, a page it moved or renamed; for a trash, a parent whose subpages moved up. A parent that moved nothing had nothing to list, so deleting it changes nothing.</p></div>
   <div class="mock">
     <div class="mock-bar">Pages list · right after the trash</div>
     <div class="wp">
@@ -396,18 +404,79 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   </div>
   <div class="prose"><p>The CSV is generated server-side in the detected provider's import layout, for example <code>source,target,regex,code</code> for Redirection and Safe Redirect Manager, so it imports without editing. Each row's code is the code the server's own rule chooses (before filters) for that old URL, in every layout: 302 while restoring a page from the trash could still undo the move its redirect follows, because a page in the trash holds a prefix of the old path or the target or a page above it sits where the trash moved it, and 301 otherwise. "Copy as text" carries no code. Download links are the one place the plugin sends a file. An old URL a live page uses now gets no redirect, because a redirect plugin would hide that page, and nothing is listed without pretty permalinks.</p></div>
 
-  <h3>Settings</h3>
-  <div class="prose"><p>Three fields don't earn a top-level page. They register as a "Page hierarchy" section on Settings › Writing through the Settings API, the same precedent the Classic Editor plugin uses.</p></div>
+  <h3>Settings › Hierarchy Guard</h3>
+  <div class="prose"><p>Hierarchy Guard is not a redirect plugin. It is a minimal add-on for sites with no redirect plugin, or whose owners don't want to mix manual redirects with the ones this plugin generates. So its one admin page holds the three settings and the redirects the plugin recorded, and nothing else. It sits under Settings at <code>options-general.php?page=hierarchy-guard</code>, for users with <code>manage_options</code>, with core nav tabs: Settings | Redirects. The Settings tab holds the three fields, Post types, Trashing a page with subpages, and Redirects, the one switch for built-in redirects. They save the same <code>hierarchy_guard_settings</code> option through the Settings API. Nothing registers on Settings › Writing. Every link to the settings opens this page: the "Set up redirects" notice action, the panel's "Change this in Settings", and the readme. The plugin's row on the Plugins screen gets a "Settings" action link to it too.</p></div>
   <div class="mock" style="max-width:680px">
-    <div class="mock-bar">Settings › Writing › Page hierarchy</div>
+    <div class="mock-bar">Settings › Hierarchy Guard · Settings tab</div>
     <div class="wp">
-      <span class="w-h1">Writing Settings</span>
+      <span class="w-h1">Hierarchy Guard</span>
+      <div class="w-tabs"><a class="w-tab cur">Settings</a><a class="w-tab">Redirects</a></div>
       <table class="w-form">
         <tr><th>Post types</th><td><label><span class="w-box on"></span> Pages</label><label><span class="w-box on"></span> Documentation</label><div class="w-muted">Public hierarchical post types appear here automatically.</div></td></tr>
         <tr><th>Trashing a page with subpages</th><td><label><span class="w-radio on"></span> Move subpages up one level</label><label><span class="w-radio"></span> Trash the subpages too</label><label><span class="w-radio"></span> Leave subpages where they are</label><div class="w-muted">Used when there's no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.</div></td></tr>
         <tr><th>Redirects</th><td><label><span class="w-box"></span> Redirect old URLs to their new pages</label><div class="w-muted">Redirection is active and can handle these. URL changes are recorded either way.</div></td></tr>
       </table>
       <a class="w-btn" style="margin-top:6px">Save Changes</a>
+    </div>
+  </div>
+
+  <h3>Redirects tab</h3>
+  <div class="prose"><p>The Redirects tab is a core <code>WP_List_Table</code> of every redirect the plugin recorded, and only those. Each row is one ledger record: a page's <code>_hierarchy_guard_path_{md5}</code> entry, or one root-list entry, whose subpages became top level. Old URL is the recorded path, linked to its Edit view as core links a row title, with "and the URLs under it" for a page target. Redirects to is the page's title, linked to its edit screen, with its current URL; for a URL target, the URL; for a root-list entry without an override, "Top level". Code is "Automatic", which is 302 while restoring a page from the Trash could undo the move and 301 otherwise, or the 301 or 302 chosen on Edit. Status is "Active", or says why the redirect isn't served as far as its plain checks tell, and a row shows the first reason that applies:</p>
+    <ul>
+      <li>"Not active: a page uses this URL". A live page always wins; redirects act only on a 404.</li>
+      <li>"Not active: the page it points to isn't published".</li>
+      <li>"Not active: the server can’t send this redirect".</li>
+      <li>"Not active: built-in redirects are off".</li>
+    </ul>
+    <p>The status comes from plain checks, read for the page's 20 rows only. "A page uses this URL" means a published post, page or attachment of any public type that anyone can view is at the exact old URL, as <code>url_to_postid()</code> finds it, so WordPress shows it and no redirect runs. "The server can’t send this redirect", whether built-in redirects are on or off and under plain permalinks too, covers a path deeper than the server's segment cap, which it refuses before it looks, counting for a top-level root-list entry the segment of the URLs under it; a URL target at its own old URL, which it refuses as a loop, the two compared decoded, so <code>/café/</code> and <code>/caf%C3%A9/</code> are one path; and a URL target on this site that is another old URL this plugin redirects, which the server never sends. A row whose own page is in the Trash reads "the page it points to isn’t published" whatever else is at its old URL: its own target is why it isn't served. Other WordPress URLs aren't checked, so a row whose old URL is an archive, or another plugin's rule, can read "Active" while WordPress shows that instead; under the table the tab says "Status checks posts and pages at each old URL. Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked." The checks don't weigh one record against another either: when two recorded redirects share an old URL, as an older and a newer holder, a post entry and a root-list entry, or records of two post types, at most one is served (none while a newer holder is in the Trash, so a restore can take the URL back), and the tab says "When two recorded redirects share an old URL, at most one is served, and both can read Active."</p>
+    <p>Search matches the old URL, ignoring case in any script, and a percent-encoded path or URL is read as the old URL it names, so <code>/caf%C3%A9/</code> finds <code>/café/</code> and the URLs under it. A search that leaves nothing to search for once sanitized, such as one of tags only, finds nothing, and the heading says what was searched; the search heading shows on the list, not on the Edit view. A post type filter appears when more than one type is supported. Rows come 20 per page, sorted by old URL across the newest 1,000 records plus the root list; past that, a notice says so, the count reads "1,000+", and a search for a full old URL still finds any record by its exact key, whatever the newest list holds. Until the list is first built, a notice says "The list of recorded redirects is still being built. Older redirects appear here once it’s done.", and an empty table says "No redirects are listed yet." rather than that nothing was recorded. The newest records come from a capped list the ledger keeps per post type, so the post type filter shows that type's own newest records. Row actions are Edit and Delete, and Delete is also a bulk action. Edit and Delete, and the Edit view's Save, Cancel and Delete, return to the list with its search, filter and page. Delete asks first, from a row, the Edit view or in bulk, a middle-click on a Delete link included, with a browser confirmation as core asks before deleting a term: "Delete the redirect from /about/team/? This can’t be undone.", or once for a bulk selection, "Delete the selected redirects? This can’t be undone." A bulk Delete asks whatever submits the form, Enter in the search box or the page number included; only Filter runs no action. Without JavaScript it deletes directly, as core does. There is no Add button: adding redirects by hand is a redirect plugin's job. When built-in redirects are off, a notice above the table says "Built-in redirects are off, so these redirects aren't served. Turn them on in the Settings tab." Under plain permalinks, where the server serves nothing, a notice says "Built-in redirects need a permalink structure other than Plain, so these redirects aren’t served. Choose one in Permalink settings." When a redirect plugin is detected, a notice names it and says these are the redirects Hierarchy Guard recorded, which its notices after each change offer to add there.</p></div>
+  <div class="mock">
+    <div class="mock-bar">Settings › Hierarchy Guard · Redirects tab · built-in redirects on, Redirection active</div>
+    <div class="wp">
+      <span class="w-h1">Hierarchy Guard</span>
+      <div class="w-tabs"><a class="w-tab">Settings</a><a class="w-tab cur">Redirects</a></div>
+      <div class="w-note"><p>Redirection is active. These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them in Redirection.</p></div>
+      <div class="w-filters" style="justify-content:flex-end"><span class="w-input">Search old URLs</span><a class="w-btn-sec">Search Redirects</a></div>
+      <div class="w-filters"><span class="w-select">Bulk actions ▾</span><a class="w-btn-sec">Apply</a><span class="w-select">All post types ▾</span><a class="w-btn-sec">Filter</a><span class="w-muted" style="margin-left:auto">47 items · « ‹ 1 of 3 › »</span></div>
+      <div class="w-tablewrap">
+      <table class="w-table">
+        <thead><tr><th style="width:28px"><span class="w-box"></span></th><th>Old URL</th><th>Redirects to</th><th>Code</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title"><code>/about/team/</code></a><div class="w-muted w-small">and the URLs under it</div><div class="w-actions"><a>Edit</a> | <a class="w-trash">Delete</a></div></td><td><a>Team</a><div class="w-muted w-small">/company/team/</div></td><td>Automatic</td><td>Active</td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title"><code>/archive/</code></a><div class="w-muted w-small">and the URLs under it</div></td><td>Top level</td><td>Automatic</td><td>Active</td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title"><code>/careers/</code></a></td><td>https://jobs.example.com/</td><td>302</td><td>Active</td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title"><code>/events/</code></a><div class="w-muted w-small">and the URLs under it</div></td><td><a>What’s on</a> <span class="w-muted">— Draft</span><div class="w-muted w-small">/?page_id=58</div></td><td>Automatic</td><td>Not active: the page it points to isn’t published</td></tr>
+          <tr><td><span class="w-box"></span></td><td><a class="w-row-title"><code>/news/</code></a><div class="w-muted w-small">and the URLs under it</div></td><td><a>Newsroom</a><div class="w-muted w-small">/newsroom/</div></td><td>301</td><td>Not active: a page uses this URL</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="w-variants">
+        <div class="w-note warn"><p><strong>If built-in redirects are off:</strong> Built-in redirects are off, so these redirects aren’t served. Turn them on in the <a>Settings tab</a>.</p><p class="w-muted">Every row that would be Active reads “Not active: built-in redirects are off”.</p></div>
+        <div class="w-note warn"><p><strong>Under plain permalinks:</strong> Built-in redirects need a permalink structure other than Plain, so these redirects aren’t served. Choose one in <a>Permalink settings</a>.</p><p class="w-muted">Every row that would be Active reads “Not active: built-in redirects are off”, whatever the switch says.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Editing a redirect</h3>
+  <div class="prose"><p>Edit is its own view of the page, <code>&amp;action=edit&amp;redirect=&lt;id&gt;</code>, behind a nonce. Old URL is read only. One "Redirect to" field takes a URL, or a path on this site such as <code>/company/about/</code>, which is read against the home URL; it is a plain text field, so a path isn't stopped by the browser, and its help says so. If it resolves to a supported page on this site through <code>url_to_postid()</code>, it is saved as a page target, which follows that page when it moves and covers the URLs under the old one; the page must be published, viewable by anyone and not under the Trash, so a link to a draft, its preview, a private page or a page in the Trash, which <code>url_to_postid()</code> reads through <code>?page_id=</code> whatever its status, is refused with "That page isn’t published." Any other http(s) URL is saved as a URL target, which redirects only that exact old URL: the URLs under it stop redirecting through this record, and the form says so before saving. A page of another post type counts as any other URL, because a record belongs to its own post type. An http(s) URL must name a host, so <code>http:/path</code> is refused, and a URL target at the record's own old URL, as typed or percent-encoded, is refused with "That URL is the old URL itself.", since the server would refuse it as a loop. A URL on this site that is another old URL this plugin redirects is refused with "That URL is another old URL this plugin recorded.", since the server never sends a URL target to one: point the record at where that redirect leads instead. A URL is on this site when its host and port are the home URL's, whatever its scheme, and its path is under the home URL's path, read in any case as WordPress routes it: another port is another site, and so is a URL of the same host outside the home path, as the main site's URLs are to a subdirectory subsite. There is no page picker, because a list of every page can't be bounded on a large site, and the form works without JavaScript. For a root-list entry whose subpages are top level and that has no URL target, the view says "Now redirects to the same page at the top level, for example /about/team/ to /team/.", and the field starts empty, with the help "Leave empty to keep this. Enter a URL to send these URLs somewhere else."; saving it empty keeps the entry and saves only the code. Code is Automatic, 301 or 302. Save and Cancel sit under the form, with a Delete link. Saving returns to the Redirects tab with a core notice confirming it. Deleting, from this view, a row or in bulk, says the old URL no longer redirects through this record; a shorter recorded URL, or core's own guess, may still send it somewhere.</p></div>
+  <div class="mock" style="max-width:720px">
+    <div class="mock-bar">Settings › Hierarchy Guard · Redirects › Edit · &amp;action=edit&amp;redirect=…</div>
+    <div class="wp">
+      <span class="w-h1">Hierarchy Guard</span>
+      <div class="w-tabs"><a class="w-tab">Settings</a><a class="w-tab cur">Redirects</a></div>
+      <div class="w-h2">Edit redirect</div>
+      <table class="w-form">
+        <tr><th>Old URL</th><td><code>/about/team/</code> <span class="w-muted">and the URLs under it</span></td></tr>
+        <tr><th>Redirect to</th><td><span class="w-input w-value">https://example.com/company/team/</span><div class="w-muted">A page on this site: the redirect follows it when it moves, and the URLs under <code>/about/team/</code> go to the matching URLs under it. Any other URL: only <code>/about/team/</code> redirects, and this redirect no longer covers the URLs under it. A path on this site, such as <code>/about/team/</code>, works as well as a full URL.</div></td></tr>
+        <tr><th>Code</th><td><label><span class="w-radio on"></span> Automatic</label><div class="w-muted" style="margin:-4px 0 10px 24px">301, or 302 while restoring a page from the Trash could undo the move.</div><label><span class="w-radio"></span> 301 (permanent)</label><label><span class="w-radio"></span> 302 (temporary)</label></td></tr>
+      </table>
+      <div class="w-btns left"><a class="w-btn">Save</a><a class="w-btn-ter">Cancel</a><a class="w-del" style="margin-left:auto">Delete</a></div>
+      <div class="w-variants">
+        <div class="w-note ok"><p><strong>After saving:</strong> Redirect updated.</p></div>
+        <div class="w-note"><p><strong>Delete asks first:</strong> Delete the redirect from /about/team/? This can’t be undone.</p></div>
+        <div class="w-note"><p><strong>A top-level root-list entry:</strong> Now redirects to the same page at the top level, for example /about/team/ to /team/. The field starts empty: Leave empty to keep this. Enter a URL to send these URLs somewhere else.</p></div>
+        <div class="w-note ok"><p><strong>After deleting:</strong> Redirect deleted. <code>/about/team/</code> no longer redirects through it.</p></div>
+      </div>
     </div>
   </div>
 </section>
@@ -528,11 +597,57 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
     <figcaption>Where a dialog is possible the editor decides. Everywhere else the default policy runs and Undo is one click away. Nothing is mutated until core has succeeded, and nothing in the request grows with the size of the subtree.</figcaption>
   </figure>
 
-  <h3>Serving a redirect</h3>
-  <div class="prose"><p>Only runs when the built-in option is on, only for GET and HEAD, and at <code>template_redirect</code> priority 9 so it beats both <code>redirect_canonical()</code> and its fuzzy 404 guess. The requested path comes from <code>$wp-&gt;request</code> with the <code>index.php</code> root removed. Query vars can't be used: with the default <code>/%postname%/</code> structure, core skips every page rule whose path matches no page, so a 404 for an old page path carries no <code>pagename</code> at all, or an unrelated <code>attachment</code> value for two-segment paths. Pagination, comment-page, trackback, feed and embed suffixes are set aside and re-applied to the target, and the path is normalized the way <code>get_page_by_path()</code> normalizes. A path under a hierarchical custom type's rewrite prefix is tried as that type first, then as a page. The resolver tries the longest prefix first; on a hit it rebuilds a candidate from the matched post's current path plus the remainder, or from the remainder alone when the prefix is in the root list, and asks core to resolve it scoped to the post type. A candidate that still fails is fed back through the loop for chained changes, at most five rounds with a seen-set to break cycles. The final target must be publicly viewable. The URL passes <code>wp_validate_redirect()</code> after filtering. The status code defaults to 301, or 302 while a restore from the trash could still undo the move the redirect follows, so no browser keeps a redirect that a restore would make wrong.</p></div>
+  <h3>Editing a recorded redirect</h3>
+  <div class="prose"><p>No new post type and no table: an edit lives next to the record it changes. Retargeting a record to another page moves it: the path is recorded on that page and forgotten on the old holder, or moved out of the root list. A URL target or a chosen code is a sibling post meta on the holder, <code>_hierarchy_guard_target_{md5}</code>, with the same hash as the entry, holding <code>{ url, code }</code>. A root-list entry's override lives in a second non-autoloaded option, <code>hierarchy_guard_root_targets</code>, keyed by post type then path. Deleting a record deletes its override with it. Every edit bumps the ledger's cache key, so the resolver and the cached redirect lists see it on the next request. The page and every action on it check <code>manage_options</code> and a nonce, so only administrators can point a redirect off the site, and only at an http(s) URL.</p></div>
   <figure>
     <div class="scroll">
-    <svg class="dg" viewBox="0 0 1000 340" role="img" aria-label="A GET or HEAD 404 at template_redirect priority 9. If built-in redirects are off, core handles it. Otherwise the path is taken from the raw request and normalized, looked up by longest prefix with an index seek on the hashed key. On a miss core guesses. On a hit a candidate is rebuilt from the matched post's current path plus the remainder and resolved with get_page_by_path. If it is a viewable page, redirect with 301; otherwise feed the candidate back, up to five rounds.">
+    <svg class="dg" viewBox="0 0 920 290" role="img" aria-label="Saving the Edit form. If url_to_postid finds a page of the record's own post type on this site, the redirect becomes a page target: the record is recorded on that page and forgotten on the old holder, or moved out of the root list, and it follows the page and covers the URLs under the old one. Otherwise, if the URL is http or https, it becomes a URL target stored as sibling post meta on the holder or in the root targets option, and redirects the exact old URL only. Any other URL is not saved. Either way a chosen code is saved beside the record, the ledger cache key is bumped, and a core notice confirms.">
+      <defs><marker id="arrD" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
+      <rect class="box" x="16" y="108" width="180" height="64" rx="6"/>
+      <text class="b" x="106" y="132" text-anchor="middle">Save the Edit form</text>
+      <text class="sub" x="106" y="150" text-anchor="middle">Redirect to · Code · nonce</text>
+      <path class="ar" d="M196 140 H220" marker-end="url(#arrD)"/>
+      <text class="lab" x="330" y="92" text-anchor="middle">url_to_postid()</text>
+      <polygon class="box" points="330,100 440,140 330,180 220,140"/>
+      <text x="330" y="137" text-anchor="middle">Supported page</text>
+      <text x="330" y="152" text-anchor="middle">on this site?</text>
+      <path class="ar" d="M440 140 H460 V58 H480" marker-end="url(#arrD)"/>
+      <text class="lab" x="466" y="104">yes</text>
+      <rect class="dec" x="480" y="16" width="420" height="84" rx="6"/>
+      <text class="b" x="690" y="38" text-anchor="middle">Page target</text>
+      <text class="sub" x="690" y="56" text-anchor="middle">recorded on that page, forgotten on the old holder,</text>
+      <text class="sub" x="690" y="71" text-anchor="middle">or moved out of the root list</text>
+      <text class="sub" x="690" y="88" text-anchor="middle">follows the page · covers the URLs under the old one</text>
+      <rect class="note" x="480" y="112" width="420" height="64" rx="6"/>
+      <text class="b" x="690" y="134" text-anchor="middle">Either way</text>
+      <text class="sub" x="690" y="152" text-anchor="middle">a chosen code is saved beside the record as { url, code }</text>
+      <text class="sub" x="690" y="167" text-anchor="middle">ledger cache key bumped · core notice confirms</text>
+      <path class="ar" d="M330 180 V196" marker-end="url(#arrD)"/>
+      <text class="lab" x="340" y="192">no</text>
+      <polygon class="box" points="330,196 420,230 330,264 240,230"/>
+      <text x="330" y="234" text-anchor="middle">http(s) URL?</text>
+      <path class="ar" d="M420 230 H480" marker-end="url(#arrD)"/>
+      <text class="lab" x="450" y="222" text-anchor="middle">yes</text>
+      <rect class="dec" x="480" y="188" width="420" height="84" rx="6"/>
+      <text class="b" x="690" y="210" text-anchor="middle">URL target</text>
+      <text class="sub" x="690" y="228" text-anchor="middle">_hierarchy_guard_target_{md5} on the holder,</text>
+      <text class="sub" x="690" y="243" text-anchor="middle">or hierarchy_guard_root_targets for a root-list entry</text>
+      <text class="sub" x="690" y="260" text-anchor="middle">exact old URL only · the URLs under it fall through</text>
+      <path class="ar" d="M240 230 H196" marker-end="url(#arrD)"/>
+      <text class="lab" x="218" y="222" text-anchor="middle">no</text>
+      <rect class="box" x="16" y="202" width="180" height="56" rx="6"/>
+      <text class="b" x="106" y="224" text-anchor="middle">Not saved</text>
+      <text class="sub" x="106" y="242" text-anchor="middle">the form says why</text>
+    </svg>
+    </div>
+    <figcaption>One URL field decides the target. A page on the site makes a page target, which moves the record and keeps covering the URLs under the old one. Anything else makes a URL target, which answers only the exact old URL. The shaded steps are the only persistent writes an edit makes.</figcaption>
+  </figure>
+
+  <h3>Serving a redirect</h3>
+  <div class="prose"><p>Only runs when the built-in option is on, only for GET and HEAD, and at <code>template_redirect</code> priority 9 so it beats both <code>redirect_canonical()</code> and its fuzzy 404 guess. The requested path comes from <code>$wp-&gt;request</code> with the <code>index.php</code> root removed. Query vars can't be used: with the default <code>/%postname%/</code> structure, core skips every page rule whose path matches no page, so a 404 for an old page path carries no <code>pagename</code> at all, or an unrelated <code>attachment</code> value for two-segment paths. Pagination, comment-page, trackback, feed and embed suffixes are set aside and re-applied to the target, and the path is normalized the way <code>get_page_by_path()</code> normalizes. A path under a hierarchical custom type's rewrite prefix is tried as that type first, then as a page. The resolver tries the longest prefix first; on a hit it rebuilds a candidate from the matched post's current path plus the remainder, or from the remainder alone when the prefix is in the root list, and asks core to resolve it scoped to the post type. A record with a URL target answers only its exact old path, with that URL; for a longer path, matching continues as if that record weren't there, so a shorter prefix can still answer. A root-list entry's override is read from <code>hierarchy_guard_root_targets</code> the same way. A candidate that still fails is fed back through the loop for chained changes, at most five rounds with a seen-set to break cycles. A page target must be publicly viewable, and its URL passes <code>wp_validate_redirect()</code> after filtering. A URL target, which may be on another host, is sent with <code>wp_redirect()</code> after <code>esc_url_raw()</code>, http(s) only. The status code defaults to 301, or 302 while a restore from the trash could still undo the move the redirect follows, so no browser keeps a redirect that a restore would make wrong. A chosen code replaces the automatic one. A live page at the old URL always wins, because the server acts only on a 404. It never redirects to the URL being requested: a URL target at the requested path on this host and port, in either scheme, is not sent, while one on another port is. Nor does it send a URL target on this site whose path is another old URL this plugin redirects, as the resolver answers that path through any record, unless a published post or page is shown at that path, the request's query string aside: redirects that send each other round, however many and however the loop formed, stop at a plain 404, for one extra resolve per same-site URL target sent. The batch resolver that builds a change's redirect lists honours the same overrides, so the modal and the CSV list what the server sends, with one exception: a URL-target pair whose target later became another recorded old URL is still listed. A redirect plugin importing the CSV would follow it on through that redirect, but the built-in redirects don't send it.</p></div>
+  <figure>
+    <div class="scroll">
+    <svg class="dg" viewBox="0 0 1000 340" role="img" aria-label="A GET or HEAD 404 at template_redirect priority 9. If built-in redirects are off, core handles it. Otherwise the path is taken from the raw request and normalized, looked up by longest prefix with an index seek on the hashed key. On a miss core guesses. On a hit a candidate is rebuilt from the matched post's current path plus the remainder and resolved with get_page_by_path. If it is a viewable page, redirect with the record's code; otherwise feed the candidate back, up to five rounds.">
       <defs><marker id="arrC" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 z" fill="currentColor"/></marker></defs>
       <rect class="box" x="16" y="36" width="190" height="48" rx="6"/>
       <text class="b" x="111" y="56" text-anchor="middle">GET or HEAD 404</text>
@@ -575,7 +690,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
       <path class="ar" d="M560 272 V292" marker-end="url(#arrC)"/>
       <text class="lab" x="568" y="286">yes</text>
       <rect class="dec" x="490" y="292" width="140" height="40" rx="6"/>
-      <text class="b" x="560" y="316" text-anchor="middle">301 to it</text>
+      <text class="b" x="560" y="316" text-anchor="middle">Redirect to it</text>
       <path class="ar dash" d="M500 244 H410 V14 H790 V28" marker-end="url(#arrC)"/>
       <text class="lab" x="470" y="236" text-anchor="middle">no</text>
       <text class="lab" x="600" y="24" text-anchor="middle">feed the candidate back, up to 5 rounds</text>
@@ -602,17 +717,21 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
 <section id="data">
   <span class="eyebrow sec-eyebrow">Persistence</span>
   <h2>Data model</h2>
-  <div class="prose"><p>Everything lives in core tables. Post meta is removed by core when a post is deleted, and <code>uninstall.php</code> removes the rest in batches of a thousand rows, per site on multisite. All plugin caches live in a <code>hierarchy_guard</code> cache group with its own last-changed key, bumped only by the plugin's own writes, because the posts key changes on every post or meta write anywhere on the site.</p></div>
+  <div class="prose"><p>Everything lives in core tables. Post meta is removed by core when a post is deleted, and <code>uninstall.php</code> removes the rest in batches of a thousand rows, per site on multisite, and clears each site's <code>hierarchy_guard_rebuild_recent</code> event. All plugin caches live in a <code>hierarchy_guard</code> cache group with its own last-changed key, bumped only by the plugin's own writes, because the posts key changes on every post or meta write anywhere on the site. Edits and deletes on the Redirects tab are plugin writes and bump it too.</p></div>
   <div class="scroll">
   <table class="t">
     <thead><tr><th>Where</th><th>Key</th><th>Value</th><th>Purpose</th></tr></thead>
     <tbody>
-      <tr><td>Post meta</td><td><code>_hierarchy_guard_path_{md5}</code></td><td>The old page path, normalized, without the post type's rewrite prefix, such as <code>about/team</code>. The hash covers the post type and the path.</td><td>One row per URL change on this post, or an old parent path whose children now live under this post. The hash in the key makes a 404 lookup a single index seek. Pruned when it equals the current path. Protected prefix keeps it out of Custom Fields and REST.</td></tr>
+      <tr><td>Post meta</td><td><code>_hierarchy_guard_path_{md5}</code></td><td>The old page path, normalized, without the post type's rewrite prefix, such as <code>about/team</code>. The hash covers the post type and the path.</td><td>One row per URL change on this post, or an old parent path whose children now live under this post. The hash in the key makes a 404 lookup a single index seek. Pruned when it equals the current path. Protected prefix keeps it out of Custom Fields and REST. Each row is one record on the Redirects tab; retargeting it to another page moves the row to that page.</td></tr>
+      <tr><td>Post meta</td><td><code>_hierarchy_guard_target_{md5}</code></td><td><code>{ url, code }</code>: a URL target or none, and a chosen 301 or 302 or none. The same hash as the path entry beside it.</td><td>An edit from the Redirects tab, kept on the record's holder. Present only when the record has a URL target or a chosen code. Deleted with its record. Protected prefix, like the path entry.</td></tr>
       <tr><td>Post meta, one row per subpage and root</td><td><code>_hierarchy_guard_moved_{root_id}</code></td><td>New parent, original slug, assigned slug, time of the move</td><td>Set on a subpage the plugin moved when its parent was trashed. The root ID in the key makes every restore read a bounded seek, and each row is deleted once handled. Reversal moves the subpage back only if it still sits under the recorded parent, and gives back the original slug only if the editor hasn't renamed it since. Rows pointing at a permanently deleted root are cleaned up in batches. Excluded from WXR export.</td></tr>
       <tr><td>Post meta, one row per subpage and root</td><td><code>_hierarchy_guard_trashed_{root_id}</code></td><td><code>1</code></td><td>Set on subpages trashed under the subtree policy. They return with their previous status however they leave the trash, through a permanent filter rather than core's own callback. A subpage restored on its own drops its row. When the root is deleted for good the rows stay, so those subpages still come back with their previous status; each goes when its subpage is restored or deleted. Excluded from WXR export.</td></tr>
       <tr><td>Post meta</td><td><code>_hierarchy_guard_aliases</code></td><td>Aliases the trash recorded for this root</td><td>Lets a restore remove the aliases once the root is back at its old path.</td></tr>
-      <tr><td>Option</td><td><code>hierarchy_guard_settings</code></td><td><code>post_types</code>, <code>trash_policy</code>, <code>serve_redirects</code></td><td>The three settings. Autoloaded. Absent keys fall back to defaults.</td></tr>
-      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_root_paths</code></td><td>Old parent paths whose children became top level, per post type, capped at 200</td><td>Consulted by the resolver after post entries. Pruned when the children move back.</td></tr>
+      <tr><td>Option</td><td><code>hierarchy_guard_settings</code></td><td><code>post_types</code>, <code>trash_policy</code>, <code>serve_redirects</code></td><td>The three settings, saved from the Settings tab of Settings › Hierarchy Guard. Autoloaded. Absent keys fall back to defaults.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_root_paths</code></td><td>Old parent paths whose children became top level, per post type, capped at 200</td><td>Consulted by the resolver after post entries. Pruned when the children move back. Each entry is one record on the Redirects tab; retargeting it to a page moves it out of this list onto that page.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_root_targets</code></td><td><code>{ url, code }</code> per root-list entry, keyed by post type then path</td><td>Root-list entries' overrides from the Redirects tab: a URL target, a chosen code, or both. Deleted with the entry.</td></tr>
+      <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_recent_records</code></td><td>Per post type: the meta IDs of the newest <code>_hierarchy_guard_path_{md5}</code> entries, newest first, at most 1,000, and whether older ones exist</td><td>The Redirects tab's window: one primary-key lookup reads it, whatever the number of records. An entry is added when it is recorded (once per batch inside a background job) and leaves when its row is deleted, however that happens. Records made before the list existed reach it from the daily rebuild below. Every write reads the row fresh, right before it writes it through <code>update_option()</code>, and keeps the IDs newest first, so the cap's slice keeps the newest entries. There is no lock: two writes at the very same moment can lose one entry. A lost update heals within a day, at the next rebuild; a search by full URL finds any record meanwhile.</td></tr>
+      <tr><td>Option, autoloaded</td><td><code>hierarchy_guard_recent_state</code></td><td><code>building</code>, or <code>done:</code> and the post types it was built for, such as <code>done:page</code></td><td>Whether a first build of the newest-records list has completed, and the types it built. The daily WP-Cron event <code>hierarchy_guard_rebuild_recent</code>, a single event that schedules its next run a day later when it runs (so on a site where the plugin is no longer active, it is not scheduled again), reads each supported type's newest 1,000 entries again, in one query per type ordered by meta ID with <code>LIMIT</code> 1,001, which also tells whether older ones exist; it keeps entries recorded while it ran, while their rows exist, and when another request wrote the list right after it, merges the rebuilt entries back and writes it once more before it marks the list built. So an entry a lost update dropped comes back, and one whose row was deleted without the plugin's hook goes. Activation, or the first admin load that finds the event missing, schedules it; until a first build has completed, that load sets <code>building</code> and brings the run forward, and the run sets <code>done:</code> with the types it built. A type supported later is built by the next daily run, with no notice. When a query fails, that type's list is left as it was and the state stays <code>building</code>. When deletes take a supported type's full list below the cap, the run is brought forward quietly, without setting <code>building</code>, so the tab shows no notice for it. The first scheduling on a site also clears what development builds left: the old <code>hierarchy_guard_backfill_recent</code> event, a recurring <code>hierarchy_guard_rebuild_recent</code> event, and the <code>hierarchy_guard_recent_lock</code> and <code>hierarchy_guard_recent_queue</code> rows. It never runs in a web request, and once built a page load only reads autoloaded options. Running it again changes nothing.</td></tr>
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}</code></td><td>Type, root, target parent, post type, triggering user, cursor or depth-first stack, counts, up to 20 kept IDs, total, created and touched times</td><td>One background job per root, for work above the inline budget. Replaced by a newer job for the same root and deleted on completion.</td></tr>
       <tr><td>Option, not autoloaded</td><td><code>hierarchy_guard_job_{root_id}_next</code></td><td>A job, in the same shape</td><td>Left by a trash or restore that finds a batch for the same root running in another process. That process adopts it after its current step, so the newer action wins.</td></tr>
       <tr><td>Option row, not autoloaded</td><td><code>hierarchy_guard_lock_{root_id}</code></td><td>Expiry time</td><td>An atomic lock written with an insert that fails when the row exists, so two runs never step the same root's job.</td></tr>
@@ -654,20 +773,21 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
 ├── readme.txt · composer.json · package.json · phpcs.xml · .wp-env.json · .distignore
 ├── includes/HierarchyGuard/
 │   ├── Plugin.php                   wires every hook to its handler
-│   ├── Settings.php                 option access, defaults, "Page hierarchy" section on Settings › Writing
+│   ├── Settings.php                 option access, defaults, Settings API registration for the Settings tab
 │   ├── Post_Types.php               supported hierarchical types, memoised, filterable
 │   ├── Subtree.php                  bounded queries: children(), child_counts(ids), total(cap), walk(level)
 │   ├── Paths.php                    old and current relative paths from the slug chain, normalized
-│   ├── Ledger.php                   record · prune · seek by hashed key · root list · own cache group
+│   ├── Ledger.php                   record · prune · seek by hashed key · root list · records list · overrides · own cache group
 │   ├── Change_Listener.php          post_updated, before_delete_post; zero-query early returns; suspend flag
 │   ├── Trash/Trash_Handler.php      policy, snapshot in wp_trash_post, apply in trashed_post, reversal after the page's save, undo
 │   ├── Trash/Operations.php         reparent, trash-subtree and restore steps with per-child capability checks
 │   ├── Trash/Mover.php · Markers.php · Guard.php · Change_Log.php · Request.php   raw re-parent, per-root markers, re-entrancy guard, change summary, core's bulk selection
 │   ├── Batch/Queue.php · Processor.php · CLI_Command.php   per-root jobs and locks, time-boxed runs, watchdog, wp hierarchy-guard process-jobs
-│   ├── Redirects/Resolver.php       longest-prefix resolution, chained rounds, seen-set
-│   ├── Redirects/Server.php         template_redirect priority 9, GET/HEAD, validate, 301
+│   ├── Redirects/Resolver.php       longest-prefix resolution, chained rounds, seen-set, page and URL targets
+│   ├── Redirects/Server.php         template_redirect priority 9, GET/HEAD, validate, automatic or chosen code, URL targets via wp_redirect()
 │   ├── Redirects/Providers.php      detect redirect plugins, deep links, CSV layouts
-│   ├── Redirects/Pairs.php          old and new URL pairs of a change, each with the 301 or 302 the server's own rule chooses (before filters), capped, cached, never stored
+│   ├── Redirects/Pairs.php          old and new URL pairs of a change, each with the 301 or 302 the server's own rule chooses (before filters), overrides honoured, URL targets listed as set, capped, cached, never stored
+│   ├── Redirects/Records.php        the Redirects tab's records: newest-list window, root list, exact search, overrides, statuses from plain checks, save and delete
 │   ├── Overview.php                 one page's ancestors, paged children, counts, trash outcome, the user's latest change on it
 │   ├── Export/Csv.php               CSV per provider layout
 │   ├── REST/Hierarchy_Controller.php · REST/Changes_Controller.php · REST/Csv_Download.php · REST/Page_Field.php
@@ -677,12 +797,16 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
 │       ├── Tree_View.php            "Tree" view in the views row, hierarchical order, lazy children
 │       ├── Meta_Box.php             classic editor box and submit confirmation
 │       ├── Notices.php              subpage sentences on core's notice, the URLs notice, batch progress, one-time nudge
+│       ├── Settings_Page.php        Settings › Hierarchy Guard: menu, nav tabs, Plugins row link, actions behind manage_options and nonces
+│       ├── Redirects_Table.php      WP_List_Table of recorded redirects: columns, status, search, type filter, row and bulk Delete
+│       ├── Redirect_Edit.php        Edit view: read-only old URL, one URL field, page or URL target, code, save and delete
 │       └── Assets.php               bundles only where they act, their settings, DataViews registration
 ├── src/
 │   ├── common/                      every sentence, REST calls, the redirects Modal
 │   ├── editor/                      save warning (PluginPostStatusInfo), editor notice, Hierarchy panel (PluginDocumentSettingPanel)
 │   ├── list-table/                  trash Modal, Quick Edit inline warning, breadcrumb, nudge
 │   ├── classic/                     submit confirmation
+│   ├── redirects/                   the Redirects tab's Delete confirmation, from a row, the Edit view or in bulk
 │   ├── tree/                        TreeGrid behaviour, lazy load, server search
 │   └── dataviews/                   hierarchy field, replacement move-to-trash action with RenderModal
 ├── build/                           compiled, shipped in release zips only
@@ -701,7 +825,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <tr><td><code>wp_untrash_post_status</code>, priority 20</td><td>Markers, Trash_Handler</td><td>Give co-trashed subpages, and the page Undo restores, the status they had. Core's own callback is never added or removed.</td></tr>
       <tr><td><code>deleted_post</code></td><td>Trash_Handler</td><td>Delete the marker rows and the job of a root deleted for good.</td></tr>
       <tr><td><code>before_delete_post</code></td><td>Change_Listener</td><td>Record the deleted page's path, and any old paths it carried, on the grandparent or in the root list before core re-parents the children. Snapshot new paths for the notice in <code>after_delete_post</code>.</td></tr>
-      <tr><td><code>template_redirect</code>, priority 9</td><td>Redirects\Server</td><td>Serve a 301 from the resolver when built-in redirects are on. GET and HEAD only.</td></tr>
+      <tr><td><code>template_redirect</code>, priority 9</td><td>Redirects\Server</td><td>Serve the resolver's redirect when built-in redirects are on, with the automatic 301 or 302 or the chosen code. GET and HEAD only.</td></tr>
       <tr><td><code>hierarchy_guard_process_batch</code> (cron)</td><td>Batch\Processor</td><td>Step a root's job under its lock for up to 20 seconds, then reschedule until done. Mirrored by a WP-CLI command for hosts without cron.</td></tr>
       <tr><td><code>hierarchy_guard_watchdog</code> (hourly)</td><td>Batch\Processor</td><td>Restart a job whose run died; drop one older than seven days or whose page is gone.</td></tr>
       <tr><td><code>request</code> (edit.php)</td><td>Admin\List_Table</td><td>Translate the subtree filter into <code>post__in</code> from a capped walk, and sort by menu order then title as an array so core paginates normally.</td></tr>
@@ -712,7 +836,13 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <tr><td><code>rest_api_init</code></td><td>REST controllers, Page_Field</td><td>Register the hierarchy and changes routes and the <code>hierarchy_guard</code> field on page objects.</td></tr>
       <tr><td><code>wxr_export_skip_postmeta</code></td><td>Markers</td><td>Keep the marker keys out of exports so they can't point at wrong posts on another site.</td></tr>
       <tr><td><code>bulk_post_updated_messages</code></td><td>Admin\Notices</td><td>Add what happened to the subpages to core's trash and restore notices, once per change.</td></tr>
-      <tr><td><code>add_meta_boxes</code>, <code>admin_init</code>, <code>admin_notices</code></td><td>Admin\Meta_Box, Settings, Admin\Notices</td><td>Classic editor box, settings section, the URLs notice, progress notices and the nudge (dismissed into core's <code>dismissed_wp_pointers</code>).</td></tr>
+      <tr><td><code>admin_menu</code>, <code>plugin_action_links_{basename}</code></td><td>Admin\Settings_Page</td><td>Add Settings › Hierarchy Guard for <code>manage_options</code>, and the "Settings" link on the Plugins screen row.</td></tr>
+      <tr><td><code>load-settings_page_hierarchy-guard</code></td><td>Admin\Settings_Page, Admin\Redirect_Edit</td><td>Check <code>manage_options</code> and the nonce, then save an edit, delete a record, or bulk delete, and return to the Redirects tab with a core notice.</td></tr>
+      <tr><td><code>deleted_post_meta</code></td><td>Ledger</td><td>Take a deleted <code>_hierarchy_guard_path_{md5}</code> row off the newest-records list, however it was deleted; a full list that falls below the cap has the daily rebuild brought forward.</td></tr>
+      <tr><td><code>before_delete_post</code>, first; <code>delete_post</code>, last</td><td>Ledger</td><td>Deleting a supported post for good: read its entry IDs before core deletes its meta row by row, and hold the newest-records list's writes, so its entries leaving and the paths other handlers move off it reach the list in one write once <code>delete_post</code> fires; <code>deleted_post_meta</code> passes over its rows meanwhile.</td></tr>
+      <tr><td>Activation, <code>admin_init</code></td><td>Ledger</td><td>Make sure the newest-records rebuild is scheduled, and bring it forward until a first build has completed: reads of autoloaded options otherwise.</td></tr>
+      <tr><td><code>hierarchy_guard_rebuild_recent</code> (cron, single event, daily)</td><td>Ledger</td><td>The rebuild: schedules its own next run a day later, then one query per supported type, the newest 1,000 entries, written as the list; a lost update heals within a day. Deactivation clears it on the site it runs on, and on any other site it is not scheduled again. Mirrored by <code>wp cron event run hierarchy_guard_rebuild_recent</code> for hosts without cron.</td></tr>
+      <tr><td><code>add_meta_boxes</code>, <code>init</code>, <code>admin_init</code>, <code>admin_notices</code></td><td>Admin\Meta_Box, Settings, Admin\Notices</td><td>Classic editor box, the setting (registered on <code>init</code>, so REST and WP-CLI writes are sanitized too) and the Settings tab's fields (on <code>admin_init</code>), the URLs notice, progress notices and the nudge (dismissed into core's <code>dismissed_wp_pointers</code>).</td></tr>
     </tbody>
   </table>
   </div>
@@ -725,7 +855,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <li><code>hierarchy_guard_trash_policy( $policy, $post )</code>: choose the policy for one page; the Pages list dialog uses it.</li>
       <li><code>hierarchy_guard_batch_threshold</code> (default 200 raw moves per step), <code>hierarchy_guard_core_call_threshold</code> (default 25 core trash or restore calls per step) and <code>hierarchy_guard_count_cap</code> (default 1,000).</li>
       <li><code>hierarchy_guard_redirect_providers</code>: add or remove detected redirect plugins and their CSV layouts.</li>
-      <li><code>hierarchy_guard_redirect_url</code> and <code>hierarchy_guard_redirect_status</code>: change the target or the 301. The result still passes <code>wp_validate_redirect()</code>.</li>
+      <li><code>hierarchy_guard_redirect_url</code> and <code>hierarchy_guard_redirect_status</code>: change the target or the code, including a chosen one. Their second argument is the post redirected to, or null for a URL target, so a callback takes <code>?WP_Post</code>. A page target's result still passes <code>wp_validate_redirect()</code>; a URL target's is sent only while its http(s) scheme is typed and it names a host.</li>
       <li><code>hierarchy_guard_should_record</code>: skip recording for a given post.</li>
       <li>Action <code>hierarchy_guard_children_reparented( $ids, $from, $to )</code> for integrations that need to react to the raw re-parent.</li>
       <li>Action <code>hierarchy_guard_job_finished( $job )</code> when a background batch job completes.</li>
@@ -768,29 +898,38 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <li>Where a change shows: a classic save's notice prints once on the edit screen it lands on, and a Quick Edit, block editor or Bulk Edit save never prints on a later classic visit; a Bulk Edit's notice prints once on the Pages list core returns to; a Bulk Edit of a parent and its subpage, in either order, lists each page at its URL from before the request; a request of many roots writes its change once.</li>
       <li>REST routes require <code>edit_post</code>; response shapes are stable; children page correctly.</li>
       <li>Markers are absent from a WXR export; old-path entries are present.</li>
+      <li>Redirects tab sources: one row per <code>_hierarchy_guard_path_{md5}</code> entry and one per root-list entry, each with its override; a root-list entry without an override reads "Top level"; nothing else the plugin stores becomes a row.</li>
+      <li>Redirects tab search and paging: search matches the old URL; the post type filter appears only when more than one type is supported; 20 rows per page, sorted by old URL with root-list entries in the same order, over the newest 1,000 records, with the notice past that and a full-URL search reaching any record. The daily rebuild brings records made before the list onto it from WP-Cron, restores an entry a lost update dropped, drops one whose row is gone, is idempotent, and runs nothing on a normal page load; until the list is first built the tab says it is still being built, and an empty table says no redirects are listed yet. A holder deleted for good, with subpages too, writes the newest-records list once.</li>
+      <li>Edit to a page: the record moves onto that page, or out of the root list, follows the page when it moves, and covers the URLs under the old one. Edit to a URL: only the exact old URL redirects there, and a longer path resolves as if the record weren't there. Each code: Automatic gives 301, or 302 while a restore could undo the move; a chosen 301 or 302 is sent as chosen. Delete removes the record and its override, and the old URL is a 404. Every edit and delete bumps the ledger cache key. A path on this site is read against the home URL; a top-level root-list entry saved with the field empty stays top level with its code saved. Delete asks first with JavaScript, a middle-click included, and deletes directly without it. Edit, Delete, Save and Cancel return to the list with its search, filter and page.</li>
+      <li>Capability and nonce checks: without <code>manage_options</code> the page, the Edit view, save, delete and bulk delete are refused; without a valid nonce nothing is saved or deleted; a URL that isn't http(s), has no host, is the record's own old URL, or is another old URL this plugin redirects is not saved, nor is a link to a page in the Trash, a draft or a preview; a URL on another port of this host is saved.</li>
+      <li>Status labels: Active; "a page uses this URL" when a published post, page or attachment of any public type is at the old URL, a draft not counting; "the page it points to isn't published" for a draft, private or trashed target, and first for a holder in the Trash; "the server can’t send this redirect" past the segment cap (a top-level entry's counting the URLs under it), for a URL target at its own old URL, or for one that is another redirect; "built-in redirects are off" when serving is off or under plain permalinks; each row shows the first that applies. An author archive at an old URL is not checked, the stated limitation. Statuses cost one page's checks whatever the number of records.</li>
+      <li>Loops: redirects that send each other round, two records or seven, are stopped by the server at a plain 404, and so is a loop formed after both saves; a same-site URL target at a live page or post is still sent.</li>
+      <li>Resolver and batch parity with overrides: for page targets, URL targets and chosen codes, the pairs a change lists and its CSV codes match what the server sends, except a URL-target pair whose target became another recorded old URL, which is still listed for a redirect plugin to follow though the built-in redirects don't send it; a URL target goes out through <code>wp_redirect()</code>; a live page at the old URL always wins.</li>
+      <li>Settings links: "Set up redirects", the panel's "Change this in Settings", the Plugins row's "Settings" link and the readme point to <code>options-general.php?page=hierarchy-guard</code>; nothing registers on Settings › Writing.</li>
     </ol>
-    <p>Manual checks on the Local site: with Redirection installed and without, confirm detection, deep links, CSV import into Redirection, and the three notice variants. Browser end-to-end tests for the trash dialog are a follow-up.</p>
+    <p>Manual checks on the Local site: with Redirection installed and without, confirm detection, deep links, CSV import into Redirection, the three notice variants, and both Redirects tab notices. Browser end-to-end tests for the trash dialog are a follow-up.</p>
   </div>
 </section>
 
 <section id="build">
   <span class="eyebrow sec-eyebrow">Sequence</span>
   <h2>Build order</h2>
-  <div class="prose"><p>Each step leaves the plugin activatable and tested. The riskiest logic comes first so the UI is built on something already proven.</p>
+  <div class="prose"><p>Each step leaves the plugin activatable and tested. The riskiest logic comes first so the UI is built on something already proven. Plans 1 to 3 cover steps 1 to 7. Plan 4 is step 8, plan 5 is step 9, and plan 6 is steps 10 and 11.</p>
     <ol>
       <li>Scaffold the repo, wp-env, PHPCS, PHPUnit, and CI. Symlink into a Local site.</li>
       <li>Paths, Ledger, Resolver, and Change_Listener with their tests, including the query-count assertions. This alone makes every URL change observable and resolvable.</li>
       <li>Subtree queries with caps, and the cache group.</li>
       <li>Trash_Handler with capabilities, snapshot and apply, all three policies, reversal, and the Batch job and processor, with tests.</li>
-      <li>Redirects: Providers detection, Server, CSV export, and the Settings › Writing section.</li>
+      <li>Redirects: Providers detection, Server, CSV export, and the settings option.</li>
       <li>REST routes, the page REST field, the editor panel, and the classic meta box.</li>
       <li>List table: Hierarchy column, subtree filter with its breadcrumb, row action, trash Modal, Quick Edit inline warning, outcome notices and redirects Modal.</li>
+      <li>Settings › Hierarchy Guard: the Settings tab, the Plugins row link and every settings link pointed at the page, the Redirects tab, the Edit view, overrides in the ledger, and the resolver and batch resolver honouring them.</li>
       <li>Tree view with tree grid semantics, lazy loading, and server search.</li>
       <li>DataViews track: the hierarchy field and the replacement trash action, registered wherever the API is available.</li>
       <li>Notices, readme.txt, uninstall, translation pass, release zip.</li>
     </ol>
   </div>
-  <div class="callout">Next step is a written implementation plan from this spec, then step 1. Open items: which Local site to symlink into, and whether the DataViews field and action registration APIs are public in the WordPress version current when step 9 begins.</div>
+  <div class="callout">Next step is plan 4's written implementation plan from this spec. Open item: whether the DataViews field and action registration APIs are public in the WordPress version current when plan 6 begins.</div>
 </section>
 
 
@@ -799,13 +938,16 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
   <h2>Out of scope for 1.0</h2>
   <div class="prose">
     <ul>
-      <li>Lists of a page's past URLs, or redirect lists for an old URL long after it changed. Declined: the redirects a change needs are offered when it happens, and the built-in server keeps every recorded old URL working.</li>
-      <li>Listing redirects for pages deleted for good. The built-in redirects still serve their old URLs.</li>
+      <li>Lists of a page's past URLs in the editor panel or the meta box. Declined: the redirects a change needs are offered when it happens, the Redirects tab lists every recorded old URL, and the built-in server keeps them working.</li>
+      <li>Listing redirects for pages deleted for good in a change's notice, modal or CSV. The built-in redirects still serve their old URLs, and the Redirects tab lists them.</li>
       <li>Listing, in a trash's redirect list, the subpages of a subpage it moved that another user then trashed. The second trash moves them up, and the first trash's notice, modal and CSV leave them out; the built-in redirects still serve their old URLs.</li>
       <li>One-click "Add to Redirection" and "Add to Safe Redirect Manager" adapters. Natural 1.1 candidates since both have stable PHP APIs; the CSV export in their layouts covers 1.0.</li>
       <li>Incrementally maintained descendant counts stored on ancestors. Every such write would bump the posts cache key; the capped walk is enough.</li>
       <li>A zero-query first-segment gate for the 404 handler. Cached misses with a TTL cover bot traffic; revisit if real sites show otherwise.</li>
-      <li>A redirect log screen. Declined; the outcome notice, the redirects modal, and the per-page panel cover auditing.</li>
+      <li>Adding redirects by hand. Hierarchy Guard is not a redirect plugin: the Redirects tab manages only what it recorded, and a site that needs its own redirects is better served by a redirect plugin.</li>
+      <li>Import and export of redirects. The CSV a change offers, in the detected plugin's layout, is the one way out.</li>
+      <li>Regex or wildcard redirects. A page target already covers the URLs under its old path.</li>
+      <li>Hit counts and logs. The Redirects tab shows what the plugin recorded and whether each is served, not who followed it.</li>
       <li>Attachment URLs under pages. Attachments have hierarchical URLs too, but they are not in the supported types and core's own attachment-page handling is changing.</li>
       <li>Scanning post content for internal links that point at changed URLs. A different and much larger problem.</li>
       <li>Non-hierarchical post types. Core already handles their old slugs.</li>

@@ -48,6 +48,13 @@ final class Prefetched_View implements Ledger_View {
 	private ?array $roots = null;
 
 	/**
+	 * The root list's overrides for the view's type, by path, read once when first needed.
+	 *
+	 * @var array<string,mixed>|null
+	 */
+	private ?array $root_targets = null;
+
+	/**
 	 * The post at each path looked up as a request, 0 for none, Batch_Resolver::UNKNOWN when core could not be asked.
 	 *
 	 * @var array<string,int>
@@ -129,6 +136,26 @@ final class Prefetched_View implements Ledger_View {
 			$this->roots = array_fill_keys( array_map( 'strval', (array) ( is_array( $list ) ? ( $list[ $this->post_type ] ?? [] ) : [] ) ), true );
 		}
 		return isset( $this->roots[ $prefix ] ) ? Rules::ROOT : null;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $prefix    Normalized path.
+	 * @param int    $hit       What find() answered.
+	 */
+	public function target( string $post_type, string $prefix, int $hit ): ?array {
+		$this->own( $post_type );
+		if ( $hit > 0 ) {
+			$fact = $this->fact( $prefix );
+			return $fact['live'] === $hit ? Ledger::clean_target( $fact['target'] ?? null ) : null;
+		}
+		if ( null === $this->root_targets ) {
+			$all                = get_option( Ledger::ROOT_TARGETS, [] );
+			$this->root_targets = is_array( $all ) && is_array( $all[ $this->post_type ] ?? null ) ? $all[ $this->post_type ] : [];
+		}
+		return Ledger::clean_target( $this->root_targets[ $prefix ] ?? null );
 	}
 
 	/**

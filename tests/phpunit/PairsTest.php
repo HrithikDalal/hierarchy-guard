@@ -11,6 +11,7 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\Notices;
 use HierarchyGuard\Batch\Queue;
+use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
@@ -48,6 +49,7 @@ final class PairsTest extends WP_UnitTestCase {
 		parent::set_up();
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
+		delete_option( Ledger::ROOT_TARGETS );
 		Post_Types::reset();
 		Change_Log::reset_request();
 		$this->set_permalink_structure( '/%postname%/' );
@@ -1323,5 +1325,79 @@ final class PairsTest extends WP_UnitTestCase {
 			$this->lines( $collected )
 		);
 		return $cost;
+	}
+
+	public function test_a_record_s_url_target_is_listed_for_its_exact_old_url_as_the_server_sends_it(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], 'https://example.org/about/', 0 );
+
+		$collected = $this->pairs->collect_change( $change );
+
+		$this->assertSame( [ '/company/about/ -> https://example.org/about/' ], $this->lines( $collected ), 'Only the exact old URL redirects; the subpages’ old URLs no longer do.' );
+		$this->assertSame( [ '/company/about/ -> https://example.org/about/' => [ 301, 301 ] ], $this->statuses( $collected ) );
+		$this->assertSame( 'https://example.org/about/', $this->target_on_request( 'company/about' )['url'] );
+		$this->assertNull( $this->target_on_request( 'company/about/team' ) );
+
+		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], home_url( '/careers/?from=about#jobs' ), 0 );
+		$this->assertSame( [ '/company/about/ -> ' . home_url( '/careers/?from=about#jobs' ) ], $this->lines( $this->pairs->collect_change( $change ) ), 'A URL on this site is listed as it was set, absolute, with its query and #fragment.' );
+		$this->assertSame( home_url( '/careers/?from=about#jobs' ), $this->target_on_request( 'company/about' )['url'], 'As the server sends it.' );
+	}
+
+	public function test_a_url_target_with_a_chosen_302_is_listed_and_served_as_a_302(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], 'https://example.org/about/', 302 );
+
+		$this->assertSame( [ '/company/about/ -> https://example.org/about/' => [ 302, 302 ] ], $this->statuses( $this->pairs->collect_change( $change ) ) );
+	}
+
+	public function test_a_root_entry_s_url_target_answers_its_own_old_url_only_in_the_list_as_on_the_server(): void {
+		$services = $this->page( 'services' );
+		$this->page( 'web', $services );
+		wp_trash_post( $services );
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( [ '/services/web/ -> /web/' ], $this->lines( $this->pairs->collect_change( $change ) ), 'Precondition: the root entry leads the subpage to the top level.' );
+
+		( new Ledger() )->set_target( 'page', 'services', 0, 'https://example.org/services/', 0 );
+
+		$this->assertSame( [], $this->lines( $this->pairs->collect_change( $change ) ), 'A URL target answers its exact old URL only, so the subpage’s old URL no longer redirects.' );
+		$this->assertNull( $this->target_on_request( 'services/web' ), 'The server agrees.' );
+		$this->assertSame( 'https://example.org/services/', $this->target_on_request( 'services' )['url'] ?? null );
+	}
+
+	public function test_the_csv_lists_a_url_target_absolute_as_the_server_sends_it(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], home_url( '/careers/' ), 302 );
+
+		$csv = Csv::build( 'redirection', $this->pairs->all( $this->pairs->collect_change( $change ) ) );
+
+		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", $csv );
+		$this->assertSame( home_url( '/careers/' ), $this->target_on_request( 'company/about' )['url'] );
+	}
+
+	public function test_a_chosen_code_is_the_code_listed_and_the_code_served(): void {
+		$change = $this->rename( $this->ids['about'], 'about-us' );
+		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], '', 302 );
+
+		$this->assertSame(
+			[
+				'/company/about/ -> /company/about-us/' => [ 302, 302 ],
+				'/company/about/history/ -> /company/about-us/history/' => [ 302, 302 ],
+				'/company/about/team/ -> /company/about-us/team/' => [ 302, 302 ],
+				'/company/about/team/leadership/ -> /company/about-us/team/leadership/' => [ 302, 302 ],
+			],
+			$this->statuses( $this->pairs->collect_change( $change ) )
+		);
+	}
+
+	public function test_an_edit_to_a_root_entry_shows_in_a_list_already_cached(): void {
+		$services = $this->page( 'services' );
+		$this->page( 'web', $services );
+		wp_trash_post( $services );
+		$change = $this->log->latest( $this->admin );
+		$this->assertSame( [ '/services/web/ -> /web/' => [ 302, 302 ] ], $this->statuses( $this->pairs->collect_change( $change ) ), 'Precondition: a restore could undo it, and the list is cached now.' );
+
+		( new Ledger() )->set_target( 'page', 'services', 0, '', 301 );
+
+		$this->assertSame( [ '/services/web/ -> /web/' => [ 301, 301 ] ], $this->statuses( $this->pairs->collect_change( $change ) ), 'A root-list edit writes no post, so the cache key has the ledger’s.' );
 	}
 }

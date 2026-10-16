@@ -37,8 +37,11 @@ final class AssetsTest extends WP_UnitTestCase {
 		}
 		rmdir( $this->dir . '/build' );
 		rmdir( $this->dir );
-		wp_dequeue_script( 'hierarchy-guard-list-table' );
-		wp_deregister_script( 'hierarchy-guard-list-table' );
+		foreach ( [ 'list-table', 'redirects' ] as $bundle ) {
+			wp_dequeue_script( 'hierarchy-guard-' . $bundle );
+			wp_deregister_script( 'hierarchy-guard-' . $bundle );
+		}
+		unset( $_GET['tab'] );
 		wp_dequeue_style( 'wp-components' );
 		set_current_screen( 'front' );
 		parent::tear_down();
@@ -82,8 +85,8 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertSame( 'hierarchy-guard/v1', $config['namespace'] );
 		$this->assertFalse( $config['serving'] );
 		$this->assertNull( $config['provider'] );
-		$this->assertStringEndsWith( 'options-writing.php#hierarchy-guard-redirects', $config['settingsUrl'] );
-		$this->assertStringEndsWith( 'options-writing.php#hierarchy-guard-trash-policy', $config['policyUrl'] );
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ), $config['settingsUrl'] );
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-trash-policy' ), $config['policyUrl'] );
 		$this->assertSame( Settings::POLICY_REPARENT, $config['policy'] );
 		$this->assertContains( 'page', $config['postTypes'] );
 		$this->assertSame( 1000, $config['cap'] );
@@ -130,5 +133,24 @@ final class AssetsTest extends WP_UnitTestCase {
 		}
 
 		$this->assertTrue( $found );
+	}
+
+	public function test_the_redirects_tab_gets_the_bundle_that_asks_before_a_delete(): void {
+		$this->build( 'redirects', [ 'wp-dom-ready' ] );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ), 'Not on the Settings tab.' );
+
+		$_GET['tab'] = 'redirects';
+		$assets->enqueue_admin( 'settings_page_hierarchy-guard' );
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ) );
+		$script = wp_scripts()->registered['hierarchy-guard-redirects'];
+		$this->assertStringNotContainsString( 'window.hierarchyGuard', implode( '', (array) ( $script->extra['before'] ?? [] ) ), 'It reads only the questions the page prints: no settings, and no REST nonce.' );
+		$this->assertEmpty( $script->textdomain ?? '', 'It has no strings of its own.' );
+
+		wp_dequeue_script( 'hierarchy-guard-redirects' );
+		$assets->enqueue_admin( 'options-general.php' );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-redirects', 'enqueued' ), 'Not on another settings page.' );
 	}
 }
