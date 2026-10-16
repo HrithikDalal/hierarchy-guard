@@ -578,7 +578,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->recorded( $this->ids['about'], 'old-about' );
 
 		$this->assertStringContainsString( '</table>', $this->rendered() );
-		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">Status checks posts and pages at each old URL. Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked. When two recorded redirects share an old URL, only one is served, and both can read Active.</p>#s', $this->rendered() );
+		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">Status checks posts and pages at each old URL. Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked. When two recorded redirects share an old URL, at most one is served, and both can read Active.</p>#s', $this->rendered() );
 	}
 
 	public function test_while_the_newest_list_is_built_the_tab_says_so(): void {
