@@ -305,8 +305,22 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ 'Front Page' ], $children[ $this->ids['history'] ]['states'] );
 		$this->assertSame( [ 'Password protected' ], $children[ $this->ids['team'] ]['states'] );
-		delete_option( 'show_on_front' );
-		delete_option( 'page_on_front' );
+	}
+
+	public function test_a_post_state_callback_that_asks_for_the_screen_does_not_break_the_route(): void {
+		// A plugin's display_post_states callback, hooked everywhere, that reads the admin screen as core's list does.
+		add_filter(
+			'display_post_states',
+			static function ( array $states ): array {
+				$screen = get_current_screen();
+				return null === $screen ? $states + [ 'featured' => 'Featured' ] : $states;
+			}
+		);
+
+		$response = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( [ 'Featured' ], $response->get_data()['children'][0]['states'] );
 	}
 
 	public function test_a_child_another_user_is_editing_says_who(): void {
@@ -322,6 +336,57 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'Priya', $children[ $this->ids['team'] ]['locked_by'] );
 		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'] );
+	}
+
+	public function test_a_lock_the_user_holds_or_that_expired_names_no_one(): void {
+		$other = self::factory()->user->create( [ 'role' => 'editor' ] );
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $this->admin );
+		// An hour ago: well past core's lock window of 150 seconds.
+		update_post_meta( $this->ids['history'], '_edit_lock', ( time() - HOUR_IN_SECONDS ) . ':' . $other );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertNull( $children[ $this->ids['team'] ]['locked_by'], 'The user’s own lock is not another user editing.' );
+		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'], 'A lock past its window has lapsed.' );
+	}
+
+	public function test_a_child_whose_author_is_gone_has_no_author(): void {
+		global $wpdb, $authordata;
+		$wpdb->update( $wpdb->posts, [ 'post_author' => 999999 ], [ 'ID' => $this->ids['team'] ] );
+		$wpdb->update( $wpdb->posts, [ 'post_author' => 0 ], [ 'ID' => $this->ids['history'] ] );
+		clean_post_cache( $this->ids['team'] );
+		clean_post_cache( $this->ids['history'] );
+		// A loop earlier in the request, a theme's or a plugin's, leaves its author behind.
+		$authordata = get_userdata( $this->admin ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Sets the state the route must not read.
+
+		try {
+			$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+		} finally {
+			$authordata = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Restores it.
+		}
+
+		$this->assertSame( '', $children[ $this->ids['team'] ]['author'], 'A deleted user.' );
+		$this->assertSame( '', $children[ $this->ids['history'] ]['author'], 'No author, not the last loop’s.' );
+	}
+
+	public function test_a_page_of_50_children_reads_their_locks_in_one_query(): void {
+		global $wpdb;
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$this->page( sprintf( 'bulk-%02d', $i ), $this->ids['about'] );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertCount( 1, $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertCount( 50, $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'] );
+		$fifty = $wpdb->num_queries - $queries;
+
+		$this->assertSame( $one, $fifty, 'Fifty editable rows cost the queries of one: their meta, edit locks included, loads in one query.' );
 	}
 
 	public function test_a_child_the_user_may_not_trash_has_no_trash_link(): void {

@@ -191,15 +191,20 @@ final class Overview {
 		}
 
 		// The first $cap children in menu order, read without sorting every child of a large parent.
-		$rows = array_slice( Subtree::ordered_children( [ $parent_id ], $type, $cap ), $offset, min( $per_page, $cap - $offset ) );
+		$rows = array_slice( Subtree::ordered_children( [ $parent_id ], $type, $cap ), $offset, $per_page );
 		$ids  = array_map( static fn( array $row ): int => (int) $row['ID'], $rows );
-		_prime_post_caches( $ids, false, false );
+		// Their meta too, in one query, so each row's edit lock is read from the cache.
+		_prime_post_caches( $ids, false, true );
 		$counts = Subtree::child_counts( $ids, $type, $cap + 1 );
 		$posts  = array_values( array_filter( array_map( 'get_post', $ids ) ) );
 		update_post_author_caches( $posts );
 		// Core's helpers for the states and the edit lock live with its list screens.
 		require_once ABSPATH . 'wp-admin/includes/template.php';
 		require_once ABSPATH . 'wp-admin/includes/post.php';
+		// A display_post_states callback may ask for the screen, as on core's list; a REST request has none, so it gets null.
+		if ( ! function_exists( 'get_current_screen' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/screen.php';
+		}
 
 		$out = [];
 		foreach ( $posts as $child ) {
@@ -209,12 +214,14 @@ final class Overview {
 			}
 			$status = (string) $child->post_status;
 			$object = get_post_status_object( $status );
+			$author = get_userdata( (int) $child->post_author );
 			$out[]  = self::ref( $child_id ) + [
 				'status'          => $status,
 				'status_label'    => null !== $object ? (string) $object->label : $status,
 				'children_count'  => min( $counts[ $child_id ] ?? 0, $cap ),
 				'children_capped' => ( $counts[ $child_id ] ?? 0 ) > $cap,
-				'author'          => (string) get_the_author_meta( 'display_name', (int) $child->post_author ),
+				// get_userdata(), not get_the_author_meta(), which reads the loop's author for a post_author of 0.
+				'author'          => false !== $author ? (string) $author->display_name : '',
 				'states'          => array_values( array_map( 'wp_strip_all_tags', (array) get_post_states( $child ) ) ),
 				'locked_by'       => self::locked_by( $child ),
 				'date'            => self::date( $child ),
