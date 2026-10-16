@@ -650,6 +650,105 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( $core, apply_filters( 'wp_redirect', $core, 302 ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own redirect filter.
 	}
 
+	/**
+	 * The _wp_http_referer a row's Trash link carries, or null.
+	 *
+	 * @param mixed $actions Row actions.
+	 * @return string|null
+	 */
+	private static function trash_referer( $actions ): ?string {
+		preg_match( '/href="([^"]+)"/', (string) ( $actions['trash'] ?? '' ), $href );
+		parse_str( (string) wp_parse_url( html_entity_decode( $href[1] ?? '' ), PHP_URL_QUERY ), $args );
+		return isset( $args['_wp_http_referer'] ) && is_string( $args['_wp_http_referer'] ) ? $args['_wp_http_referer'] : null;
+	}
+
+	/**
+	 * Core's Trash link for a page, as its row prints it.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return array<string,string>
+	 */
+	private static function core_trash( int $post_id ): array {
+		return [ 'trash' => '<a href="' . esc_url( (string) get_delete_post_link( $post_id ) ) . '" class="submitdelete">Trash</a>' ];
+	}
+
+	public function test_the_tree_s_load_hooks_the_trash_link_s_place_into_core_s_row_actions(): void {
+		global $wp_filter;
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['about'];
+
+		$this->tree->load();
+
+		$found = false;
+		foreach ( $wp_filter['page_row_actions']->callbacks[20] ?? [] as $callback ) {
+			if ( is_array( $callback['function'] ) && $this->tree === $callback['function'][0] && 'row_actions' === $callback['function'][1] && 2 === $callback['accepted_args'] ) {
+				$found = true;
+			}
+		}
+		$this->assertTrue( $found, 'The plugin’s own object, at 20 with 2 arguments.' );
+
+		$this->open_levels( [ $this->ids['company'] ], 1 );
+		$actions = apply_filters( 'page_row_actions', self::core_trash( $this->ids['team'] ), get_post( $this->ids['team'] ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own row actions filter.
+
+		$this->assertSame( Tree_View::place_url( 'page', $this->ids['about'] ), self::trash_referer( $actions ), 'Core’s row prints the link with the tree’s place.' );
+	}
+
+	public function test_the_tree_s_load_keeps_undo_s_page(): void {
+		$_GET['doaction']        = 'undo';
+		$_SERVER['HTTP_REFERER'] = Tree_View::place_url( 'page' ) . '&paged=2&trashed=1&ids=9';
+		$core                    = admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&paged=1&untrashed=1' );
+
+		$this->tree->load();
+
+		$this->assertSame( str_replace( 'paged=1', 'paged=2', $core ), apply_filters( 'wp_redirect', $core, 302 ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own redirect filter.
+	}
+
+	public function test_undo_from_the_tree_s_first_page_drops_core_s_page_one(): void {
+		$_GET['doaction']        = 'undo';
+		$_SERVER['HTTP_REFERER'] = Tree_View::place_url( 'page', $this->ids['about'] ) . '&trashed=1&ids=9';
+		$core                    = admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&hierarchy_guard_open=' . $this->ids['about'] . '&paged=1&untrashed=1' );
+
+		$this->tree->keep_page_on_undo();
+		$location = apply_filters( 'wp_redirect', $core, 302 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own redirect filter.
+
+		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree&hierarchy_guard_open=' . $this->ids['about'] . '&untrashed=1' ), $location, 'The first page has no paged, as place_url() builds it.' );
+	}
+
+	public function test_a_trash_from_a_later_page_of_subpages_returns_to_that_page(): void {
+		$this->subpages( $this->ids['about'], 58 );
+		// About's subpages sort as History, Sub-001 … Sub-058, Team: Team is the 60th, on page 2.
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['about'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+		$this->open_levels( [ $this->ids['company'] ], 1 );
+
+		$referer = self::trash_referer( $this->tree->row_actions( self::core_trash( $this->ids['team'] ), get_post( $this->ids['team'] ) ) );
+
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['page'] );
+		$this->assertSame( Tree_View::place_url( 'page', $this->ids['about'], 2 ), $referer );
+		$this->assertStringContainsString( Tree_View::CHILDREN_PAGE_VAR . '=2', (string) $referer );
+	}
+
+	public function test_a_trash_that_empties_a_later_page_of_subpages_returns_to_the_last_page_left(): void {
+		$this->subpages( $this->ids['about'], 49 );
+		// About's 51 subpages sort as History, Sub-001 … Sub-049, Team: Team is alone on page 2.
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['about'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+		$this->assertCount( 2 + 1, $this->open_levels( [ $this->ids['company'] ], 1 ) );
+		$referer = (string) self::trash_referer( $this->tree->row_actions( self::core_trash( $this->ids['team'] ), get_post( $this->ids['team'] ) ) );
+		$this->assertStringContainsString( Tree_View::CHILDREN_PAGE_VAR . '=2', $referer );
+
+		$this->trash_raw( $this->ids['team'] );
+		// Core's redirect after the trash goes to the referer; the next request reads its arguments.
+		parse_str( (string) wp_parse_url( $referer, PHP_URL_QUERY ), $back );
+		$_GET = $back;
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		$this->assertCount( 2 + 50, $rows, 'Page 2 is gone: the 50 left are page 1, not an empty table.' );
+		$this->assertSame( [ 'company', 'about', 'history' ], array_slice( wp_list_pluck( $rows, 'post_name' ), 0, 3 ) );
+		$this->assertNotContains( $this->ids['team'], wp_list_pluck( $rows, 'ID' ) );
+		$this->assertSame( 1, $this->tree->row( $this->ids['about'] )['shown'] );
+		$this->assertFalse( $this->tree->row( $this->ids['about'] )['more'] );
+	}
+
 	public function test_the_controls_keep_the_view_and_leave_what_the_script_needs(): void {
 		$asked = 0;
 		add_action(
