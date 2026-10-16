@@ -4,13 +4,13 @@
 
 **Goal:** Give every supported hierarchical post type's list a "Tree" view: core's own list table with the top level paged 20 at a time by core's query, subpages opened on demand 50 at a time from the hierarchy route, tree grid keys, a flat search that shows each match's parent path, links that work without JavaScript, and Trash through the list's own dialog with the return to the same place.
 
-**Architecture:** `Admin\Tree_View` owns the view. It adds "Tree" to the views row (`edit.php?post_type=page&hierarchy_guard_view=tree`), and on `request` limits core's list query to `post_parent` 0 (or, in a search, to the matches at any level) with the list's order as an array, so core pages 20 rows and counts them. On `the_posts` it notes each row's place and, for `hierarchy_guard_open=<id>`, puts each opened level's page of 50 after its parent in core's results, so core prints those rows with its own `level-N` class; that is the view without JavaScript and the reload after a trash. In the tree it removes the checkbox column, bulk actions and Quick Edit, gives the trash link the tree's place as `_wp_http_referer`, and keeps Undo on the same page. `Admin\List_Table` keeps printing the Hierarchy column and asks `Tree_View` what the cell shows there: the count and a toggle link in the tree, the parent path in a search. The hierarchy route gains `children_per_page` (at most 50) and, per child, `author`, `date` and `trash_link`. The script in `src/tree/`, part of the list-table bundle, puts tree grid roles and keys on core's table, turns the toggle links into core `button-link` buttons, renders loaded subpages with the list's columns, and reuses the list's trash dialog.
+**Architecture:** `Admin\Tree_View` owns the view. It adds "Tree" to the views row (`edit.php?post_type=page&hierarchy_guard_view=tree`), and on `request` limits core's list query to `post_parent` 0 (or, in a search, to the matches at any level) with the list's order as an array, so core pages 20 rows and counts them. On `the_posts` it notes each row's place and, for `hierarchy_guard_open=<id>`, puts the path down to that page and then its page of 50 subpages after their parents in core's results, so core prints those rows with its own `level-N` class; that is the view without JavaScript and the reload after a trash. Both filters act only in wp-admin on `edit.php`. On a page past the view's last one it sets the view's own count, so core sends the user to its last page. In the tree it removes the checkbox column, bulk actions and Quick Edit, gives the trash link the tree's place as `_wp_http_referer`, and keeps Undo on the same page. `Admin\List_Table` keeps printing the Hierarchy column and asks `Tree_View` what the cell shows there: the count and a toggle link in the tree, the parent path in a search. The hierarchy route gains `children_per_page` (at most 50) and, per child, what core's row shows: `states`, `locked_by`, `author`, `date` (with `missed`), a `view_link` for private pages too, and `trash_link`. The script in `src/tree/`, part of the list-table bundle, puts tree grid roles and keys on core's table, turns the toggle links into core `button-link` buttons, renders loaded subpages with the list's columns, and reuses the list's trash dialog.
 
 **Tech Stack:** PHP 8.0+, WordPress 6.6+, the plugin's engine, trash flow, admin UI and settings page (plans 1 to 4), PHPUnit 9.6 in wp-env, PHPCS (WordPress-Extra, WordPress-VIP-Go, PHPCompatibilityWP), `@wordpress/scripts` 36.1.0 (webpack, ESLint, Stylelint, Vitest 5), and `happy-dom` 20.14.5 as a dev dependency for the tree script's DOM tests.
 
-**Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html`, as committed at `93558be`. Read the Decisions row "Tree view", "Hierarchy column, subtree filter and Tree view" with both Tree view mockups, "REST endpoint", Architecture (`Admin\Tree_View`, `src/tree/`), the hooks table rows for `request`, the list-table hooks and `the_posts`, Testing ("Tree view, bounded", "Tree view, behaviour", "Tree grid", "REST routes"), Build order step 9, and Out of scope. This plan is build-order step 9. DataViews, the release pass and uninstall are plan 6.
+**Spec:** `docs/superpowers/specs/hierarchy-guard-spec.html`, as corrected at `5e6013a` and updated with this plan for the audit rulings (the path-only levels without JavaScript, the pages the tree cannot reach, the loaded row's states, lock, description and label, the status rows, the keyboard on Show more and after a collapse). Read the Decisions row "Tree view", "Hierarchy column, subtree filter and Tree view" with both Tree view mockups, "REST endpoint", Architecture (`Admin\Tree_View`, `src/tree/`), the hooks table rows for `request`, the list-table hooks and `the_posts`, Testing ("Tree view, bounded", "Tree view, behaviour", "Tree grid", "REST routes"), Build order step 9, and Out of scope. This plan is build-order step 9. DataViews, the release pass and uninstall are plan 6.
 
-**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3, PHP 8.2) on the local branch `proto-tree-view` (head `ae275c2`), then replayed from `tree-view` on a scratch branch task by task, reproducing the prototype exactly; every Replace below was checked to rebuild the task's file. Each task's tests were seen to fail before its code and pass after it. After every task `composer lint`, `npm run lint:js` and `npm run lint:style` exit 0 and the suites pass: PHPUnit 847, 859, 870, 880 and 883 tests after Tasks 1 to 5 (5 skipped, as before this plan; 883 also as multisite), Vitest 87 after Tasks 1 to 5, 95 after Task 6 and 116 after Task 7; `npm run build` compiles. The live check in Task 8 was run on the dev site.
+**Code in this plan is verified.** Every code block was run in a prototype on wp-env (WordPress 7.1.3, PHP 8.2) on the local branch `proto-tree-view`, with the three plan 5 audits (core, scale, UI) folded in, then replayed from `tree-view` on a scratch branch task by task, reproducing the prototype exactly; every Replace below was checked to rebuild the task's file, and the finished document was applied to `5e6013a` and compared with the replay task by task. Each task's tests were seen to fail before its code and pass after it. After every task `composer lint`, `npm run lint:js` and `npm run lint:style` exit 0 and the suites pass: PHPUnit 851, 864, 878, 890 and 894 tests after Tasks 1 to 5 (5 skipped, as before this plan; 894 also as multisite), Vitest 87 after Tasks 1 to 5, 99 after Task 6 and 127 after Task 7; `npm run build` compiles. The live check in Task 8 was run on the dev site, left to right and right to left.
 
 ## Global Constraints
 
@@ -18,20 +18,20 @@
 - Commits are authored by the repository's git config. No `Co-Authored-By` trailer, and no mention of Claude or AI, in any commit message.
 - `composer lint` must exit 0, warnings included. Run `composer lint:fix` (phpcbf) first; formatting-only changes it makes are not deviations. `npm run lint:js`, `npm run lint:style`, `npm run test:js` and `npm run build` must pass; `npx wp-scripts lint-js src --fix` fixes Prettier formatting only.
 - UI: core components and core admin classes only: `button-link`, `dashicons dashicons-arrow-right-alt2` / `dashicons-arrow-down-alt2`, `screen-reader-text`, `row-title`, `row-actions`, `post-state`, `submitdelete`, `toggle-row`, `alignleft actions`, `subtitle`, `colspanchange`, `hidden`. CSS is layout only: the title's indent per level and the toggle's place, in logical properties so it reads right to left too. No colours, radii, shadows or type sizes of the plugin's own. Status is text (" — Draft"), not a pill.
-- Copy: "subpages" is the word. One translatable string per sentence; `_n()` on a counted noun; a translator comment directly above the one call whose string has a placeholder (never above a string without one); curly quotes and apostrophes; "Trash" capitalised on PHP screens; text domain `hierarchy-guard`. The view's strings are: "Tree", "Collapse all", "Back to the tree", "Show more", "Show the subpages of “%s”", "Hide the subpages of “%s”", "No subpages", "Parent pages:", "Only the first %s subpage is shown." / "Only the first %s subpages are shown.", "%1$s of %2$s subpage shown" / "%1$s of %2$s subpages shown", "Loading subpages…", "The subpages couldn’t be loaded.", and for a loaded row "Edit", "Edit “%s”", "Trash", "Move “%s” to the Trash", "View", "View “%s”", "View subpages", "View subpages of “%s”", "View the %1$s subpage of “%2$s”", "Show more details", "(no author)", and the date words "Published", "Scheduled", "Missed schedule", "Last Modified", "Unpublished", "%1$s at %2$s", "Y/m/d", "g:i a".
-- Scale: nothing in a web request grows with the size of a subtree beyond core's 20-row page of top-level pages and one 50-row page of subpages per opened page. A page of subpages is read the way the route already reads it: `Subtree::ordered_children( [ $parent ], $type, Subtree::count_cap() )`, at most the cap's IDs of one parent, sorted. `Subtree::ordered_children()` is never asked for parent 0: the top level comes only from core's query with `post_parent` 0. The Hierarchy column stays one grouped count query per screen, opened levels included; a search's parent paths load one query per level, whatever the rows.
+- Copy: "subpages" is the word. One translatable string per sentence; `_n()` on a counted noun; a translator comment directly above the one call whose string has a placeholder (never above a string without one, except a date format, which gets core's own comment: "Post date format. See https://www.php.net/manual/datetime.format.php" above "Y/m/d" and "Post time format. …" above "g:i a"); curly quotes and apostrophes; "Trash" capitalised on PHP screens; text domain `hierarchy-guard`. The view's strings are: "Tree", "Collapse all", "Back to the tree", "Show more", "Show the subpages of “%s”", "Hide the subpages of “%s”", "No subpages", "Parent page:" / "Parent pages:", "Only the first %s subpage is shown." / "Only the first %s subpages are shown.", "%1$s of %2$s subpage shown" / "%1$s of %2$s subpages shown", "Loading subpages…", "The subpages couldn’t be loaded.", "Try again", and for a loaded row "Edit", "Edit “%s”", "Trash", "Move “%s” to the Trash", "View", "View “%s”", "View subpages", "View subpages of “%s”", "View the %1$s subpage of “%2$s”", "Show more details", "(no author)", "Child of %s", "%s is currently editing", and the date words "Published", "Scheduled", "Missed schedule", "Last Modified", "Unpublished", "%1$s at %2$s", "Y/m/d", "g:i a".
+- Scale: nothing in a web request grows with the size of a subtree beyond core's 20-row page of top-level pages and one 50-row page of subpages: without JavaScript the levels above the opened page show only the path down to it, so the rows are the opened page's depth plus 50. A page past the view's last one costs one more query, of one row. A page of subpages is read the way the route already reads it: `Subtree::ordered_children( [ $parent ], $type, Subtree::count_cap() )`, at most the cap's IDs of one parent, sorted. `Subtree::ordered_children()` is never asked for parent 0: the top level comes only from core's query with `post_parent` 0. The Hierarchy column stays one grouped count query per screen, opened levels included; a search's parent paths load one query per level, whatever the rows.
 - Every query goes through `$wpdb->prepare()` or a core API. This plan adds no SQL of its own.
-- Request arguments: `hierarchy_guard_view=tree` turns the view on, on `edit.php` of a supported type, without `hierarchy_guard_under` and with `post_status` empty or `all` (core's search form sends `all`); a non-empty `s` makes it the search. `hierarchy_guard_open=<id>` and `hierarchy_guard_children_page=N` open a page without JavaScript. Arguments that are not text are ignored, never warned about.
+- Request arguments: `hierarchy_guard_view=tree` turns the view on, on `edit.php` of a supported type, without `hierarchy_guard_under` and with `post_status` empty or `all` (core's search form sends `all`); a non-empty `s` makes it the search. `hierarchy_guard_open=<id>` and `hierarchy_guard_children_page=N` open a page without JavaScript. Arguments that are not text, a `post_type` array included, are ignored, never warned about; the view's `request` and `the_posts` filters return before reading anything unless the request is wp-admin's `edit.php`.
 - Order: core's default `orderby` of `menu_order title` becomes `[ 'menu_order' => 'ASC', 'title' => 'ASC' ]` with `fields` and `posts_per_archive_page` unset and `posts_per_page` set to the screen's Number of items, so core pages the rows instead of loading every top-level page for its indented tree; a column's own sort is left to core.
-- The hierarchy route: `children_per_page` is an integer from 1 to 50, default 10 (unchanged for the editor panel, the meta box and Quick Edit); paging stops at the count cap; the route still needs `edit_post` on the page it reads. Each child adds `author` (display name, or ''), `date` (`{ label, date }` in core's Date column words) and `trash_link` (the raw URL of core's trash action, signed for the current user, or null when they may not trash it).
-- Trash from the tree: the trash link carries `_wp_http_referer` = `Tree_View::place_url( $type, $parent, $page )`: the view at its page, sort and date filter, opened at the trashed page's parent, at the page of subpages it was on. Undo's redirect gets the referring Tree view's `paged` back.
+- The hierarchy route: `children_per_page` is an integer from 1 to 50, default 10 (unchanged for the editor panel, the meta box and Quick Edit); paging stops at the count cap; the route still needs `edit_post` on the page it reads. Each child adds `states` (core's `get_post_states()`, as text), `locked_by` (the display name of another user holding the edit lock, from `wp_check_post_lock()`, or null), `author` (display name, or ''), `date` (`{ label, date, missed }` in core's Date column words) and `trash_link` (the raw URL of core's trash action, signed for the current user, or null when they may not trash it); `view_link` is the permalink for a page anyone can view and for a private page of a viewable type, as core's row prints View.
+- Trash from the tree: the trash link carries `_wp_http_referer` = `Tree_View::place_url( $type, $parent, $page )`: the view at its page, sort and date filter, opened at the trashed page's parent, at the page of subpages it was on. Undo's redirect gets the referring Tree view's `paged` back. A search in the tree leaves core's trash link alone, so the browser's referrer returns to the results.
 - The script lives in `src/tree/` and is part of the `list-table` bundle (no new webpack entry). It reuses the list's trash dialog through the existing `#the-list .row-actions .trash a` handler. The tree has no checkboxes, bulk actions or Quick Edit.
 - The redirect features (ledger, resolver, server, pairs, CSV, Settings › Hierarchy Guard) are untouched.
 - Tests: no test depends on the install folder name; URLs come from `admin_url()`, `Tree_View::url()` and `Tree_View::place_url()`. Tests that check a hook is registered find the plugin's own object in `$GLOBALS['wp_filter'][ $hook ]->callbacks[ $priority ]`. DOM tests start with `// @vitest-environment happy-dom`.
 
 ## Review Focus
 
-1. A crafted URL: an array or a non-number in `hierarchy_guard_view`, `s`, `post_status`, `hierarchy_guard_open` or `hierarchy_guard_children_page`. Expected: the list loads with no PHP warning; the view is off or nothing opens, and a page number below 1 is the first page. Pinned in Task 2 (`test_crafted_view_arguments_turn_the_view_off_without_a_warning`) and Task 3 (`test_a_crafted_open_or_children_page_opens_nothing_and_warns_nothing`).
+1. A crafted URL or query: an array or a non-number in `hierarchy_guard_view`, `s`, `post_status`, `hierarchy_guard_open` or `hierarchy_guard_children_page`, and an array `post_type`, in wp-admin or on the front end (`/?post_type[]=post`, or a theme setting one on the main query). Expected: no PHP warning anywhere; the view is off or nothing opens, a page number below 1 is the first page, and the front end is never read. Pinned in Task 2 (`test_crafted_view_arguments_turn_the_view_off_without_a_warning`, `test_the_request_filter_leaves_the_front_end_and_an_array_post_type_alone`) and Task 3 (`test_a_crafted_open_or_children_page_opens_nothing_and_warns_nothing`, `test_the_posts_filter_leaves_the_front_end_and_an_array_post_type_alone`).
 2. A page title with markup or entities (`<img src=x onerror=alert(1)> Tom & “Jerry”`) in a subpage the script loads. Expected: it reads as text in the title, the actions and their labels, and nothing runs. Pinned in Task 6 (`shows a title with markup or entities as text`).
 3. A toggle clicked again, or three times, while its subpages load. Expected: the row ends in the state of the last click, its subpages appear once, and no second request starts while one is pending. Pinned in Task 7 (`shows a row once whatever the clicks while it loads`).
 4. The Hierarchy column hidden in Screen Options. Expected: the script still finds every row's place and toggle in the hidden cell and puts the toggle before the title. Pinned in Task 7 (`still finds the toggles when the Hierarchy column is hidden`).
@@ -41,16 +41,22 @@
 
 Settled for this plan; reviewers should not re-raise them.
 
-- Undo. The spec says core's redirect after Undo lands on the same page of top-level pages. Core's Undo request carries no `paged`, and `edit.php` adds `paged` from that request, so it lands on page 1: checked on the dev site, where Undo from page 2 of the normal list returned `…&paged=1&untrashed=1`. `Tree_View::keep_page_on_undo()` (Task 5), on `load-edit.php`, puts the referring Tree view's `paged` back on that one redirect.
+- Undo. Core's Undo request carries no `paged`, and `edit.php` adds `paged` from that request, so it lands on page 1: checked on the dev site, where Undo from page 2 of the normal list returned `…&paged=1&untrashed=1`. `Tree_View::keep_page_on_undo()` (Task 5), on `load-edit.php`, puts the referring Tree view's `paged` back on that one redirect, as the spec now says.
+- The levels above an opened page, without JavaScript (owner ruling): each shows only the page that leads down, so the rows are the depth plus one page of 50, and the trash return inherits it. Close and reopen such a level to list all of it; its toggle closes it to its parent.
+- Pages the tree cannot reach (owner ruling): the tree starts from `post_parent` 0, so a page whose parent is in the Trash, missing, or a private page the user may not read is not in it. No bounded query finds them; the list and a search in the Tree view still show them. The spec (Tree view prose and Out of scope), the README (Task 8) and this list say so; there is no UI change.
+- A page past the view's last one (owner ruling): core counts nothing there and falls back to every page of the type, so `open_levels()` sets the view's own count from one one-row query and core redirects to the last page.
+- A trash from a search in the tree (owner ruling) keeps core's link, so the browser's referrer returns to the search; only the tree's own rows carry the tree's place.
 - Where the toggle sits without JavaScript. Core has no hook before a row's title, so the no-JavaScript toggle link, "Show more" and the cap's sentence are printed in the Hierarchy cell; the script moves the toggle before the title and turns "Show more" and the cap's sentence into rows. With the Hierarchy column hidden in Screen Options, the view without JavaScript has no toggles; the script is unaffected.
 - "Show more" without JavaScript pages: `hierarchy_guard_children_page=2` shows the 51st to the 100th in place of the first 50 (one 50-row page per opened page); the opened page's toggle closes it, and opening it again shows the first page.
-- A subpage the script loads has the list's columns and cells (hidden ones hidden, another plugin's column empty). Its Author is the name as text: the spec's JSON gives a name only, where core links it to the author filter. Its Comments cell is empty. A draft gets no Preview: the spec lists Edit, View, Trash and "View subpages", and the route's `view_link` is null for a page nobody can view.
-- The route's date words are the plugin's own strings, worded as core's Date column words them; borrowing core's text domain would fail WordPress.org's plugin check. Core's `post_date_column_status` and `post_date_column_time` filters are not applied to them.
-- The indent is set for levels 1 to 20; a deeper row indents as level 20.
+- A subpage the script loads has the list's columns and cells (hidden ones hidden, another plugin's column empty), core's post states, its lock notice (`.locked-info`, filled by core's heartbeat, and `wp-locked` with "… is currently editing" when the route says another user holds the lock), core's hidden "Child of …" description, and, on WordPress 7.1 (where core's own title cell has it), the title cell's `aria-label`. Its Author is the name as text, and its Comments cell is empty. A draft, pending or scheduled page gets no Preview: the spec lists Edit, View, Trash and "View subpages"; a private page gets View, as core's row does.
+- The lock notice carries no avatar: core prints one, the route sends only the name.
+- The route's date words are the plugin's own strings, worded as core's Date column words them; borrowing core's text domain would fail WordPress.org's plugin check. Core's `post_date_column_status` and `post_date_column_time` filters are not applied to them. A missed schedule is in core's `error-message` style.
+- The indent is set for levels 1 to 20; a deeper row indents as level 20. On screens up to 782 pixels wide, core's own breakpoint, the step is 12 pixels and the indent stops at half the cell.
 - A page past its parent's first 1,000 subpages cannot be opened through `hierarchy_guard_open`: the chain stops above it, as paging stops at the cap.
 - "Collapse all" and closing a row remove the loaded rows; opening the row again loads them again.
 - Core's item count and paging are the top level's; opened levels are shown in addition and are not counted.
 - The "Tree" link has no count beside it, as in the mockups.
+- Home and End move to the first and last row, beyond the spec's four keys; pinned in Task 7.
 
 ---
 
@@ -86,15 +92,15 @@ tests/phpunit/
 ### Task 1: The hierarchy route pages children 50 at a time, with the list's columns
 
 **Files:**
-- Modify: `includes/HierarchyGuard/Overview.php` (`MAX_CHILDREN_PER_PAGE`, `describe()` takes `$per_page`, `children()` adds the columns, new `date()` and `trash_link()`)
+- Modify: `includes/HierarchyGuard/Overview.php` (`MAX_CHILDREN_PER_PAGE`, `describe()` takes `$per_page`, `children()` adds what core's row shows, new `date()`, `locked_by()` and `trash_link()`)
 - Modify: `includes/HierarchyGuard/REST/Hierarchy_Controller.php` (the `children_per_page` argument)
 - Modify: `src/common/api.js` (`hierarchyPath()`, `fetchHierarchy()` takes `perPage`)
 - Test: `tests/phpunit/HierarchyControllerTest.php`, `src/common/test/api.test.js`
 
 **Interfaces:**
 - Produces: `Overview::MAX_CHILDREN_PER_PAGE = 50`; `Overview::describe( WP_Post $post, int $children_page = 1, int $per_page = self::CHILDREN_PER_PAGE ): array`, `has_more` now `$children_page * $per_page < min( $children_total, $cap )`.
-- Produces: each item of `children` keeps `id`, `title`, `edit_link`, `status`, `status_label`, `children_count`, `children_capped`, `view_link`, and adds `author: string`, `date: array{label:string,date:string}`, `trash_link: ?string`.
-- Produces: `Overview::date( WP_Post $post ): array{label:string,date:string}` and `Overview::trash_link( WP_Post $post ): ?string` (public static).
+- Produces: each item of `children` keeps `id`, `title`, `edit_link`, `status`, `status_label`, `children_count`, `children_capped`, `view_link` (now also for a private page of a viewable type), and adds `states: string[]`, `locked_by: ?string`, `author: string`, `date: array{label:string,date:string,missed:bool}`, `trash_link: ?string`.
+- Produces: `Overview::date( WP_Post $post ): array{label:string,date:string,missed:bool}`, `Overview::locked_by( WP_Post $post ): ?string` and `Overview::trash_link( WP_Post $post ): ?string` (public static). The route loads core's `wp-admin/includes/template.php` and `post.php` for `get_post_states()` and `wp_check_post_lock()`.
 - Produces: `GET /hierarchy-guard/v1/posts/{id}/hierarchy?children_page=N&children_per_page=50`; `children_per_page` 1 to 50, default 10.
 - Produces (JS): `hierarchyPath( id: number, page = 1, perPage = 0 ): string` and `fetchHierarchy( id, page = 1, perPage = 0 ): Promise<Object>` in `src/common/api.js`; `perPage` 0 leaves the route's own 10.
 
@@ -179,8 +185,9 @@ with:
 		$this->assertSame( 'Priya', $history['author'] );
 		$this->assertSame(
 			[
-				'label' => 'Published',
-				'date'  => '2026/09/02 at 3:04 pm',
+				'label'  => 'Published',
+				'date'   => '2026/09/02 at 3:04 pm',
+				'missed' => false,
 			],
 			$history['date'],
 			'As core’s Date column words it.'
@@ -206,6 +213,74 @@ with:
 		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
 
 		$this->assertSame( 'Scheduled', $children[ $future ]['date']['label'] );
+	}
+
+	public function test_a_child_past_its_schedule_is_marked_missed(): void {
+		$late = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'future',
+				'post_parent' => $this->ids['about'],
+				'post_date'   => gmdate( 'Y-m-d H:i:s', time() + DAY_IN_SECONDS ),
+			]
+		);
+		// A schedule that cron never ran: still future, dated in the past.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_date' => '2020-01-01 00:00:00' ], [ 'ID' => $late ] );
+		clean_post_cache( $late );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Missed schedule', $children[ $late ]['date']['label'] );
+		$this->assertTrue( $children[ $late ]['date']['missed'], 'Core prints it in its error style.' );
+		$this->assertFalse( $children[ $this->ids['team'] ]['date']['missed'] );
+	}
+
+	public function test_a_private_child_has_the_view_link_core_prints(): void {
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_status' => 'private',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( get_permalink( $this->ids['history'] ), $children[ $this->ids['history'] ]['view_link'] );
+		$this->assertContains( 'Private', $children[ $this->ids['history'] ]['states'] );
+	}
+
+	public function test_each_child_carries_core_s_post_states(): void {
+		update_option( 'show_on_front', 'page' );
+		update_option( 'page_on_front', $this->ids['history'] );
+		wp_update_post(
+			[
+				'ID'            => $this->ids['team'],
+				'post_password' => 'secret',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( [ 'Front Page' ], $children[ $this->ids['history'] ]['states'] );
+		$this->assertSame( [ 'Password protected' ], $children[ $this->ids['team'] ]['states'] );
+		delete_option( 'show_on_front' );
+		delete_option( 'page_on_front' );
+	}
+
+	public function test_a_child_another_user_is_editing_says_who(): void {
+		$other = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $other );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Priya', $children[ $this->ids['team'] ]['locked_by'] );
+		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'] );
 	}
 
 	public function test_a_child_the_user_may_not_trash_has_no_trash_link(): void {
@@ -265,7 +340,7 @@ describe( 'routes', () => {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npm run test:php -- --filter HierarchyControllerTest` and `npm run test:js`
-Expected: FAIL. PHPUnit reports `Failed asserting that actual size 10 matches expected size 50.` for `test_the_tree_takes_children_50_at_a_time_and_paging_stops_at_the_cap` and `Undefined array key "author"`, `"date"` and `"trash_link"` for the other three; Vitest reports `TypeError: hierarchyPath is not a function`.
+Expected: FAIL. PHPUnit reports `Failed asserting that actual size 10 matches expected size 50.` for `test_the_tree_takes_children_50_at_a_time_and_paging_stops_at_the_cap`, `Undefined array key "author"`, `"date"`, `"states"`, `"locked_by"` and `"trash_link"` for the new field tests, and a null `view_link` for the private child; Vitest reports `TypeError: hierarchyPath is not a function`.
 
 - [ ] **Step 3: Page the children by `children_per_page` and give each the list's columns**
 
@@ -373,8 +448,9 @@ with:
 
 ```php
 	 * One page of live children the current user may read, each with its own
-	 * child count and what the list's columns show: the author, the date as
-	 * core's Date column words it, and the trash link when the user may trash it.
+	 * child count and what the list's rows show: the post states and edit lock
+	 * by the title, the author, the date as core's Date column words it, the
+	 * View link core prints, and the trash link when the user may trash it.
 	 *
 	 * @param int    $parent_id Parent post ID.
 	 * @param string $type      Post type name.
@@ -396,6 +472,9 @@ with:
 		$counts = Subtree::child_counts( $ids, $type, $cap + 1 );
 		$posts  = array_values( array_filter( array_map( 'get_post', $ids ) ) );
 		update_post_author_caches( $posts );
+		// Core's helpers for the states and the edit lock live with its list screens.
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		require_once ABSPATH . 'wp-admin/includes/post.php';
 
 		$out = [];
 		foreach ( $posts as $child ) {
@@ -411,8 +490,11 @@ with:
 				'children_count'  => min( $counts[ $child_id ] ?? 0, $cap ),
 				'children_capped' => ( $counts[ $child_id ] ?? 0 ) > $cap,
 				'author'          => (string) get_the_author_meta( 'display_name', (int) $child->post_author ),
+				'states'          => array_values( array_map( 'wp_strip_all_tags', (array) get_post_states( $child ) ) ),
+				'locked_by'       => self::locked_by( $child ),
 				'date'            => self::date( $child ),
-				'view_link'       => is_post_publicly_viewable( $child ) ? (string) get_permalink( $child ) : null,
+				// As core's row: View for a page anyone can view, and for a private page of a viewable type, which this user may read.
+				'view_link'       => is_post_publicly_viewable( $child ) || ( 'private' === $status && is_post_type_viewable( $type ) ) ? (string) get_permalink( $child ) : null,
 				'trash_link'      => self::trash_link( $child ),
 			];
 		}
@@ -424,7 +506,7 @@ with:
 	 * then the date and time.
 	 *
 	 * @param WP_Post $post Post.
-	 * @return array{label:string,date:string}
+	 * @return array{label:string,date:string,missed:bool}
 	 */
 	public static function date( WP_Post $post ): array {
 		if ( '0000-00-00 00:00:00' === $post->post_date ) {
@@ -434,24 +516,44 @@ with:
 			$date = sprintf(
 				/* translators: 1: post date, 2: post time. */
 				__( '%1$s at %2$s', 'hierarchy-guard' ),
+				/* translators: Post date format. See https://www.php.net/manual/datetime.format.php */
 				get_the_time( __( 'Y/m/d', 'hierarchy-guard' ), $post ),
+				/* translators: Post time format. See https://www.php.net/manual/datetime.format.php */
 				get_the_time( __( 'g:i a', 'hierarchy-guard' ), $post )
 			);
 			$late = time() > (int) get_post_timestamp( $post );
 		}
 
+		$missed = 'future' === $post->post_status && $late;
 		if ( 'publish' === $post->post_status ) {
 			$label = __( 'Published', 'hierarchy-guard' );
 		} elseif ( 'future' === $post->post_status ) {
-			$label = $late ? __( 'Missed schedule', 'hierarchy-guard' ) : __( 'Scheduled', 'hierarchy-guard' );
+			$label = $missed ? __( 'Missed schedule', 'hierarchy-guard' ) : __( 'Scheduled', 'hierarchy-guard' );
 		} else {
 			$label = __( 'Last Modified', 'hierarchy-guard' );
 		}
 
 		return [
-			'label' => $label,
-			'date'  => $date,
+			'label'  => $label,
+			'date'   => $date,
+			'missed' => $missed,
 		];
+	}
+
+	/**
+	 * Who holds the edit lock on a post the current user may edit, as core's
+	 * row says "… is currently editing", or null.
+	 *
+	 * @param WP_Post $post Post.
+	 * @return string|null Display name.
+	 */
+	public static function locked_by( WP_Post $post ): ?string {
+		if ( 'trash' === $post->post_status || ! current_user_can( 'edit_post', (int) $post->ID ) ) {
+			return null;
+		}
+		$holder = wp_check_post_lock( $post );
+		$user   = false !== $holder ? get_userdata( (int) $holder ) : false;
+		return false !== $user ? (string) $user->display_name : null;
 	}
 
 	/**
@@ -573,10 +675,10 @@ export function fetchHierarchy( id, page = 1, perPage = 0 ) {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter HierarchyControllerTest`, then `npm run test:js`
-Expected: PASS (31 PHPUnit tests; 87 Vitest tests).
+Expected: PASS (35 PHPUnit tests; 87 Vitest tests).
 
 Run: `npm run test:php`, `composer lint`, `npm run lint:js`
-Expected: 847 tests pass (5 skipped); both lints exit 0.
+Expected: 851 tests pass (5 skipped); both lints exit 0.
 
 - [ ] **Step 5: Commit**
 
@@ -596,7 +698,7 @@ git commit -m "feat: the hierarchy route pages children 50 at a time, with the l
 **Interfaces:**
 - Produces: `Tree_View::QUERY_VAR = 'hierarchy_guard_view'`, `Tree_View::VIEW = 'tree'`, `Tree_View::OPEN_VAR = 'hierarchy_guard_open'`, `Tree_View::CHILDREN_PAGE_VAR = 'hierarchy_guard_children_page'`, `Tree_View::PER_PAGE = 50`.
 - Produces: `Tree_View::url( string $post_type ): string`, the view's URL; `Tree_View::mode( string $post_type ): string`, `'tree'`, `'search'` or `''`.
-- Produces: `Tree_View::register()` hooks `request` → `filter_request( $vars )` and `load-edit.php` → `load()`; `load()` hooks `views_edit-{type}` → `views()` on every supported list, and in the tree `manage_{type}_posts_columns` (priority 20) → `columns()`, `bulk_actions-edit-{type}` → `bulk_actions()`, `quick_edit_enabled_for_post_type` → `__return_false`, and in the tree but not a search `admin_body_class` → `body_class()` (adds `hierarchy-guard-tree-view`).
+- Produces: `Tree_View::register()` hooks `request` → `filter_request( $vars )` and `load-edit.php` → `load()`; `filter_request()` returns at once unless the request is wp-admin's `edit.php` (`Tree_View::on_list()`, private) and reads `post_type` only when it is a string; `load()` hooks `views_edit-{type}` → `views()` on every supported list, and in the tree `manage_{type}_posts_columns` (priority 20) → `columns()`, `bulk_actions-edit-{type}` → `bulk_actions()`, `quick_edit_enabled_for_post_type` → `__return_false`, and in the tree but not a search `admin_body_class` → `body_class()` (adds `hierarchy-guard-tree-view`).
 - Produces: `List_Table::per_page( string $post_type ): int` is public static.
 - Consumes: `List_Table::under()`, `Post_Types::is_supported()`.
 
@@ -730,6 +832,16 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$_GET['s']                    = [ 'team' ];
 		$_GET['post_status']          = [ 'trash' ];
 		$this->assertSame( 'tree', $this->tree->mode( 'page' ), 'A search or status that is not text is no search and no status.' );
+	}
+
+	public function test_the_request_filter_leaves_the_front_end_and_an_array_post_type_alone(): void {
+		$vars = [ 'post_type' => [ 'post', 'page' ] ];
+		$this->assertSame( $vars, $this->tree->filter_request( $vars ), 'An array post type in wp-admin is not one list.' );
+
+		set_current_screen( 'front' );
+		$GLOBALS['pagenow'] = 'index.php';
+		$this->assertSame( $vars, $this->tree->filter_request( $vars ), 'A visitor’s ?post_type[]=post is never read.' );
+		$this->assertSame( self::core_vars(), $this->tree->filter_request( self::core_vars() ), 'The view acts only on edit.php.' );
 	}
 
 	public function test_the_top_level_is_core_s_query_with_post_parent_0_twenty_to_a_page(): void {
@@ -903,9 +1015,10 @@ use HierarchyGuard\Post_Types;
  * post_parent 0 in menu order then title, 20 to a page, and a search lists
  * the matches at any level, flat. The list-table script loads subpages 50 at
  * a time from the hierarchy route. Without JavaScript a toggle reloads the
- * view opened at one page: each opened level's page of 50 is put after its
- * parent in core's results, so core prints it. Nothing here reads every
- * top-level post: Subtree::ordered_children() is never asked for parent 0.
+ * view opened at one page: the path down to it and its page of 50 subpages
+ * are put after their parents in core's results, so core prints them.
+ * Nothing here reads every top-level post: Subtree::ordered_children() is
+ * never asked for parent 0.
  */
 final class Tree_View {
 
@@ -1015,10 +1128,10 @@ final class Tree_View {
 	 * @return mixed
 	 */
 	public function filter_request( $vars ) {
-		if ( ! is_array( $vars ) ) {
+		if ( ! is_array( $vars ) || ! self::on_list() ) {
 			return $vars;
 		}
-		$type = (string) ( $vars['post_type'] ?? '' );
+		$type = isset( $vars['post_type'] ) && is_string( $vars['post_type'] ) ? $vars['post_type'] : '';
 		$mode = $this->mode( $type );
 		if ( '' === $mode ) {
 			return $vars;
@@ -1068,6 +1181,16 @@ final class Tree_View {
 	public function body_class( $classes ) {
 		return is_string( $classes ) ? $classes . ' hierarchy-guard-tree-view ' : $classes;
 	}
+
+	/**
+	 * Whether the request is a list screen in wp-admin, the only place the
+	 * view acts; front-end queries are left alone before anything is read.
+	 *
+	 * @return bool
+	 */
+	private static function on_list(): bool {
+		return is_admin() && 'edit.php' === ( $GLOBALS['pagenow'] ?? '' );
+	}
 }
 ```
 
@@ -1099,10 +1222,10 @@ with:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter TreeViewTest`
-Expected: PASS (12 tests).
+Expected: PASS (13 tests).
 
 Run: `npm run test:php`, `npx wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard bash -c 'WP_MULTISITE=1 vendor/bin/phpunit'`, `composer lint`
-Expected: 859 tests pass (5 skipped), and as multisite; lint exits 0. `list_query()` sets `REQUEST_URI` and `PHP_SELF` to `/wp-admin/edit.php` as the list screen has them: without that, core's list query in the full suite matches a rewrite rule an earlier test left and finds nothing.
+Expected: 864 tests pass (5 skipped), and as multisite; lint exits 0. `list_query()` sets `REQUEST_URI` and `PHP_SELF` to `/wp-admin/edit.php` as the list screen has them: without that, core's list query in the full suite matches a rewrite rule an earlier test left and finds nothing.
 
 - [ ] **Step 5: Commit**
 
@@ -1119,8 +1242,8 @@ git commit -m "feat: Tree in the views row, the top level through core's query 2
 
 **Interfaces:**
 - Consumes: `Subtree::ordered_children()`, `Subtree::count_live_children()`, `Subtree::count_cap()`, `List_Table::per_page()`.
-- Produces: `Tree_View::open_levels( mixed $posts, mixed $query ): mixed`, hooked on `the_posts` (10, 2 arguments): for the main query of the tree (not a search) it records every top-level row's facts and, for `hierarchy_guard_open`, inserts each opened level's page of up to 50 `WP_Post` rows after its parent.
-- Produces: `Tree_View::row( int $post_id ): ?array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool}`: `level` from 0, `page` is the page of its parent's subpages the row is on, `shown` the page of its own subpages shown when `open`, `more` when a next page exists within the cap, `capped` when the shown page reached the cap and more exist; `position` and `setsize` are null past the cap.
+- Produces: `Tree_View::open_levels( mixed $posts, mixed $query ): mixed`, hooked on `the_posts` (10, 2 arguments), acting only for wp-admin's `edit.php` main query with a string `post_type`. On an empty page past page 1 of the tree or a search it sets `found_posts` from one one-row copy of the query. For the tree (not a search) it records every top-level row's facts and, for `hierarchy_guard_open`, inserts the path down to the opened page (one row a level, the page that leads down) and then the opened page's page of up to 50 `WP_Post` rows.
+- Produces: `Tree_View::row( int $post_id ): ?array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool}`: `level` from 0, `page` is the page of its parent's subpages the row is on, `shown` the page of its own subpages shown when `open` (on a level above the opened page, the page that holds the next one down), `more` when a next page exists within the cap, `capped` when the shown page reached the cap and more exist; `position` and `setsize` are null past the cap.
 - Produces: `Tree_View::place_url( string $post_type, int $open = 0, int $children_page = 1 ): string`: the view's URL keeping only `orderby`, `order` (`asc` or `desc`), `m` and `paged` from the request, plus `hierarchy_guard_open` and, above 1, `hierarchy_guard_children_page`.
 - Produces: `Tree_View::opened(): int` and `Tree_View::children_page(): int` (from 1), ignoring values that are not text.
 
@@ -1223,9 +1346,9 @@ with:
 		$rows = $this->open_levels( [ $this->ids['company'], $lonely ], 2 );
 
 		$this->assertSame(
-			[ 'company', 'about', 'history', 'team', 'leadership', 'lonely' ],
+			[ 'company', 'about', 'team', 'leadership', 'lonely' ],
 			wp_list_pluck( $rows, 'post_name' ),
-			'Each level above the opened page is opened through it, in menu order then title.'
+			'The levels above the opened page show only the path down to it: History, beside Team, is left out.'
 		);
 		$this->assertTrue( $this->tree->row( $this->ids['about'] )['open'] );
 		$this->assertSame( 3, $this->tree->row( $this->ids['leadership'] )['level'], 'Leadership sits three levels down.' );
@@ -1246,23 +1369,39 @@ with:
 		$this->assertContains( 'level-2', get_post_class( 'level-' . count( get_post_ancestors( $this->ids['team'] ) ), $this->ids['team'] ) );
 	}
 
-	public function test_each_level_above_shows_the_page_of_50_that_holds_the_next_one_down(): void {
+	public function test_each_level_above_shows_only_the_page_that_leads_down_however_far_in_it_is(): void {
 		$many = $this->subpages( $this->ids['about'], 58 );
 		// About's subpages sort as history, sub-001 … sub-058, team: team is the 60th, on page 2.
 		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
 
-		$rows  = $this->open_levels( [ $this->ids['company'] ], 1 );
-		$names = wp_list_pluck( $rows, 'post_name' );
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
 
-		$this->assertSame( [ 'company', 'about' ], array_slice( $names, 0, 2 ) );
-		$this->assertCount( 2 + 10 + 1, $rows, 'Company, About, the 10 subpages on page 2, and Leadership under Team.' );
-		$this->assertSame( 'sub-050', $names[2], 'Page 2 starts at the 51st: history, then sub-001 to sub-049 fill page 1.' );
-		$this->assertSame( [ 'team', 'leadership' ], array_slice( $names, -2 ) );
-		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['page'] );
+		$this->assertSame( [ 'company', 'about', 'team', 'leadership' ], wp_list_pluck( $rows, 'post_name' ), 'The depth plus one page of the opened page’s subpages, never 50 rows a level.' );
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['page'], 'A trash from Team comes back to About’s page 2.' );
 		$this->assertSame( 60, $this->tree->row( $this->ids['team'] )['position'] );
-		$this->assertSame( 2, $this->tree->row( $this->ids['about'] )['shown'] );
-		$this->assertFalse( $this->tree->row( $this->ids['about'] )['more'] );
-		$this->assertNotContains( $many[0], wp_list_pluck( $rows, 'ID' ), 'Only one page of 50 per opened page.' );
+		$this->assertSame( 60, $this->tree->row( $this->ids['team'] )['setsize'] );
+		$this->assertTrue( $this->tree->row( $this->ids['about'] )['open'] );
+		$this->assertFalse( $this->tree->row( $this->ids['about'] )['more'], 'A level on the path has no Show more.' );
+		$this->assertNotContains( $many[0], wp_list_pluck( $rows, 'ID' ) );
+	}
+
+	public function test_a_deep_opened_page_costs_its_depth_plus_one_page(): void {
+		$parent = $this->ids['leadership'];
+		$chain  = [];
+		for ( $depth = 1; $depth <= 8; $depth++ ) {
+			$this->subpages( $parent, 3, "side{$depth}" );
+			$parent  = $this->page( "deep-{$depth}", $parent );
+			$chain[] = $parent;
+		}
+		$this->subpages( $parent, 60, 'leaf' );
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $parent;
+
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		// Company, About, Team, Leadership, the eight deep pages, then 50 of the 60 leaves.
+		$this->assertCount( 4 + 8 + 50, $rows );
+		$this->assertSame( array_slice( $chain, 0, 7 ), array_slice( wp_list_pluck( $rows, 'ID' ), 4, 7 ) );
+		$this->assertSame( 12, $this->tree->row( (int) $rows[ count( $rows ) - 1 ]->ID )['level'] );
 	}
 
 	public function test_the_opened_page_shows_the_children_page_it_asks_for_and_says_when_more_follow(): void {
@@ -1270,17 +1409,17 @@ with:
 		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
 
 		$first = $this->open_levels( [ $this->ids['company'] ], 1 );
-		$this->assertCount( 4 + 50, $first, 'Company, About, History, Team, and 50 of Team’s 121.' );
+		$this->assertCount( 3 + 50, $first, 'Company, About, Team, and 50 of Team’s 121.' );
 		$this->assertTrue( $this->tree->row( $this->ids['team'] )['more'] );
 		$this->assertSame( 1, $this->tree->row( $this->ids['team'] )['shown'] );
 
 		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '3';
 		$third                                = $this->open_levels( [ $this->ids['company'] ], 1 );
-		$this->assertCount( 4 + 21, $third, 'Leadership and 120 more: page 3 holds the last 21.' );
+		$this->assertCount( 3 + 21, $third, 'Leadership and 120 more: page 3 holds the last 21.' );
 		$this->assertFalse( $this->tree->row( $this->ids['team'] )['more'] );
 
 		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '99';
-		$this->assertCount( 4 + 21, $this->open_levels( [ $this->ids['company'] ], 1 ), 'A page past the end shows the last one.' );
+		$this->assertCount( 3 + 21, $this->open_levels( [ $this->ids['company'] ], 1 ), 'A page past the end shows the last one.' );
 	}
 
 	public function test_past_the_cap_the_opened_page_says_only_the_first_are_shown(): void {
@@ -1291,7 +1430,7 @@ with:
 
 		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
 
-		$this->assertCount( 4 + 10, $rows, 'Paging stops at the cap: page 2 holds the 51st to the 60th.' );
+		$this->assertCount( 3 + 10, $rows, 'Paging stops at the cap: page 2 holds the 51st to the 60th.' );
 		$row = $this->tree->row( $this->ids['team'] );
 		$this->assertFalse( $row['more'] );
 		$this->assertTrue( $row['capped'] );
@@ -1335,6 +1474,34 @@ with:
 		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['company'];
 		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '-3';
 		$this->assertSame( [ 'company', 'about' ], wp_list_pluck( $this->open_levels( [ $this->ids['company'] ], 1 ), 'post_name' ), 'A page number below 1 is the first page.' );
+	}
+
+	public function test_the_posts_filter_leaves_the_front_end_and_an_array_post_type_alone(): void {
+		$posts = [ get_post( $this->ids['company'] ) ];
+		$query = new WP_Query();
+		$query->set( 'post_type', [ 'post', 'page' ] );
+		$GLOBALS['wp_the_query'] = $query;
+		$this->assertSame( $posts, $this->tree->open_levels( $posts, $query ) );
+
+		set_current_screen( 'front' );
+		$GLOBALS['pagenow'] = 'index.php';
+		$this->assertSame( $posts, $this->tree->open_levels( $posts, $query ), 'A theme’s array post type on the front end is never read.' );
+		$query->set( 'post_type', 'page' );
+		$this->assertSame( $posts, $this->tree->open_levels( $posts, $query ) );
+		$this->assertNull( $this->tree->row( $this->ids['company'] ) );
+	}
+
+	public function test_a_page_past_the_last_gets_the_view_s_own_count_so_core_sends_it_to_the_last_page(): void {
+		update_user_option( get_current_user_id(), 'edit_page_per_page', 1 );
+		$this->page( 'alpha' );
+		$last = $this->page( 'zeta' );
+		wp_trash_post( $last );
+		$_GET['paged'] = '3';
+
+		$query = $this->list_query();
+
+		$this->assertSame( [], $query->posts, 'Zeta was the only row on page 3.' );
+		$this->assertSame( 2, (int) $query->found_posts, 'Alpha and Company: core’s list then redirects to page 2 instead of counting every page.' );
 	}
 
 	public function test_opening_a_level_costs_the_same_queries_whatever_its_size(): void {
@@ -1437,21 +1604,45 @@ with:
 
 	/**
 	 * Notes each top-level row's place and, with hierarchy_guard_open, puts
-	 * each opened level's page of subpages after its parent in core's
-	 * results, so core prints them as its own rows with its level-N class.
-	 * Each level above the opened page shows the page of 50 that holds the
-	 * next one down; the opened page shows hierarchy_guard_children_page.
+	 * the opened page's rows after their parent in core's results, so core
+	 * prints them as its own rows with its level-N class. Each level above
+	 * the opened page shows only the page that leads down to it; the opened
+	 * page shows its page of 50 subpages, hierarchy_guard_children_page. A
+	 * page past the view's last one gets the view's own count, so core sends
+	 * the user to its last page.
 	 *
 	 * @param mixed $posts Posts.
 	 * @param mixed $query Query.
 	 * @return mixed
 	 */
 	public function open_levels( $posts, $query ) {
-		if ( ! is_array( $posts ) || ! $query instanceof WP_Query || ! $query->is_main_query() ) {
+		if ( ! is_array( $posts ) || ! $query instanceof WP_Query || ! self::on_list() || ! $query->is_main_query() ) {
 			return $posts;
 		}
-		$type = (string) $query->get( 'post_type' );
-		if ( 'tree' !== $this->mode( $type ) ) {
+		$type = $query->get( 'post_type' );
+		$mode = is_string( $type ) ? $this->mode( $type ) : '';
+		if ( '' === $mode ) {
+			return $posts;
+		}
+		if ( [] === $posts && (int) $query->get( 'paged' ) > 1 ) {
+			// Past the last page core finds nothing and counts every page of the type instead; one row of the view's own query gives its count.
+			$count              = new WP_Query(
+				array_merge(
+					$query->query_vars,
+					[
+						'paged'                  => 1,
+						'posts_per_page'         => 1,
+						'fields'                 => 'ids',
+						'no_found_rows'          => false,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					]
+				)
+			);
+			$query->found_posts = (int) $count->found_posts;
+			return $posts;
+		}
+		if ( 'tree' !== $mode ) {
 			return $posts;
 		}
 
@@ -1518,6 +1709,8 @@ In `includes/HierarchyGuard/Admin/Tree_View.php`, replace (4 of 4):
 ```php
 		return is_string( $classes ) ? $classes . ' hierarchy-guard-tree-view ' : $classes;
 	}
+
+	/**
 ```
 
 with:
@@ -1570,8 +1763,10 @@ with:
 	}
 
 	/**
-	 * Puts one opened level's page of subpages into the output, then opens
-	 * the next level inside it.
+	 * Puts one opened level into the output. A level above the opened page
+	 * shows only the page that leads down, then opens the next level inside
+	 * it; the opened page shows one page of 50 subpages. So the rows grow
+	 * with the opened page's depth plus 50, never with a subtree.
 	 *
 	 * @param int[]             $chain Pages to open, top level first.
 	 * @param int               $level Index of the page opened here.
@@ -1584,16 +1779,35 @@ with:
 		$cap     = Subtree::count_cap();
 		$ordered = array_map( 'intval', array_column( Subtree::ordered_children( [ $node ], $type, $cap ), 'ID' ) );
 		$found   = $next > 0 ? array_search( $next, $ordered, true ) : false;
-		$page    = false !== $found ? intdiv( (int) $found, self::PER_PAGE ) + 1 : self::children_page();
-		$last    = max( 1, (int) ceil( count( $ordered ) / self::PER_PAGE ) );
-		$page    = min( $page, $last );
-		$ids     = array_slice( $ordered, ( $page - 1 ) * self::PER_PAGE, self::PER_PAGE );
 		$total   = Subtree::count_live_children( $node, $type, $cap + 1 );
 		$capped  = $total > $cap;
+		$fact    = $this->rows[ $node ] ?? self::fact( $level, 0, null, null, 1 );
 
+		if ( false !== $found ) {
+			// A level above the opened page: only the path down.
+			$page                = intdiv( (int) $found, self::PER_PAGE ) + 1;
+			$this->rows[ $node ] = array_merge(
+				$fact,
+				[
+					'open'  => true,
+					'shown' => $page,
+				]
+			);
+			$child               = get_post( $next );
+			if ( $child instanceof WP_Post ) {
+				$this->rows[ $next ] = self::fact( $level + 1, $node, $capped ? null : (int) $found + 1, $capped ? null : $total, $page );
+				$out[]               = $child;
+				$this->open( $chain, $level + 1, $type, $out );
+			}
+			return;
+		}
+
+		// The opened page, or a level whose next page lies past the cap: one page of 50.
+		$page = min( $next > 0 ? 1 : self::children_page(), max( 1, (int) ceil( count( $ordered ) / self::PER_PAGE ) ) );
+		$ids  = array_slice( $ordered, ( $page - 1 ) * self::PER_PAGE, self::PER_PAGE );
 		_prime_post_caches( $ids, false, false );
 		$this->rows[ $node ] = array_merge(
-			$this->rows[ $node ] ?? self::fact( $level, 0, null, null, 1 ),
+			$fact,
 			[
 				'open'   => true,
 				'shown'  => $page,
@@ -1609,9 +1823,6 @@ with:
 			$position          = ( $page - 1 ) * self::PER_PAGE + $index + 1;
 			$this->rows[ $id ] = self::fact( $level + 1, $node, $capped ? null : $position, $capped ? null : $total, $page );
 			$out[]             = $child;
-			if ( $id === $next ) {
-				$this->open( $chain, $level + 1, $type, $out );
-			}
 		}
 	}
 
@@ -1638,15 +1849,17 @@ with:
 			'capped'   => false,
 		];
 	}
+
+	/**
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter TreeViewTest`
-Expected: PASS (23 tests).
+Expected: PASS (27 tests).
 
 Run: `npm run test:php`, `npx wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard bash -c 'WP_MULTISITE=1 vendor/bin/phpunit'`, `composer lint`
-Expected: 870 tests pass (5 skipped), and as multisite; lint exits 0.
+Expected: 878 tests pass (5 skipped), and as multisite; lint exits 0.
 
 - [ ] **Step 5: Commit**
 
@@ -1667,7 +1880,7 @@ git commit -m "feat: without JavaScript an opened page's levels follow it in cor
 - Consumes: `Tree_View::mode()`, `Tree_View::row()`, `Tree_View::place_url()`, `Tree_View::open_levels()`.
 - Produces: `List_Table::__construct( ?Tree_View $tree = null )`.
 - Produces: the tree's cell: `<span class="hierarchy-guard-cell" data-id data-children data-status data-level data-parent data-page [data-position data-setsize] [data-open]>` holding, separated by `<span aria-hidden="true"> · </span>`, `a.hierarchy-guard-toggle` (only for a page with subpages the user may edit; `href` opens it, or for an opened page goes back to its parent; a dashicon and a screen-reader label), the count link, then `a.hierarchy-guard-more[data-page]` or `span.hierarchy-guard-capped` under an opened page. `data-children` is the count up to the cap plus one; `data-open` is the page of subpages shown.
-- Produces: in a search, the cell's parent path, each ancestor linked to `List_Table::filter_url()`, after `Parent pages:` for screen readers.
+- Produces: in a search, the cell's parent path, each ancestor linked to `List_Table::filter_url()`, after `Parent page:` or `Parent pages:` for screen readers. The closed toggle's dashicon is `arrow-left-alt2` when `is_rtl()`, so it points toward the title.
 - Produces: `Tree_View::controls( $post_type, $which )` on `restrict_manage_posts`: asks for the list-table script, prints `<input type="hidden" name="hierarchy_guard_view" value="tree">`, then in a search `span.hierarchy-guard-back` with the "Back to the tree" link, otherwise `<span class="hierarchy-guard-tree" hidden data-type data-place data-total data-start data-per-page>`; `Tree_View::collapse_all( $which )` on `manage_posts_extra_tablenav` prints `a.hierarchy-guard-collapse` in the tree.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1821,6 +2034,25 @@ with:
 		$this->assertStringContainsString( '1 subpage</a>', $this->cell( $this->ids['company'] ) );
 	}
 
+	public function test_a_tree_search_names_one_parent_page_in_the_singular(): void {
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'about';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['about'] ] );
+
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent page: </span><a href="', $this->cell( $this->ids['about'] ) );
+	}
+
+	public function test_a_closed_toggle_points_toward_the_title_right_to_left(): void {
+		$GLOBALS['wp_locale']->text_direction = 'rtl';
+		$this->tree_table( [ $this->ids['company'] ] );
+
+		$cell                                 = $this->cell( $this->ids['company'] );
+		$GLOBALS['wp_locale']->text_direction = 'ltr';
+
+		$this->assertStringContainsString( 'dashicons-arrow-left-alt2', $cell );
+	}
+
 	public function test_a_tree_search_loads_the_screen_s_ancestors_one_level_at_a_time(): void {
 		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
 		$_GET['s']                    = 'e';
@@ -1959,7 +2191,7 @@ with:
 		$mode   = null !== $this->tree ? $this->tree->mode( $type ) : '';
 
 		if ( 'search' === $mode && $above instanceof WP_Post ) {
-			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent pages:', 'hierarchy-guard' ) . ' </span>' . $this->trail( $post );
+			$parts[] = '<span class="screen-reader-text">' . esc_html( _n( 'Parent page:', 'Parent pages:', count( get_post_ancestors( $post ) ), 'hierarchy-guard' ) ) . ' </span>' . $this->trail( $post );
 		} elseif ( '' === $mode && $above instanceof WP_Post ) {
 ```
 
@@ -2025,7 +2257,8 @@ with:
 				sprintf(
 					'<a class="hierarchy-guard-toggle" href="%1$s"><span class="dashicons dashicons-arrow-%2$s-alt2" aria-hidden="true"></span><span class="screen-reader-text">%3$s</span></a>',
 					esc_url( $href ),
-					$open ? 'down' : 'right',
+					// A closed toggle points along the line toward the title.
+					$open ? 'down' : ( is_rtl() ? 'left' : 'right' ),
 					$open
 						/* translators: %s: page title. */
 						? sprintf( esc_html__( 'Hide the subpages of “%s”', 'hierarchy-guard' ), $title )
@@ -2251,10 +2484,10 @@ with:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter 'TreeViewTest|ListTableTest'`
-Expected: PASS (25 and 32 tests).
+Expected: PASS (29 and 34 tests).
 
 Run: `npm run test:php`, `composer lint`
-Expected: 880 tests pass (5 skipped); lint exits 0.
+Expected: 890 tests pass (5 skipped); lint exits 0.
 
 - [ ] **Step 5: Commit**
 
@@ -2271,7 +2504,7 @@ git commit -m "feat: the tree's Hierarchy column, toggles without JavaScript, an
 
 **Interfaces:**
 - Consumes: `Tree_View::row()`, `Tree_View::place_url()`; core's `wp_get_referer()`, which reads `_wp_http_referer` before the browser's referrer.
-- Produces: `Tree_View::row_actions( $actions, $post )` on `page_row_actions` (20, 2 arguments) in the tree: core's own Trash link with `_wp_http_referer` = `place_url( type, row's parent, row's page )` added, nothing else changed.
+- Produces: `Tree_View::row_actions( $actions, $post )` on `page_row_actions` (20, 2 arguments) in the tree, not a search: core's own Trash link with `_wp_http_referer` = `place_url( type, row's parent, row's page )` added, nothing else changed.
 - Produces: `Tree_View::keep_page_on_undo()`, called first in `load()`: on an Undo request (`doaction=undo`) referred by the Tree view, a `wp_redirect` filter sets that redirect's `paged` to the referring page's, or removes it for page 1.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2310,6 +2543,16 @@ with:
 		$this->assertSame( Tree_View::place_url( 'page', $this->ids['about'] ), $args['_wp_http_referer'], 'The same page of top-level pages, opened at the trashed page’s parent.' );
 		$this->assertStringContainsString( 'paged=3', $args['_wp_http_referer'] );
 		$this->assertStringContainsString( 'orderby=title', $args['_wp_http_referer'] );
+	}
+
+	public function test_a_trash_from_a_search_in_the_tree_returns_to_the_search(): void {
+		$_GET['s'] = 'team';
+		$this->tree->load();
+		$link = '<a href="' . esc_url( (string) get_delete_post_link( $this->ids['team'] ) ) . '" class="submitdelete">Trash</a>';
+
+		$actions = apply_filters( 'page_row_actions', [ 'trash' => $link ], get_post( $this->ids['team'] ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own row actions filter.
+
+		$this->assertSame( $link, $actions['trash'], 'Core’s link: the browser’s referrer returns to the results.' );
 	}
 
 	public function test_the_place_keeps_only_the_view_s_own_arguments(): void {
@@ -2371,14 +2614,15 @@ with:
 In `includes/HierarchyGuard/Admin/Tree_View.php`, replace (2 of 4):
 
 ```php
-		add_filter( 'quick_edit_enabled_for_post_type', '__return_false' );
+			add_filter( 'admin_body_class', [ $this, 'body_class' ] );
 ```
 
 with:
 
 ```php
-		add_filter( 'quick_edit_enabled_for_post_type', '__return_false' );
-		add_filter( 'page_row_actions', [ $this, 'row_actions' ], 20, 2 );
+			add_filter( 'admin_body_class', [ $this, 'body_class' ] );
+			// A search's rows are core's, and the browser's referrer already returns to the results.
+			add_filter( 'page_row_actions', [ $this, 'row_actions' ], 20, 2 );
 ```
 
 In `includes/HierarchyGuard/Admin/Tree_View.php`, replace (3 of 4):
@@ -2467,10 +2711,10 @@ with:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run test:php -- --filter TreeViewTest`
-Expected: PASS (28 tests).
+Expected: PASS (33 tests).
 
 Run: `npm run test:php`, `npx wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard bash -c 'WP_MULTISITE=1 vendor/bin/phpunit'`, `composer lint`
-Expected: 883 tests pass (5 skipped), and as multisite; lint exits 0.
+Expected: 894 tests pass (5 skipped), and as multisite; lint exits 0.
 
 - [ ] **Step 5: Commit**
 
@@ -2483,14 +2727,14 @@ git commit -m "feat: a trash from the tree, and its Undo, come back to the same 
 
 **Files:**
 - Modify: `package.json`, `package-lock.json` (happy-dom, dev only)
-- Modify: `src/common/copy.js` (`treeRowLabels()`, `viewSubpagesLabel()`)
+- Modify: `src/common/copy.js` (`treeRowLabels()`, `viewSubpagesLabel()`, `childOfLabel()`, `lockedLabel()`)
 - Create: `src/tree/rows.js`
 - Test: `src/tree/test/fixture.js`, `src/tree/test/rows.test.js`, `src/common/test/copy.test.js`
 
 **Interfaces:**
 - Consumes: the route's child fields from Task 1; `subpagesLabel()` from `src/common/copy.js`.
-- Produces (copy): `treeRowLabels( title: string ): Object<string,string>` with `edit`, `editLabel`, `trash`, `trashLabel`, `view`, `viewLabel`, `subpages`, `subpagesLabel`, `details`, `noSubpages`, `noAuthor`; `viewSubpagesLabel( count: number, capped: boolean, title: string ): string`.
-- Produces (rows): `PER_PAGE = 50`; `placeUrl( place: string, parent: number, page = 1 ): string`; `subtreeUrl( type: string, id: number ): string`; `childRow( template: HTMLTableRowElement, child: Object, context: {level, parent, page, position, setsize, place, type} ): HTMLTableRowElement`, a row `#post-{id}.level-{level}` whose cells copy the template's tag, classes, `scope` and `data-colname`, with the Hierarchy cell's data attributes as the server prints them; `statusRow( template, parent: number, level: number ): {row, cell}`, a one-cell row spanning the visible columns.
+- Produces (copy): `treeRowLabels( title: string ): Object<string,string>` with `edit`, `editLabel`, `trash`, `trashLabel`, `view`, `viewLabel`, `subpages`, `subpagesLabel`, `details`, `noSubpages`, `noAuthor`; `viewSubpagesLabel( count: number, capped: boolean, title: string ): string`; `childOfLabel( title ): string` ("Child of %s"); `lockedLabel( name ): string` ("%s is currently editing").
+- Produces (rows): `PER_PAGE = 50`; `placeUrl( place: string, parent: number, page = 1 ): string`; `subtreeUrl( type: string, id: number ): string`; `childRow( template: HTMLTableRowElement, child: Object, context: {level, parent, parentTitle, page, position, setsize, place, type} ): HTMLTableRowElement`, a row `#post-{id}.level-{level}` (plus `wp-locked` when another user holds the lock) whose cells copy the template's tag, classes, `scope` and `data-colname`, and the title cell's `aria-label` (set to the title) when the template's has one; the title cell holds core's `.locked-info`, the title with `aria-describedby="post-hierarchy-{id}"` and its hidden "Child of …" description, and core's post states; a missed schedule's label is `strong.error-message`; the Hierarchy cell has its data attributes as the server prints them; `statusRow( template, parent: number, level: number ): {row, cell}`, a one-cell row spanning the visible columns.
 - Produces (fixture): `coreRow( {...} ): string`, `mountScreen( rows: string )`, `child( id, title, overrides )`, `page( children, total, hasMore, capped )`.
 
 - [ ] **Step 1: Add the DOM test environment**
@@ -2555,7 +2799,7 @@ export function coreRow( {
 		? `<a href="edit.php?post_type=page&hierarchy_guard_under=${ id }">${ children } subpages</a>`
 		: '<span aria-hidden="true">—</span>';
 	return `<tr id="post-${ id }" class="iedit level-${ level }">
-		<th scope="row" class="title column-title has-row-actions column-primary page-title" data-colname="Title"><div class="locked-info"></div><strong><a class="row-title" href="post.php?post=${ id }&action=edit">${ title }</a></strong><div class="row-actions"><span class="trash"><a href="post.php?post=${ id }&action=trash" class="submitdelete">Trash</a></span></div></th>
+		<th scope="row" class="title column-title has-row-actions column-primary page-title" data-colname="Title" aria-label="${ title }"><div class="locked-info"><span class="locked-avatar"></span> <span class="locked-text"></span></div><strong><a class="row-title" href="post.php?post=${ id }&action=edit">${ title }</a></strong><div class="row-actions"><span class="trash"><a href="post.php?post=${ id }&action=trash" class="submitdelete">Trash</a></span></div></th>
 		<td class="hierarchy_guard column-hierarchy_guard" data-colname="Hierarchy"><span class="hierarchy-guard-cell" data-id="${ id }" data-children="${ children }" data-status="publish" data-level="${ level }" data-parent="${ parent }" data-page="1" data-position="${ position }" data-setsize="${ setsize }"${ open ? ` data-open="${ open }"` : '' }>${ toggleLink }${ count }${ extra }</span></td>
 		<td class="author column-author" data-colname="Author">Sam</td>
 		<td class="comments column-comments hidden" data-colname="Comments"></td>
@@ -2801,6 +3045,91 @@ describe( 'a loaded subpage’s row', () => {
 		).toBe( `Edit “${ title }”` );
 	} );
 
+	it( 'names the row by its title as WordPress 7.1 does, and says whose child it is', () => {
+		const row = childRow(
+			template,
+			child( 5, 'About' ),
+			context( { parentTitle: 'Company' } )
+		);
+
+		expect( row.children[ 0 ].getAttribute( 'aria-label' ) ).toBe(
+			'About'
+		);
+		const title = row.querySelector( '.row-title' );
+		expect( title.getAttribute( 'aria-describedby' ) ).toBe(
+			'post-hierarchy-5'
+		);
+		const description = row.querySelector( '#post-hierarchy-5' );
+		expect( description.className ).toBe( 'hidden' );
+		expect( description.textContent ).toBe( 'Child of Company' );
+
+		template.children[ 0 ].removeAttribute( 'aria-label' );
+		expect(
+			childRow(
+				template,
+				child( 6, 'History' ),
+				context()
+			).children[ 0 ].hasAttribute( 'aria-label' )
+		).toBe( false );
+	} );
+
+	it( 'carries core’s lock notice, and who holds the lock', () => {
+		const free = childRow( template, child( 5, 'About' ), context() );
+		expect( free.querySelector( '.locked-info' ).innerHTML ).toBe(
+			'<span class="locked-avatar"></span> <span class="locked-text"></span>'
+		);
+		expect( free.classList.contains( 'wp-locked' ) ).toBe( false );
+
+		const held = childRow(
+			template,
+			child( 6, 'History', { locked_by: 'Priya' } ),
+			context()
+		);
+		expect( held.classList.contains( 'wp-locked' ) ).toBe( true );
+		expect( held.querySelector( '.locked-text' ).textContent ).toBe(
+			'Priya is currently editing'
+		);
+	} );
+
+	it( 'lists core’s post states after the title', () => {
+		const row = childRow(
+			template,
+			child( 3, 'Privacy', {
+				status: 'draft',
+				states: [ 'Draft', 'Privacy Policy Page' ],
+			} ),
+			context()
+		);
+
+		expect(
+			Array.from( row.querySelectorAll( 'strong .post-state' ) ).map(
+				( state ) => state.textContent
+			)
+		).toEqual( [ 'Draft, ', 'Privacy Policy Page' ] );
+		expect( row.querySelector( 'strong' ).textContent ).toBe(
+			'Privacy — Draft, Privacy Policy Page'
+		);
+	} );
+
+	it( 'shows a missed schedule in core’s error style', () => {
+		const row = childRow(
+			template,
+			child( 9, 'Launch', {
+				status: 'future',
+				date: {
+					label: 'Missed schedule',
+					date: '2026/01/01 at 9:00 am',
+					missed: true,
+				},
+			} ),
+			context()
+		);
+
+		expect( row.children[ 4 ].innerHTML ).toBe(
+			'<strong class="error-message">Missed schedule</strong><br>2026/01/01 at 9:00 am'
+		);
+	} );
+
 	it( 'keeps the tree’s place when nothing is opened', () => {
 		expect( placeUrl( PLACE, 0 ) ).toBe( PLACE );
 		expect( placeUrl( PLACE, 9 ) ).toBe(
@@ -2954,6 +3283,34 @@ export function viewSubpagesLabel( count, capped, title ) {
 		title
 	);
 }
+
+/**
+ * A loaded row's description, as core gives its own rows: "Child of About".
+ *
+ * @param {string} title The parent page's title.
+ * @return {string} Description.
+ */
+export function childOfLabel( title ) {
+	return sprintf(
+		/* translators: %s: parent page title. */
+		__( 'Child of %s', 'hierarchy-guard' ),
+		title
+	);
+}
+
+/**
+ * Core's lock notice on a row: "Priya is currently editing".
+ *
+ * @param {string} name The display name of the user holding the lock.
+ * @return {string} Notice.
+ */
+export function lockedLabel( name ) {
+	return sprintf(
+		/* translators: %s: user's display name. */
+		__( '%s is currently editing', 'hierarchy-guard' ),
+		name
+	);
+}
 ```
 
 Create `src/tree/rows.js`:
@@ -2964,6 +3321,8 @@ Create `src/tree/rows.js`:
  */
 import { addQueryArgs } from '@wordpress/url';
 import {
+	childOfLabel,
+	lockedLabel,
 	subpagesLabel,
 	treeRowLabels,
 	viewSubpagesLabel,
@@ -3063,7 +3422,8 @@ function rowActions( doc, actions ) {
 }
 
 /**
- * The title cell's content: the title, its status, and its row actions.
+ * The title cell's content as core prints it: the edit lock, the title with
+ * its "Child of" description and its post states, and the row actions.
  *
  * @param {Document} doc     The document.
  * @param {Object}   child   The subpage from the route.
@@ -3073,18 +3433,66 @@ function rowActions( doc, actions ) {
 function titleContent( doc, child, context ) {
 	const labels = treeRowLabels( child.title );
 	const out = doc.createDocumentFragment();
+	const described = `post-hierarchy-${ child.id }`;
+	if ( child.edit_link ) {
+		// Core's lock notice, which its heartbeat fills when another user starts editing.
+		const lock = el( doc, 'div', 'locked-info' );
+		lock.appendChild( el( doc, 'span', 'locked-avatar' ) );
+		lock.appendChild( doc.createTextNode( ' ' ) );
+		lock.appendChild(
+			el(
+				doc,
+				'span',
+				'locked-text',
+				child.locked_by ? lockedLabel( child.locked_by ) : ''
+			)
+		);
+		out.appendChild( lock );
+	}
 	const strong = el( doc, 'strong' );
 	if ( child.edit_link ) {
 		const title = link( doc, child.edit_link, child.title );
 		title.className = 'row-title';
 		strong.appendChild( title );
+		if ( context.parentTitle ) {
+			title.setAttribute( 'aria-describedby', described );
+			const description = el(
+				doc,
+				'span',
+				'hidden',
+				childOfLabel( context.parentTitle )
+			);
+			description.id = described;
+			strong.appendChild( description );
+		}
 	} else {
-		strong.appendChild( el( doc, 'span', '', child.title ) );
+		const title = el( doc, 'span', '', child.title );
+		if ( context.parentTitle ) {
+			const description = el(
+				doc,
+				'span',
+				'screen-reader-text',
+				` (${ childOfLabel( context.parentTitle ) })`
+			);
+			description.id = described;
+			title.appendChild( description );
+		}
+		strong.appendChild( title );
 	}
-	if ( 'publish' !== child.status ) {
+	const states =
+		child.states ||
+		( 'publish' !== child.status ? [ child.status_label ] : [] );
+	if ( states.length ) {
 		strong.appendChild( doc.createTextNode( ' — ' ) );
-		strong.appendChild(
-			el( doc, 'span', 'post-state', child.status_label )
+		states.forEach( ( state, index ) =>
+			strong.appendChild(
+				el(
+					doc,
+					'span',
+					'post-state',
+					state + ( index < states.length - 1 ? ', ' : '' )
+				)
+			)
 		);
 	}
 	out.appendChild( strong );
@@ -3223,7 +3631,11 @@ function fill( doc, cell, column, child, context ) {
 			);
 		}
 	} else if ( 'date' === column && child.date ) {
-		cell.appendChild( doc.createTextNode( child.date.label ) );
+		cell.appendChild(
+			child.date.missed
+				? el( doc, 'strong', 'error-message', child.date.label )
+				: doc.createTextNode( child.date.label )
+		);
 		cell.appendChild( el( doc, 'br' ) );
 		cell.appendChild( doc.createTextNode( child.date.date ) );
 	}
@@ -3236,7 +3648,7 @@ function fill( doc, cell, column, child, context ) {
  *
  * @param {HTMLTableRowElement} template A row core printed.
  * @param {Object}              child    The subpage from the route.
- * @param {Object}              context  Where it goes: level (from 0), parent, page, position and setsize (or null), place, type.
+ * @param {Object}              context  Where it goes: level (from 0), parent, parentTitle, page, position and setsize (or null), place, type.
  * @return {HTMLTableRowElement} Row.
  */
 export function childRow( template, child, context ) {
@@ -3244,7 +3656,8 @@ export function childRow( template, child, context ) {
 	const row = el(
 		doc,
 		'tr',
-		`level-${ context.level } status-${ child.status } hierarchy-guard-loaded`
+		`level-${ context.level } status-${ child.status } hierarchy-guard-loaded` +
+			( child.locked_by ? ' wp-locked' : '' )
 	);
 	row.id = `post-${ child.id }`;
 	Array.from( template.children ).forEach( ( source ) => {
@@ -3259,6 +3672,10 @@ export function childRow( template, child, context ) {
 		const column = Array.from( source.classList )
 			.find( ( name ) => name.startsWith( 'column-' ) )
 			?.slice( 'column-'.length );
+		if ( 'title' === column && source.hasAttribute( 'aria-label' ) ) {
+			// WordPress 7.1 names the row by its title alone.
+			cell.setAttribute( 'aria-label', child.title );
+		}
 		fill( doc, cell, column || '', child, context );
 		row.appendChild( cell );
 	} );
@@ -3291,7 +3708,7 @@ export function statusRow( template, parent, level ) {
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `npm run test:js`, then `npm run lint:js`
-Expected: 95 tests pass; lint exits 0 (`npx wp-scripts lint-js src --fix` first if Prettier reports formatting).
+Expected: 99 tests pass; lint exits 0 (`npx wp-scripts lint-js src --fix` first if Prettier reports formatting).
 
 - [ ] **Step 6: Commit**
 
@@ -3305,13 +3722,13 @@ git commit -m "feat: a subpage the tree loads gets a row with the list's columns
 **Files:**
 - Modify: `src/common/copy.js` (`treeToggleLabel()`, `treeShownLine()`, `treeCappedSentence()`)
 - Create: `src/tree/tree.js`, `src/tree/index.js`
-- Modify: `src/list-table/index.js` (calls `bindTree()`), `src/list-table/list-table.scss` (the indent and the toggle)
+- Modify: `src/list-table/index.js` (calls `bindTree()`), `src/list-table/list-table.scss` (the indent of titles and status rows, the toggle, the phone step)
 - Test: `src/tree/test/tree.test.js`, `src/common/test/copy.test.js`
 
 **Interfaces:**
 - Consumes: `childRow()`, `statusRow()`, `PER_PAGE` (Task 6); `fetchHierarchy( id, page, perPage )` (Task 1); the markup of Task 4; the list's trash dialog, which `src/list-table/index.js` already opens for any `#the-list .row-actions .trash a` whose row's `.hierarchy-guard-cell` has `data-children` above 0.
 - Produces (copy): `treeToggleLabel( open: boolean, title: string ): string`, `treeShownLine( shown: number, total: number, capped = false ): string`, `treeCappedSentence( cap: number ): string`.
-- Produces (tree): `createTree( { body, data, cap, fetchChildren } ): {expand, collapse, toggle, collapseAll, load}|null`; `levelOf( row ): number` (from 1), `descendantsOf( row ): HTMLTableRowElement[]`, `parentOf( row ): HTMLTableRowElement|null`. `toggle()` and `expand()` return a promise that settles when the load does.
+- Produces (tree): `createTree( { body, data, cap, fetchChildren } ): {expand, collapse, toggle, collapseAll, load}|null`; `levelOf( row ): number` (from 1), `descendantsOf( row ): HTMLTableRowElement[]`, `parentOf( row ): HTMLTableRowElement|null`. `toggle()` and `expand()` return a promise that settles when the load does. Show more keeps its row while it loads (`aria-busy`, the button `aria-disabled`) and gives the keyboard to the first new row; a failed load turns its status row into `.hierarchy-guard-failed` with "The subpages couldn’t be loaded." and a "Try again" button, and gives the keyboard back to the opened row's toggle; closing rows hands the tab stop to the closed row, and Collapse all leaves one; "N of M subpages shown" is spoken only when some are held back; the closed arrow follows `isRTL()`; Up, Down, Left, Home and End work from a status row's button too.
 - Produces (index): `bindTree( doc = window.document, loadKin = ( id, page ) => fetchHierarchy( id, page, 50 ) ): Object|null`, which also moves "Back to the tree" into core's search subtitle and turns `a.hierarchy-guard-collapse` into a `button-link`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -3323,6 +3740,8 @@ Create `src/tree/test/tree.test.js`:
  * The tree grid on core's list table.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { speak } from '@wordpress/a11y';
+import { setLocaleData } from '@wordpress/i18n';
 import bindTree from '..';
 import { child, coreRow, mountScreen, page } from './fixture';
 
@@ -3333,6 +3752,12 @@ const press = ( target, key ) =>
 		new window.KeyboardEvent( 'keydown', { key, bubbles: true } )
 	);
 const settle = () => new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
+const tabStops = () =>
+	rows()
+		.filter( ( item ) => 0 === item.tabIndex )
+		.map( ( item ) => item.id );
+
+vi.mock( '@wordpress/a11y', () => ( { speak: vi.fn() } ) );
 
 /**
  * Company (3 subpages), Contact, Locations (128 subpages) on page 2 of the top level.
@@ -3588,16 +4013,158 @@ describe( 'the tree grid', () => {
 		expect( document.activeElement ).toBe( link );
 	} );
 
-	it( 'says when the subpages could not be loaded', async () => {
-		const tree = bindTree( document, () => Promise.reject( new Error() ) );
+	it( 'says when the subpages could not be loaded, and tries again without closing', async () => {
+		const load = vi
+			.fn()
+			.mockRejectedValueOnce( new Error() )
+			.mockResolvedValue( page( [ child( 5, 'About' ) ], 1 ) );
+		const tree = bindTree( document, load );
+		const toggleButton = row( 4 ).querySelector(
+			'.hierarchy-guard-toggle'
+		);
+		toggleButton.focus();
 
 		await tree.toggle( row( 4 ) );
 
 		expect( rows()[ 1 ].textContent ).toBe(
-			'The subpages couldn’t be loaded.'
+			'The subpages couldn’t be loaded. Try again'
 		);
+		expect( rows()[ 1 ].getAttribute( 'aria-level' ) ).toBe( '2' );
+		expect( document.activeElement ).toBe( toggleButton );
+		expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+
+		rows()[ 1 ].querySelector( 'button' ).click();
+		await settle();
+
+		expect( rows().map( ( item ) => item.id ) ).toEqual( [
+			'post-4',
+			'post-5',
+			'post-8',
+			'post-9',
+		] );
+		expect( document.activeElement ).toBe( row( 5 ) );
+	} );
+
+	it( 'keeps the keyboard on Show more while it loads, and keeps the rows when it fails', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		let fail;
+		fetchChildren.mockImplementationOnce(
+			() =>
+				new Promise( ( resolve, reject ) => {
+					fail = reject;
+				} )
+		);
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+
+		more.click();
+
+		expect( document.activeElement ).toBe( more );
+		expect( more.getAttribute( 'aria-disabled' ) ).toBe( 'true' );
+		expect(
+			document
+				.querySelector( '.hierarchy-guard-more' )
+				.getAttribute( 'aria-busy' )
+		).toBe( 'true' );
+
+		fail( new Error() );
+		await settle();
+
+		expect(
+			rows().filter( ( item ) => item.id.startsWith( 'post-10' ) )
+		).toHaveLength( 50 );
+		expect( document.activeElement ).toBe(
+			row( 9 ).querySelector( '.hierarchy-guard-toggle' )
+		);
+		const failure = document.querySelector( '.hierarchy-guard-failed' );
+		failure.querySelector( 'button' ).click();
+		await settle();
+		expect( fetchChildren ).toHaveBeenLastCalledWith( 9, 2 );
+		expect( row( 1050 ) ).not.toBe( null );
+		expect( document.querySelector( '.hierarchy-guard-failed' ) ).toBe(
+			null
+		);
+	} );
+
+	it( 'moves the tab stop to the closed row when its subpages go', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 4 ) );
+		await tree.toggle( row( 5 ) );
+		row( 6 ).focus();
+		row( 6 ).blur();
+		expect( tabStops() ).toEqual( [ 'post-6' ] );
+
 		tree.toggle( row( 4 ) );
-		expect( rows() ).toHaveLength( 3 );
+
+		expect( tabStops() ).toEqual( [ 'post-4' ] );
+	} );
+
+	it( 'leaves a tab stop after Collapse all', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		row( 1003 ).focus();
+		row( 1003 ).blur();
+
+		tree.collapseAll();
+
+		expect( tabStops() ).toEqual( [ 'post-9' ] );
+	} );
+
+	it( 'moves to the first and last rows with Home and End', () => {
+		bindTree( document, fetchChildren );
+		row( 8 ).focus();
+
+		press( row( 8 ), 'End' );
+		expect( document.activeElement ).toBe( row( 9 ) );
+
+		press( row( 9 ), 'Home' );
+		expect( document.activeElement ).toBe( row( 4 ) );
+	} );
+
+	it( 'moves between rows from the Show more button', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+
+		press( more, 'ArrowUp' );
+		expect( document.activeElement ).toBe( row( 1049 ) );
+
+		document.querySelector( '.hierarchy-guard-more button' ).focus();
+		press(
+			document.querySelector( '.hierarchy-guard-more button' ),
+			'ArrowLeft'
+		);
+		expect( document.activeElement ).toBe( row( 9 ) );
+	} );
+
+	it( 'says how many are shown only when some are held back', async () => {
+		const tree = bindTree( document, fetchChildren );
+		speak.mockClear();
+
+		await tree.toggle( row( 4 ) );
+		expect( speak ).not.toHaveBeenCalled();
+
+		await tree.toggle( row( 9 ) );
+		expect( speak ).toHaveBeenCalledWith(
+			'50 of 128 subpages shown',
+			'polite'
+		);
+	} );
+
+	it( 'points a closed toggle toward the title right to left', () => {
+		setLocaleData( { 'text direction\u0004ltr': [ 'rtl' ] } );
+		try {
+			bindTree( document, fetchChildren );
+
+			expect(
+				row( 4 ).querySelector( '.hierarchy-guard-toggle .dashicons' )
+					.className
+			).toBe( 'dashicons dashicons-arrow-left-alt2' );
+		} finally {
+			setLocaleData( { 'text direction\u0004ltr': [ 'ltr' ] } );
+		}
 	} );
 
 	it( 'shows a row once whatever the clicks while it loads', async () => {
@@ -3881,7 +4448,7 @@ Create `src/tree/tree.js`:
  * a time with "Show more", and "Collapse all", which needs no request.
  */
 import { speak } from '@wordpress/a11y';
-import { __ } from '@wordpress/i18n';
+import { __, isRTL } from '@wordpress/i18n';
 import {
 	treeCappedSentence,
 	treeShownLine,
@@ -3890,7 +4457,15 @@ import {
 import { PER_PAGE, childRow, statusRow } from './rows';
 
 const OPEN = 'dashicons-arrow-down-alt2';
-const CLOSED = 'dashicons-arrow-right-alt2';
+const RIGHT = 'dashicons-arrow-right-alt2';
+const LEFT = 'dashicons-arrow-left-alt2';
+
+/**
+ * The closed toggle's arrow, pointing along the line toward the title.
+ *
+ * @return {string} Dashicon class.
+ */
+const closed = () => ( isRTL() ? LEFT : RIGHT );
 
 /**
  * A row's level, from 1.
@@ -3983,6 +4558,16 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	const isTreeRow = ( row ) => idOf( row ) > 0;
 
 	/**
+	 * Makes a row the one Tab reaches.
+	 *
+	 * @param {HTMLTableRowElement} row Row.
+	 */
+	const setTabStop = ( row ) =>
+		rows().forEach( ( other ) =>
+			other.setAttribute( 'tabindex', other === row ? '0' : '-1' )
+		);
+
+	/**
 	 * Moves the keyboard to a row, which becomes the one Tab reaches.
 	 *
 	 * @param {HTMLTableRowElement|null} row Row.
@@ -3991,9 +4576,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		if ( ! row ) {
 			return;
 		}
-		rows().forEach( ( other ) =>
-			other.setAttribute( 'tabindex', other === row ? '0' : '-1' )
-		);
+		setTabStop( row );
 		row.focus();
 	};
 
@@ -4006,8 +4589,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 				treeToggleLabel( open, button.dataset.title )
 			);
 			const icon = button.querySelector( '.dashicons' );
-			icon.classList.toggle( OPEN, open );
-			icon.classList.toggle( CLOSED, ! open );
+			icon.classList.remove( OPEN, RIGHT, LEFT );
+			icon.classList.add( open ? OPEN : closed() );
 		}
 	};
 
@@ -4076,7 +4659,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	};
 
 	/**
-	 * "Show more" under an opened row, or the cap's sentence past it.
+	 * "Show more" under an opened row, or the cap's sentence past it. While
+	 * the next page loads the row stays, busy, so the keyboard stays on it.
 	 *
 	 * @param {HTMLTableRowElement} row     The opened row.
 	 * @param {number}              next    The next page of its subpages.
@@ -4086,25 +4670,72 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 */
 	const addMore = ( row, next, total, capped, hasMore ) => {
 		if ( hasMore ) {
-			const { row: more, cell } = addStatus( row );
-			more.classList.add( 'hierarchy-guard-more' );
+			const status = addStatus( row );
+			status.row.classList.add( 'hierarchy-guard-more' );
 			const button = doc.createElement( 'button' );
 			button.type = 'button';
 			button.className = 'button-link';
 			button.textContent = __( 'Show more', 'hierarchy-guard' );
 			button.addEventListener( 'click', () => {
-				more.remove();
-				load( row, next, true );
+				if ( loading.has( idOf( row ) ) ) {
+					return;
+				}
+				button.setAttribute( 'aria-disabled', 'true' );
+				load( row, next, true, status );
 			} );
-			cell.appendChild( button );
+			status.cell.appendChild( button );
 			const line = doc.createElement( 'span' );
 			line.textContent =
 				' · ' + treeShownLine( shownUnder( row ), total, capped );
-			cell.appendChild( line );
+			status.cell.appendChild( line );
 		} else if ( capped ) {
 			const { row: end, cell } = addStatus( row );
 			end.classList.add( 'hierarchy-guard-capped' );
 			cell.textContent = treeCappedSentence( cap );
+		}
+	};
+
+	/**
+	 * Says a load failed, in its status row, with a button to try again
+	 * without closing the row, and gives the keyboard back to the toggle.
+	 *
+	 * @param {HTMLTableRowElement}                                    row    The opened row.
+	 * @param {number}                                                 page   The page that failed.
+	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} status Its status row.
+	 */
+	const failed = ( row, page, status ) => {
+		const here =
+			doc.activeElement === doc.body ||
+			status.row.contains( doc.activeElement ) ||
+			row.contains( doc.activeElement );
+		status.row.removeAttribute( 'aria-busy' );
+		status.row.classList.remove( 'hierarchy-guard-more' );
+		status.row.classList.add( 'hierarchy-guard-failed' );
+		status.cell.textContent = __(
+			'The subpages couldn’t be loaded.',
+			'hierarchy-guard'
+		);
+		status.cell.appendChild( doc.createTextNode( ' ' ) );
+		const retry = doc.createElement( 'button' );
+		retry.type = 'button';
+		retry.className = 'button-link';
+		retry.textContent = __( 'Try again', 'hierarchy-guard' );
+		retry.addEventListener( 'click', () => {
+			if ( ! loading.has( idOf( row ) ) ) {
+				retry.setAttribute( 'aria-disabled', 'true' );
+				load( row, page, true, status );
+			}
+		} );
+		status.cell.appendChild( retry );
+		speak(
+			__( 'The subpages couldn’t be loaded.', 'hierarchy-guard' ),
+			'assertive'
+		);
+		if ( here ) {
+			setTabStop( row );
+			(
+				row.querySelector( 'button.hierarchy-guard-toggle' ) || row
+			).focus();
 		}
 	};
 
@@ -4133,30 +4764,33 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	/**
 	 * Loads one page of a row's subpages under it.
 	 *
-	 * @param {HTMLTableRowElement} row       The opened row.
-	 * @param {number}              page      Page of its subpages, from 1.
-	 * @param {boolean}             moveFocus Whether the first new row takes the keyboard.
+	 * @param {HTMLTableRowElement}                                         row       The opened row.
+	 * @param {number}                                                      page      Page of its subpages, from 1.
+	 * @param {boolean}                                                     moveFocus Whether the first new row takes the keyboard.
+	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}|null} reuse     The Show more or failure row to keep while it loads.
 	 * @return {Promise<void>} Done.
 	 */
-	const load = async ( row, page, moveFocus = false ) => {
+	const load = async ( row, page, moveFocus = false, reuse = null ) => {
 		const id = idOf( row );
 		if ( loading.has( id ) ) {
 			return;
 		}
 		loading.add( id );
-		const status = addStatus( row );
+		const status = reuse || addStatus( row );
 		status.row.setAttribute( 'aria-busy', 'true' );
-		status.cell.textContent = __( 'Loading subpages…', 'hierarchy-guard' );
+		if ( ! reuse ) {
+			status.cell.textContent = __(
+				'Loading subpages…',
+				'hierarchy-guard'
+			);
+		}
 		let result;
 		try {
 			result = await fetchChildren( id, page );
 		} catch {
-			status.row.removeAttribute( 'aria-busy' );
-			status.cell.textContent = __(
-				'The subpages couldn’t be loaded.',
-				'hierarchy-guard'
-			);
-			speak( status.cell.textContent, 'assertive' );
+			if ( status.row.isConnected ) {
+				failed( row, page, status );
+			}
 			return;
 		} finally {
 			loading.delete( id );
@@ -4173,6 +4807,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			const node = childRow( template, child, {
 				level: levelOf( row ),
 				parent: id,
+				parentTitle: titleOf( row ),
 				page,
 				position: result.children_capped
 					? null
@@ -4196,14 +4831,17 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			result.children_capped,
 			result.has_more
 		);
-		speak(
-			treeShownLine(
-				shownUnder( row ),
-				result.children_total,
-				result.children_capped
-			),
-			'polite'
-		);
+		if ( result.has_more || result.children_capped ) {
+			// Said only when some are held back; a row opened in full needs no count.
+			speak(
+				treeShownLine(
+					shownUnder( row ),
+					result.children_total,
+					result.children_capped
+				),
+				'polite'
+			);
+		}
 		if ( moveFocus ) {
 			focus( first || row );
 		}
@@ -4225,10 +4863,16 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		const lost = under.some( ( other ) =>
 			other.contains( doc.activeElement )
 		);
+		const held = under.some(
+			( other ) => '0' === other.getAttribute( 'tabindex' )
+		);
 		under.forEach( ( other ) => other.remove() );
 		setOpen( row, false );
 		if ( lost ) {
 			focus( row );
+		} else if ( held ) {
+			// The row that Tab reached is gone: the closed row takes it.
+			setTabStop( row );
 		}
 	};
 
@@ -4245,6 +4889,11 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 					collapse( row );
 				}
 			} );
+		if (
+			! rows().some( ( row ) => '0' === row.getAttribute( 'tabindex' ) )
+		) {
+			setTabStop( rows()[ 0 ] );
+		}
 	};
 
 	// The rows core printed, with the levels the server opened.
@@ -4308,9 +4957,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			row.parentNode === body &&
 			'0' !== row.getAttribute( 'tabindex' )
 		) {
-			rows().forEach( ( other ) =>
-				other.setAttribute( 'tabindex', other === row ? '0' : '-1' )
-			);
+			setTabStop( row );
 		}
 	} );
 
@@ -4320,7 +4967,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			! row ||
 			row.parentNode !== body ||
 			( event.target !== row &&
-				! event.target.classList.contains( 'hierarchy-guard-toggle' ) )
+				! event.target.classList.contains( 'hierarchy-guard-toggle' ) &&
+				! event.target.closest( '.hierarchy-guard-status' ) )
 		) {
 			return;
 		}
@@ -4491,6 +5139,8 @@ with:
 
 // The Tree view: each level indents its title by one step, and a row's
 // toggle sits in the step before its title, so titles line up by level.
+// A status row (Show more, loading, a failure, the cap) lines up with the
+// titles of the subpages it is about.
 .hierarchy-guard-tree-view #the-list {
 
 	.column-title {
@@ -4498,7 +5148,8 @@ with:
 	}
 
 	@for $level from 1 through 20 {
-		.level-#{$level} .column-title {
+		.level-#{$level} .column-title,
+		.level-#{$level}.hierarchy-guard-status > .colspanchange {
 			padding-inline-start: 34px + 24px * $level;
 		}
 	}
@@ -4511,12 +5162,27 @@ with:
 		text-decoration: none;
 	}
 }
+
+// On a phone, at core's own breakpoint, the step halves and the indent
+// stops at half the row, so a deep title keeps its room.
+@media screen and (max-width: 782px) {
+
+	.hierarchy-guard-tree-view #the-list {
+
+		@for $level from 1 through 20 {
+			.level-#{$level} .column-title,
+			.level-#{$level}.hierarchy-guard-status > .colspanchange {
+				padding-inline-start: min(#{34px + 12px * $level}, 50%);
+			}
+		}
+	}
+}
 ```
 
 - [ ] **Step 6: Run the tests and the build**
 
 Run: `npm run test:js`, `npm run lint:js`, `npm run lint:style`, `npm run build`
-Expected: 116 tests pass; both lints exit 0; webpack compiles `build/list-table.js`, `build/list-table.css` and `build/list-table-rtl.css`.
+Expected: 127 tests pass; both lints exit 0; webpack compiles `build/list-table.js`, `build/list-table.css` and `build/list-table-rtl.css`.
 
 - [ ] **Step 7: Commit**
 
@@ -4542,36 +5208,40 @@ with:
 
 ```markdown
 - **Pages list.** A Hierarchy column shows each page's parent and its number of subpages. The number, and the "View subpages" row action, narrow the list to that page's subtree; the heading then says which subtree is shown, with each ancestor one click away. Large subtrees list their first 1,000 pages.
-- **Tree view.** "Tree" in the list's views row shows the top-level pages, 20 to a page as the list pages them. A page with subpages has a toggle that opens them below it, indented, 50 at a time with "Show more", up to the first 1,000; each level opens the same way, and "Collapse all" closes them. Each row has the list's columns and its Edit, Trash, View and "View subpages" actions; trashing from the tree asks as the list does and comes back to the same place. Arrow keys move between rows and open and close them. A search in the Tree view lists the matching pages at any level with each one's parent pages, and "Back to the tree" returns to it. Without JavaScript a toggle reloads the view opened at that page. The tree has no Quick Edit, checkboxes or bulk actions; use the list for those.
+- **Tree view.** "Tree" in the list's views row shows the top-level pages, 20 to a page as the list pages them. A page with subpages has a toggle that opens them below it, indented, 50 at a time with "Show more", up to the first 1,000; each level opens the same way, and "Collapse all" closes them. Each row has the list's columns and its Edit, Trash, View and "View subpages" actions; trashing from the tree asks as the list does and comes back to the same place. Arrow keys move between rows and open and close them. A search in the Tree view lists the matching pages at any level with each one's parent pages, and "Back to the tree" returns to it. Without JavaScript a toggle reloads the view opened at that page, with only the path down to it shown at the levels above. The tree has no Quick Edit, checkboxes or bulk actions; use the list for those. A page whose parent is in the Trash, missing, or a private page the user can't read is not in the tree, because the tree starts from the top-level pages; the list and a search in the Tree view still show it.
 ```
 
 - [ ] **Step 2: Run every check**
 
 Run: `npm run test:php`, `npx wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard bash -c 'WP_MULTISITE=1 vendor/bin/phpunit'`, `composer lint`, `npm run lint:js`, `npm run lint:style`, `npm run test:js`, `npm run build`
-Expected: 883 PHPUnit tests pass (5 skipped), the same suite passes as multisite, both lints and Stylelint exit 0, 116 Vitest tests pass, and the build compiles.
+Expected: 894 PHPUnit tests pass (5 skipped), the same suite passes as multisite, both lints and Stylelint exit 0, 127 Vitest tests pass, and the build compiles.
 
 - [ ] **Step 3: Live check**
 
-With the build done and the dev site at http://localhost:8898 (admin / password), snapshot the `_hierarchy_guard_%` meta rows and the `hierarchy_guard_*` options (`wp option get <name> --format=json`), and note whether the admin user has an `edit_page_per_page` meta row. Create the test pages with WP-CLI (`npx wp-env run cli wp eval '…'`): "HGP5 Root" (`hgp5-root`, top level) with 60 subpages "HGP5 Child 01" to "HGP5 Child 60" (`hgp5-c01` … `hgp5-c60`, Child 07 a draft), "HGP5 Grand 1" and "HGP5 Grand 2" under Child 02, "HGP5 Great" under Grand 1, "HGP5 Late" under Child 55, and a top-level "HGP5 Solo".
+With the build done and the dev site at http://localhost:8898 (admin / password), snapshot the `_hierarchy_guard_%` meta rows and the `hierarchy_guard_*` options (`wp option get <name> --format=json`), and note whether the admin user has an `edit_page_per_page` meta row. Create the test pages with WP-CLI (`npx wp-env run cli wp eval '…'`): "HGP5 Root" (`hgp5-root`, top level) with 60 subpages "HGP5 Child 01" to "HGP5 Child 60" (`hgp5-c01` … `hgp5-c60`; Child 07 a draft, Child 08 private, Child 09 password protected), "HGP5 Grand 1" and "HGP5 Grand 2" under Child 55, "HGP5 Great" under Grand 1, and a top-level "HGP5 Solo".
 
 Without JavaScript (curl with a cookie jar: GET `/wp-login.php`, then POST `log=admin&pwd=password&testcookie=1`):
 
 1. `edit.php?post_type=page&hierarchy_guard_view=tree`: the views row ends `… | Tree` with Tree `current`; the table has no checkbox column and no Quick Edit; only top-level pages are rows, each `level-0`; the Hierarchy cell holds the toggle link (`hierarchy_guard_open=<id>`) and the count, no parent; Collapse all is above the table; the body has `hierarchy-guard-tree-view`.
-2. `…&hierarchy_guard_open=<Child 02>`: HGP5 Root's first 50 subpages follow it (`level-1`), Grand 1 and Grand 2 follow Child 02 (`level-2`); Root's cell has "Show more" linking to `…&hierarchy_guard_open=<Root>&hierarchy_guard_children_page=2`; every Trash link's `_wp_http_referer` is the view opened at the row's parent.
-3. `…&hierarchy_guard_open=<Child 55>`: Root shows its second page (Child 51 to 60), with Late under Child 55.
-4. `…&hierarchy_guard_children_page=2` on Root: Child 51 to 60, positions 51 to 60.
-5. Search `s=HGP5 Gr` in the view: a flat list of Grand 1, Grand 2 and Great, each with its parent path ("HGP5 Root › HGP5 Child 02", every ancestor linked to `hierarchy_guard_under=<id>`), "Back to the tree" in the table navigation, no Collapse all.
-6. Trash Child 03 through its link: core redirects to `…&hierarchy_guard_view=tree&hierarchy_guard_open=<Root>&trashed=1&ids=<Child 03>`. With Number of items set to 2 (`wp user meta update 1 edit_page_per_page 2`), trash HGP5 Solo from page 2: the redirect keeps `paged=2`; the Undo link, requested with that page as its referrer (`curl -e`), redirects to `…&paged=2&untrashed=1`. Delete the `edit_page_per_page` meta row again (`wp user meta delete 1 edit_page_per_page`) unless it was there before.
+2. `…&hierarchy_guard_open=<Great>`: the rows are the top level with only the path down: HGP5 Root, Child 55 (`level-1`, position 55 of 60, on page 2), Grand 1 (`level-2`), Great (`level-3`); no other subpage of Root or of Child 55 is a row. Child 55's Trash link's `_wp_http_referer` opens Root at `hierarchy_guard_children_page=2`.
+3. `…&hierarchy_guard_open=<Root>`: Root's first 50 subpages follow it, and its cell has "Show more" linking to `…&hierarchy_guard_open=<Root>&hierarchy_guard_children_page=2`, which shows Child 51 to 60.
+4. Search `s=HGP5 Gr` in the view: a flat list of Grand 1, Grand 2 and Great, each with its parent path ("HGP5 Root › HGP5 Child 55", every ancestor linked to `hierarchy_guard_under=<id>`) after "Parent pages:", "Back to the tree" in the table navigation, no Collapse all, and core's Trash links without `_wp_http_referer`.
+5. Trash a subpage through its link from an opened Root: core redirects to `…&hierarchy_guard_view=tree&hierarchy_guard_open=<Root>&trashed=1&ids=<id>`.
+6. Create a top-level "ZZ HGP5 Zed", set Number of items to 6 (`wp user meta update 1 edit_page_per_page 6`) so Zed is alone on page 2, and trash it from there: the trash redirects to `…&paged=2&trashed=1&ids=<Zed>`, and that page redirects to `…&paged=1&trashed=1&ids=<Zed>`. With the same setting, trash a top-level test page from page 2 while page 2 still has rows: the Undo link, requested with that page as its referrer (`curl -e`), redirects to `…&paged=2&untrashed=1`. Delete the `edit_page_per_page` meta row again unless it was there before.
+7. `/?post_type[]=post&post_type[]=page` on the front end answers 200 with no "Array to string conversion" in the debug log.
 
 With JavaScript, in a browser:
 
-7. The table is `role="treegrid"`, each top-level row `aria-level="1"` with `aria-posinset` and `aria-setsize` from core's item count, rows with subpages `aria-expanded="false"`; the toggle is a `button-link` with an arrow before the title, on the title's line.
-8. Click HGP5 Root's toggle: 50 subpages load under it, indented one step, each with Title, Hierarchy, Author and Date and the actions Edit | Trash | View (| View subpages); the last row says "Show more · 50 of 59 subpages shown" (Child 03 is in the Trash). Show more loads the rest and moves the keyboard to the first new row. Open Child 02 and Grand 1: each level indents one more step.
-9. Collapse all closes every open row with no network request.
-10. Keys: focus a row; Down and Up move between rows; Right opens a closed row, then moves into its first subpage; Left moves to the parent, then closes it.
-11. Trash Child 02 (2 subpages) from its loaded row: the list's dialog opens with its sentence and Other options; Move to Trash reloads the view opened at HGP5 Root with core's notice, and the script keeps the server's open rows open. Undo restores it and lands on the same view.
-12. Search "HGP5 Gr" in the view: "Search results for: HGP5 Gr · Back to the tree" beside the heading.
-13. The console shows no errors from the plugin's script.
+8. The table is `role="treegrid"`, each top-level row `aria-level="1"` with `aria-posinset` and `aria-setsize` from core's item count, rows with subpages `aria-expanded="false"`; the toggle is a `button-link` with an arrow before the title, on the title's line.
+9. Click HGP5 Root's toggle: 50 subpages load under it, indented one step, each with Title, Hierarchy, Author and Date, the actions Edit | Trash | View (| View subpages), the title cell's `aria-label` (WordPress 7.1), core's `.locked-info`, the "Child of HGP5 Root" description, and the states " — Draft", " — Private" (with View) and " — Password protected". The last row, indented like the titles, says "Show more · 50 of 60 subpages shown". Focus Show more and press it: the keyboard stays on it while it loads, then moves to the first new row.
+10. With an `apiFetch` middleware that fails once (`wp.apiFetch.use()` in the console), close and reopen Root: the status row says "The subpages couldn’t be loaded. Try again", the keyboard is back on Root's toggle, and Try again loads the 50 rows without closing Root.
+11. Focus a loaded row and press Collapse all: no network request, and Root is the row Tab reaches.
+12. Keys: Down and Up move between rows, from the Show more button too; Home and End go to the first and last rows; Right opens a closed row, then moves into its first subpage; Left moves to the parent, then closes it.
+13. Trash a loaded subpage that has subpages: the list's dialog opens with its sentence and Other options; Move to Trash reloads the view opened at its parent with core's notice, and the script keeps the server's open rows open. Undo restores it and lands on the same view.
+14. Search "HGP5 Gr" in the view: "Search results for: HGP5 Gr · Back to the tree" beside the heading.
+15. Right to left: with a temporary must-use plugin that sets `$wp_locale->text_direction` to `rtl` and translates `ltr` in the "text direction" context to `rtl` (behind a cookie), load `…&hierarchy_guard_open=<Great>`: the document is `dir="rtl"`, the indent is on the right, and closed toggles point left, toward their titles, before and after the script opens and closes a row. Delete the must-use plugin and the cookie.
+16. At 500 pixels wide the indent steps by 12 pixels a level.
+17. The console shows no errors from the plugin's script.
 
 Afterwards delete every `hgp5-` page for good, deepest first (`wp eval` with `wp_delete_post( $id, true )` sorted by ancestor count, so no deletion moves a subpage), delete the `hierarchy_guard_change_1` transient, and delete the `edit_page_per_page` meta row if it wasn't there before. The meta rows and options must match the snapshot.
 
@@ -4584,13 +5254,13 @@ git commit -m "docs: describe the Tree view"
 
 ## Self-Review
 
-**Spec coverage.** "Tree" in the views row at `edit.php?post_type=page&hierarchy_guard_view=tree` on every supported type, core's own list table on the same screen: Task 2 (`views()`, `load()` on `load-edit.php` for the screen's type). The top level from core's query with `post_parent` 0, 20 to a page by Number of items, in menu order then title as an array, so paging, sorting by a column and the item count are core's: Task 2 (`filter_request()`, `test_core_s_list_query_pages_the_top_level_and_never_reads_every_child_of_0`). A disclosure toggle on a row with subpages, only where the user may edit, opening its direct subpages below it indented one level, 50 at a time from the route's children paging in menu order then title: Tasks 1, 4 and 7. "Show more" loading the next 50 up to the cap, then "only the first 1,000 are shown": Tasks 1, 3, 4 and 7. Each level opening the same way: Task 7. Collapse all with no request, no Expand all: Tasks 4 and 7. Every row with Title, Hierarchy, Author and Date; the Hierarchy cell in the tree holding only the count as a link to the subtree: Tasks 4 and 6. Rows carrying Edit, View, Trash and "View subpages", the title linking to Edit: core's rows plus Task 6. Trash opening the list's own dialog and the view reloading in place through `_wp_http_referer`, Undo too: Tasks 5 and 7 and the live check. No Quick Edit, no checkboxes, no bulk actions: Task 2. Nothing growing with a subtree, `Subtree::ordered_children()` never for parent 0, counts in one grouped query, "1,000+" past the cap: Tasks 2, 3 and 4 (`test_opening_a_level_costs_the_same_queries_whatever_its_size`, `test_a_tree_screen_counts_its_opened_levels_in_the_same_one_query`). The flat search with parent paths, each ancestor linking to its subtree, "Back to the tree", one query per level for the ancestors: Tasks 2, 4 and 7. The tree grid: `role="treegrid"`, `aria-level`, `aria-expanded`, `aria-setsize` and `aria-posinset` where known and none past the cap, Up, Down, Right and Left, the toggles as `button-link` buttons: Tasks 3, 4 and 7. Without JavaScript, `hierarchy_guard_open=<id>` putting each opened level's page of 50 after its parent so core prints it with its `level-N` class, each level showing the page of 50 that holds the next one down, "Show more" linking to `hierarchy_guard_children_page=2`, the reload after a trash using the same link: Tasks 3, 4 and 5. The route's `children_per_page` (at most 50), each child's author, date and trash link, `edit_post` on the parent: Task 1. Every supported hierarchical type: `Post_Types::is_supported()` throughout; the tests use pages. Out of scope respected: no Expand all, no Quick Edit, no drag and drop, no DataViews.
+**Spec coverage.** "Tree" in the views row at `edit.php?post_type=page&hierarchy_guard_view=tree` on every supported type, core's own list table on the same screen: Task 2 (`views()`, `load()` on `load-edit.php` for the screen's type). The top level from core's query with `post_parent` 0, 20 to a page by Number of items, in menu order then title as an array, so paging, sorting by a column and the item count are core's: Task 2 (`filter_request()`, `test_core_s_list_query_pages_the_top_level_and_never_reads_every_child_of_0`). A disclosure toggle on a row with subpages, only where the user may edit, opening its direct subpages below it indented one level, 50 at a time from the route's children paging in menu order then title: Tasks 1, 4 and 7. "Show more" loading the next 50 up to the cap, then "only the first 1,000 are shown": Tasks 1, 3, 4 and 7. Each level opening the same way: Task 7. Collapse all with no request, no Expand all: Tasks 4 and 7. Every row with Title, Hierarchy, Author and Date; the Hierarchy cell in the tree holding only the count as a link to the subtree: Tasks 4 and 6. Rows carrying Edit, View, Trash and "View subpages", the title linking to Edit: core's rows plus Task 6. Trash opening the list's own dialog and the view reloading in place through `_wp_http_referer`, Undo too: Tasks 5 and 7 and the live check. No Quick Edit, no checkboxes, no bulk actions: Task 2. Nothing growing with a subtree, `Subtree::ordered_children()` never for parent 0, counts in one grouped query, "1,000+" past the cap: Tasks 2, 3 and 4 (`test_opening_a_level_costs_the_same_queries_whatever_its_size`, `test_a_tree_screen_counts_its_opened_levels_in_the_same_one_query`). The flat search with parent paths, each ancestor linking to its subtree, "Back to the tree", one query per level for the ancestors: Tasks 2, 4 and 7. The tree grid: `role="treegrid"`, `aria-level`, `aria-expanded`, `aria-setsize` and `aria-posinset` where known and none past the cap, Up, Down, Right and Left, the toggles as `button-link` buttons: Tasks 3, 4 and 7. Without JavaScript, `hierarchy_guard_open=<id>` putting the path down to the opened page and its page of 50 after their parents so core prints them with its `level-N` class, each level above showing only the page that leads down, "Show more" linking to `hierarchy_guard_children_page=2`, the reload after a trash using the same link: Tasks 3, 4 and 5. The route's `children_per_page` (at most 50), each child's states, lock, author, date, View and trash links, `edit_post` on the parent: Task 1. Every supported hierarchical type: `Post_Types::is_supported()` throughout; the tests use pages. The audit rulings: the path-only levels without JavaScript (Task 3, `test_a_deep_opened_page_costs_its_depth_plus_one_page`), the pages the tree cannot reach (rulings, spec, README), the date formats' translator comments (Task 1), the front-end guard (Tasks 2 and 3), the page past the last (Task 3), a trash from a search (Task 5), a private page's View (Task 1), the loaded row's label, lock, description, states and missed schedule (Tasks 1 and 6), the status rows' indent, the keyboard on Show more and after a failure, the tab stop after a collapse, Up and Down from a status row, Home and End, the right-to-left arrow, the singular "Parent page:", the spoken count only when some are held back, and the phone step (Tasks 4 and 7). Out of scope respected: no Expand all, no Quick Edit, no drag and drop, no DataViews.
 
 **Placeholder scan.** No TBD or TODO. Every code step carries complete code taken from the verified replay; every command names its expected result.
 
-**Type consistency.** `Tree_View::row()`'s array (`level`, `parent`, `position`, `setsize`, `page`, `open`, `shown`, `more`, `capped`) is built only by `Tree_View::fact()` and `open()`, and read by `List_Table::render_tree_cell()` and `Tree_View::row_actions()`. The cell's `data-*` names (`id`, `children`, `status`, `level`, `parent`, `page`, `position`, `setsize`, `open`) are printed by `render_tree_cell()` and by `rows.js`'s `hierarchyContent()`, and read by `tree.js`'s `place()` and its set-up. `place_url()`'s arguments (`hierarchy_guard_open`, `hierarchy_guard_children_page`) are what `opened()` and `children_page()` read and what `rows.js`'s `placeUrl()` builds. The route's child fields (`author`, `date.label`, `date.date`, `trash_link`, `edit_link`, `view_link`, `children_count`, `children_capped`, `status`, `status_label`) are those `childRow()` reads. `fetchChildren( id, page )` resolves to the route's response (`children`, `children_total`, `children_capped`, `has_more`).
+**Type consistency.** `Tree_View::row()`'s array (`level`, `parent`, `position`, `setsize`, `page`, `open`, `shown`, `more`, `capped`) is built only by `Tree_View::fact()` and `open()`, and read by `List_Table::render_tree_cell()` and `Tree_View::row_actions()`. The cell's `data-*` names (`id`, `children`, `status`, `level`, `parent`, `page`, `position`, `setsize`, `open`) are printed by `render_tree_cell()` and by `rows.js`'s `hierarchyContent()`, and read by `tree.js`'s `place()` and its set-up. `place_url()`'s arguments (`hierarchy_guard_open`, `hierarchy_guard_children_page`) are what `opened()` and `children_page()` read and what `rows.js`'s `placeUrl()` builds. The route's child fields (`states`, `locked_by`, `author`, `date.label`, `date.date`, `date.missed`, `trash_link`, `edit_link`, `view_link`, `children_count`, `children_capped`, `status`, `status_label`) are those `childRow()` reads. `fetchChildren( id, page )` resolves to the route's response (`children`, `children_total`, `children_capped`, `has_more`).
 
-**Review Focus.** All five named tests exist: in Tasks 2, 3, 6 and 7.
+**Review Focus.** All named tests exist: in Tasks 2, 3, 6 and 7.
 
 ## Hand-offs to plan 6 (DataViews and release)
 
