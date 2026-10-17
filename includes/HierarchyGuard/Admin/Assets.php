@@ -160,6 +160,10 @@ final class Assets {
 		$styles = in_array( 'wp-components', $deps, true ) ? [ 'wp-components' ] : [];
 		if ( is_readable( $this->dir . '/build/' . $name . '.css' ) ) {
 			wp_enqueue_style( $handle, plugins_url( 'build/' . $name . '.css', $this->dir . '/hierarchy-guard.php' ), $styles, $version );
+			if ( is_readable( $this->dir . '/build/' . $name . '-rtl.css' ) ) {
+				// The build's mirrored stylesheet, {name}-rtl.css, loads in its place right to left.
+				wp_style_add_data( $handle, 'rtl', 'replace' );
+			}
 		} elseif ( [] !== $styles ) {
 			wp_enqueue_style( 'wp-components' );
 		}
