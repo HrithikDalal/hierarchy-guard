@@ -82,12 +82,23 @@ final class Tree_View {
 		}
 		$view   = isset( $_GET[ self::QUERY_VAR ] ) ? sanitize_key( wp_unslash( $_GET[ self::QUERY_VAR ] ) ) : '';
 		$status = isset( $_GET['post_status'] ) ? sanitize_key( wp_unslash( $_GET['post_status'] ) ) : '';
-		$search = isset( $_GET['s'] ) && is_string( $_GET['s'] ) ? trim( sanitize_text_field( wp_unslash( $_GET['s'] ) ) ) : '';
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		if ( self::VIEW !== $view || List_Table::under() > 0 || ! in_array( $status, [ '', 'all' ], true ) ) {
 			return '';
 		}
-		return '' !== $search ? 'search' : 'tree';
+		return '' !== self::searched() ? 'search' : 'tree';
+	}
+
+	/**
+	 * The search as it was typed, unslashed and trimmed, not sanitized: ''
+	 * for no search. A search that sanitizing empties, as one of tags only,
+	 * is still a search, which finds nothing. It is only compared here.
+	 *
+	 * @return string
+	 */
+	private static function searched(): string {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A read-only list argument, only checked for being empty here and sanitized below.
+		return isset( $_GET['s'] ) && is_string( $_GET['s'] ) ? trim( wp_unslash( $_GET['s'] ) ) : '';
 	}
 
 	/**
@@ -173,6 +184,9 @@ final class Tree_View {
 		}
 		if ( 'tree' === $mode ) {
 			$vars['post_parent'] = 0;
+		} elseif ( '' === trim( sanitize_text_field( self::searched() ) ) ) {
+			// Nothing is left to search for once sanitized: no page matches it, as on the Redirects tab.
+			$vars['post__in'] = [ 0 ];
 		}
 		if ( 'menu_order title' === ( $vars['orderby'] ?? '' ) ) {
 			$vars['orderby'] = [

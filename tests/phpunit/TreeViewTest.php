@@ -223,6 +223,23 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( 20, $vars['posts_per_page'] );
 	}
 
+	public function test_a_search_of_markup_alone_is_a_search_that_finds_nothing(): void {
+		$bold      = self::factory()->post->create(
+			[
+				'post_type'    => 'page',
+				'post_title'   => 'Styled',
+				'post_content' => '<b>Bold</b> words',
+			]
+		);
+		$_GET['s'] = '<b>';
+
+		$this->assertSame( 'search', $this->tree->mode( 'page' ), 'Typed text, even if sanitizing empties it.' );
+		$query = $this->list_query();
+
+		$this->assertSame( [], $query->posts, 'Nothing is left to search for once sanitized, as on the Redirects tab.' );
+		$this->assertNotContains( $bold, wp_list_pluck( $query->posts, 'ID' ) );
+	}
+
 	public function test_other_lists_are_left_alone(): void {
 		$_GET = [ 'post_type' => 'page' ];
 
