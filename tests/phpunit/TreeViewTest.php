@@ -478,6 +478,24 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertCount( 3 + 21, $this->open_levels( [ $this->ids['company'] ], 1 ), 'A page past the end shows the last one.' );
 	}
 
+	public function test_a_later_page_of_subpages_keeps_its_places_among_all_of_them(): void {
+		$this->subpages( $this->ids['team'], 120 );
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['team'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+
+		$second = array_slice( $this->open_levels( [ $this->ids['company'] ], 1 ), 3 );
+		$this->assertCount( 50, $second );
+		$this->assertSame( 51, $this->tree->row( (int) $second[0]->ID )['position'], 'Page 2 starts at the 51st of Team’s 121.' );
+		$this->assertSame( 100, $this->tree->row( (int) $second[49]->ID )['position'] );
+		$this->assertSame( 121, $this->tree->row( (int) $second[49]->ID )['setsize'] );
+		$this->assertSame( 2, $this->tree->row( (int) $second[0]->ID )['page'] );
+
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '3';
+		$third                                = array_slice( $this->open_levels( [ $this->ids['company'] ], 1 ), 3 );
+		$this->assertSame( 101, $this->tree->row( (int) $third[0]->ID )['position'] );
+		$this->assertSame( 121, $this->tree->row( (int) end( $third )->ID )['position'] );
+	}
+
 	public function test_past_the_cap_the_opened_page_says_only_the_first_are_shown(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 60 );
 		$this->subpages( $this->ids['team'], 70 );
