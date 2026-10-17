@@ -445,6 +445,34 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( $one, $fifty, 'Fifty editable rows cost the queries of one: their meta, edit locks included, loads in one query.' );
 	}
 
+	public function test_fifty_children_locked_by_fifty_users_cost_the_queries_of_one_locked_child(): void {
+		global $wpdb;
+		$children = [ $this->ids['history'], $this->ids['team'] ];
+		for ( $i = 1; $i <= 48; $i++ ) {
+			$children[] = $this->page( sprintf( 'locked-%02d', $i ), $this->ids['about'] );
+		}
+		foreach ( $children as $child ) {
+			// Each held by a user of its own, so a user read per row would show.
+			update_post_meta( $child, '_edit_lock', time() . ':' . self::factory()->user->create( [ 'role' => 'editor' ] ) );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertNotNull( $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'][0]['locked_by'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries  = $wpdb->num_queries;
+		$children = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'];
+		$fifty    = $wpdb->num_queries - $queries;
+
+		$this->assertCount( 50, array_filter( array_column( $children, 'locked_by' ) ) );
+		$this->assertSame( $one, $fifty, 'The lock holders are read in one go, however many.' );
+	}
+
 	public function test_children_whose_authors_are_gone_cost_the_queries_of_one(): void {
 		global $wpdb;
 		for ( $i = 1; $i <= 50; $i++ ) {

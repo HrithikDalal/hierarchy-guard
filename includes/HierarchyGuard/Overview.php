@@ -232,6 +232,7 @@ final class Overview {
 		if ( ! function_exists( 'get_current_screen' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/screen.php';
 		}
+		self::cache_lock_holders( $posts );
 
 		$out = [];
 		foreach ( $posts as $index => $child ) {
@@ -294,6 +295,28 @@ final class Overview {
 			$names[ (int) $user->ID ] = self::text( (string) $user->display_name );
 		}
 		return $names;
+	}
+
+	/**
+	 * Reads the users named by the posts' edit locks in one go, from the
+	 * primed meta, so wp_check_post_lock(), which reads the user of every
+	 * lock it finds, and locked_by() find them in the cache.
+	 *
+	 * @param WP_Post[] $posts Posts.
+	 */
+	private static function cache_lock_holders( array $posts ): void {
+		$ids = [];
+		foreach ( $posts as $post ) {
+			$lock = explode( ':', (string) get_post_meta( (int) $post->ID, '_edit_lock', true ) );
+			if ( '' !== $lock[0] ) {
+				// As wp_check_post_lock() reads it: a lock without a user is the last editor's.
+				$ids[] = (int) ( $lock[1] ?? get_post_meta( (int) $post->ID, '_edit_last', true ) );
+			}
+		}
+		$ids = array_values( array_unique( array_filter( $ids ) ) );
+		if ( [] !== $ids ) {
+			cache_users( $ids );
+		}
 	}
 
 	/**
