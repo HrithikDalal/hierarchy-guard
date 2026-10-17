@@ -148,12 +148,33 @@ final class Overview {
 	 * @return array{id:int,title:string,edit_link:string|null}
 	 */
 	public static function ref( int $post_id ): array {
-		$link = get_edit_post_link( $post_id, 'raw' );
 		return [
 			'id'        => $post_id,
 			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : __( '(private page)', 'hierarchy-guard' ),
-			'edit_link' => 'trash' !== get_post_status( $post_id ) && is_string( $link ) && '' !== $link ? $link : null,
+			'edit_link' => 'trash' !== get_post_status( $post_id ) ? self::edit_link( $post_id ) : null,
 		];
+	}
+
+	/**
+	 * A post's raw edit link, or null when the user may not edit it.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string|null
+	 */
+	private static function edit_link( int $post_id ): ?string {
+		$link = get_edit_post_link( $post_id, 'raw' );
+		return is_string( $link ) && '' !== $link ? $link : null;
+	}
+
+	/**
+	 * Text WordPress keeps or builds as HTML, such as a display name or a post
+	 * state, as the browser reads it where core prints it.
+	 *
+	 * @param string $html Text with entities.
+	 * @return string
+	 */
+	private static function text( string $html ): string {
+		return html_entity_decode( $html, ENT_QUOTES, 'UTF-8' );
 	}
 
 	/**
@@ -221,8 +242,10 @@ final class Overview {
 			$status = (string) $child->post_status;
 			$object = get_post_status_object( $status );
 			$out[]  = [
-				'title' => self::title( $child_id, false ),
-			] + self::ref( $child_id ) + [
+				'id'              => $child_id,
+				'title'           => self::title( $child_id, false ),
+				// A live child, never in the Trash.
+				'edit_link'       => self::edit_link( $child_id ),
 				'status'          => $status,
 				'status_label'    => null !== $object ? (string) $object->label : $status,
 				'position'        => null !== $total ? $offset + $index + 1 : null,
@@ -232,7 +255,8 @@ final class Overview {
 				'children_capped' => ( $counts[ $child_id ] ?? 0 ) > $cap,
 				// Not get_the_author_meta(), which reads the loop's author for a post_author of 0.
 				'author'          => $authors[ (int) $child->post_author ] ?? '',
-				'states'          => array_values( array_map( 'wp_strip_all_tags', (array) get_post_states( $child ) ) ),
+				// Core prints each state as HTML; the script sets text, so it gets the text the browser reads.
+				'states'          => array_values( array_map( static fn( $state ): string => self::text( wp_strip_all_tags( (string) $state ) ), (array) get_post_states( $child ) ) ),
 				'locked_by'       => self::locked_by( $child ),
 				'date'            => self::date( $child ),
 				// As core's row: View for a page anyone can view, and for a private page of a viewable type, which this user may read.
@@ -267,7 +291,7 @@ final class Overview {
 		);
 		$names = [];
 		foreach ( $users as $user ) {
-			$names[ (int) $user->ID ] = (string) $user->display_name;
+			$names[ (int) $user->ID ] = self::text( (string) $user->display_name );
 		}
 		return $names;
 	}
@@ -382,7 +406,7 @@ final class Overview {
 		}
 		$holder = wp_check_post_lock( $post );
 		$user   = false !== $holder ? get_userdata( (int) $holder ) : false;
-		return false !== $user ? (string) $user->display_name : null;
+		return false !== $user ? self::text( (string) $user->display_name ) : null;
 	}
 
 	/**

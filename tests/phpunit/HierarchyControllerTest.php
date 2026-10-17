@@ -307,6 +307,56 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( [ 'Password protected' ], $children[ $this->ids['team'] ]['states'] );
 	}
 
+	public function test_states_authors_and_lock_holders_are_sent_as_the_text_core_s_row_shows(): void {
+		// WordPress stores a display name with its & encoded; core's row prints it, so it reads as the name.
+		$tom = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Tom & Jerry’s',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_author' => $tom,
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $tom );
+		// A plugin's state, built with esc_html() as plugins build them, and one with markup.
+		add_filter(
+			'display_post_states',
+			static function ( array $states ): array {
+				$states['shop']  = esc_html( 'Shop’s & “Main” <page>' );
+				$states['built'] = '<span class="dashicons dashicons-admin-site"></span>Built with X';
+				return $states;
+			}
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Tom & Jerry’s', $children[ $this->ids['history'] ]['author'] );
+		$this->assertSame( 'Tom & Jerry’s', $children[ $this->ids['team'] ]['locked_by'] );
+		$this->assertSame( [ 'Shop’s & “Main” <page>', 'Built with X' ], $children[ $this->ids['history'] ]['states'], 'The script shows each as text, as the browser reads core’s.' );
+	}
+
+	public function test_each_child_s_title_is_read_once(): void {
+		$reads = 0;
+		$team  = $this->ids['team'];
+		add_filter(
+			'the_title',
+			static function ( $title, $post_id = 0 ) use ( &$reads, $team ) {
+				$reads += $team === (int) $post_id ? 1 : 0;
+				return $title;
+			},
+			10,
+			2
+		);
+
+		$this->get( '/posts/' . $this->ids['about'] . '/hierarchy' );
+
+		$this->assertSame( 1, $reads );
+	}
+
 	public function test_a_post_state_callback_that_asks_for_the_screen_does_not_break_the_route(): void {
 		// A plugin's display_post_states callback, hooked everywhere, that reads the admin screen as core's list does.
 		add_filter(
