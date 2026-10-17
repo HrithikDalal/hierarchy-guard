@@ -405,6 +405,8 @@ export function statusRow( template, parent, level ) {
 	const doc = template.ownerDocument;
 	const row = el( doc, 'tr', `level-${ level } hierarchy-guard-status` );
 	row.dataset.parent = String( parent );
+	// Its level for the keys, from 0 as the row's class and the cells count it.
+	row.dataset.level = String( level );
 	const cell = el( doc, 'td', 'colspanchange' );
 	cell.colSpan = Array.from( template.children ).filter(
 		( source ) => ! source.classList.contains( 'hidden' )

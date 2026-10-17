@@ -27,13 +27,19 @@ const closed = () => ( isRTL() ? LEFT : RIGHT );
 
 /**
  * A row's level, from 1: a page row's aria-level, or for a status row, which
- * assistive technology doesn't count among the pages, the level it sits at.
+ * assistive technology doesn't count among the pages, its data-level plus 1,
+ * since it counts from 0 as the row's class does.
  *
  * @param {HTMLTableRowElement} row Row.
  * @return {number} Level.
  */
 export function levelOf( row ) {
-	return Number( row.getAttribute( 'aria-level' ) || row.dataset.level || 1 );
+	if ( row.hasAttribute( 'aria-level' ) ) {
+		return Number( row.getAttribute( 'aria-level' ) );
+	}
+	return undefined !== row.dataset.level
+		? Number( row.dataset.level ) + 1
+		: 1;
 }
 
 /**
@@ -221,9 +227,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 * @return {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} The status row.
 	 */
 	const addStatus = ( row ) => {
+		// At its subpages' level, from 0, but with no aria-level, so it isn't read as one of them.
 		const status = statusRow( template, idOf( row ), levelOf( row ) );
-		// At its subpages' level for the keys, but with no aria-level, so it isn't read as one of them.
-		status.row.dataset.level = String( levelOf( row ) + 1 );
 		status.row.setAttribute( 'tabindex', '-1' );
 		lastOf( row ).after( status.row );
 		return status;

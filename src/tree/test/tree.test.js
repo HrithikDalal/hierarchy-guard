@@ -448,6 +448,23 @@ describe( 'the tree grid', () => {
 		expect( row( 9 ).tabIndex ).toBe( -1 );
 	} );
 
+	it( 'counts a status row’s level from 0, as its class and the cells do', async () => {
+		const tree = bindTree( document, fetchChildren );
+
+		await tree.toggle( row( 9 ) );
+
+		const more = document.querySelector( '.hierarchy-guard-more' );
+		expect( more.dataset.level ).toBe( '1' );
+		expect( more.classList.contains( 'level-1' ) ).toBe( true );
+		expect(
+			row( 1000 ).querySelector( '.hierarchy-guard-cell' ).dataset.level
+		).toBe( '1' );
+		// Left from its button still goes to the opened row.
+		more.querySelector( 'button' ).focus();
+		press( more.querySelector( 'button' ), 'ArrowLeft' );
+		expect( document.activeElement ).toBe( row( 9 ) );
+	} );
+
 	it( 'moves the tab stop to the closed row when its subpages go', async () => {
 		const tree = bindTree( document, fetchChildren );
 		await tree.toggle( row( 4 ) );
