@@ -276,7 +276,8 @@ final class Tree_View {
 		$paged   = isset( $_GET['paged'] ) && is_string( $_GET['paged'] ) ? absint( wp_unslash( $_GET['paged'] ) ) : 0;
 		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 		$args = [
-			'orderby'               => '' !== $orderby ? $orderby : null,
+			// add_query_arg() doesn't encode: a sort with & or # would add arguments or a fragment.
+			'orderby'               => '' !== $orderby ? rawurlencode( $orderby ) : null,
 			'order'                 => in_array( $order, [ 'asc', 'desc' ], true ) ? $order : null,
 			'm'                     => $month > 0 ? $month : null,
 			'paged'                 => $paged > 1 ? $paged : null,

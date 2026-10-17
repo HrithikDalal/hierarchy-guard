@@ -622,6 +622,22 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( admin_url( 'edit.php?post_type=page&hierarchy_guard_view=tree' ), Tree_View::place_url( 'page' ) );
 	}
 
+	public function test_a_crafted_sort_stays_one_argument_of_the_place(): void {
+		$_GET['orderby'] = 'title&hierarchy_guard_open=5#x';
+
+		$place = Tree_View::place_url( 'page', 7, 2 );
+
+		$this->assertStringNotContainsString( '#', $place, 'No fragment.' );
+		parse_str( (string) wp_parse_url( $place, PHP_URL_QUERY ), $args );
+		$this->assertSame( 'title&hierarchy_guard_open=5#x', $args['orderby'], 'Carried over as core received it, as one argument.' );
+		$this->assertSame( '7', $args[ Tree_View::OPEN_VAR ] );
+		$this->assertSame( '2', $args[ Tree_View::CHILDREN_PAGE_VAR ] );
+
+		ob_start();
+		$this->tree->collapse_all( 'top' );
+		$this->assertStringContainsString( 'orderby=title%26hierarchy_guard_open%3D5%23x', (string) ob_get_clean(), 'Collapse all, too.' );
+	}
+
 	public function test_the_trash_link_carries_the_tree_s_place_as_core_s_referer(): void {
 		update_user_option( get_current_user_id(), 'edit_page_per_page', 1 );
 		$_GET['paged']               = '3';
