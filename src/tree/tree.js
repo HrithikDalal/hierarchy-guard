@@ -468,7 +468,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			const node = childRow( template, child, {
 				level: levelOf( row ),
 				parent: id,
-				parentTitle: titleOf( row ),
+				// Core's "Child of" under an untitled page names no one.
+				parentTitle: result.untitled ? '' : titleOf( row ),
 				page,
 				// The server's place, so a page reads the same opened either way; none past the cap.
 				position: child.position,

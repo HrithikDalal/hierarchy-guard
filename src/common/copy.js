@@ -905,6 +905,8 @@ export function treeRowLabels( title ) {
 		details: __( 'Show more details', 'hierarchy-guard' ),
 		noSubpages: __( 'No subpages', 'hierarchy-guard' ),
 		noAuthor: __( '(no author)', 'hierarchy-guard' ),
+		// The name WordPress 7.1 gives an untitled row's title cell.
+		noTitle: __( 'no title', 'hierarchy-guard' ),
 	};
 }
 

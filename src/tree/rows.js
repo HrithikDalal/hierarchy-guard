@@ -34,8 +34,10 @@ function el( doc, tag, className = '', text = '' ) {
 }
 
 /**
- * A link's address when it is a web address or a path, or '' for any other
- * scheme, such as javascript:, as core's esc_url() leaves its rows' links.
+ * A link's address when it is an http(s) address or a path, or '' for any
+ * other scheme, javascript: included. That is on purpose stricter than core's
+ * own rows, which print the View link unescaped, and than esc_url(), which
+ * keeps mailto:, tel: and the other protocols WordPress allows.
  *
  * @param {string} href URL.
  * @return {string} The URL, or ''.
@@ -156,7 +158,7 @@ function titleContent( doc, child, context, labels ) {
 		const title = link( doc, child.edit_link, child.title );
 		title.className = 'row-title';
 		strong.appendChild( title );
-		if ( context.parentTitle ) {
+		if ( 'string' === typeof context.parentTitle ) {
 			title.setAttribute( 'aria-describedby', described );
 			const description = el(
 				doc,
@@ -169,7 +171,7 @@ function titleContent( doc, child, context, labels ) {
 		}
 	} else {
 		const title = el( doc, 'span', '', child.title );
-		if ( context.parentTitle ) {
+		if ( 'string' === typeof context.parentTitle ) {
 			const description = el(
 				doc,
 				'span',
@@ -351,7 +353,7 @@ function fill( doc, cell, column, child, context, labels ) {
  *
  * @param {HTMLTableRowElement} template A row core printed.
  * @param {Object}              child    The subpage from the route.
- * @param {Object}              context  Where it goes: level (from 0), parent, parentTitle, page, position and setsize (or null, or left out), place, type.
+ * @param {Object}              context  Where it goes: level (from 0), parent, parentTitle ('' for an untitled parent, left out for none), page, position and setsize (or null, or left out), place, type.
  * @return {HTMLTableRowElement} Row.
  */
 export function childRow( template, child, context ) {
@@ -382,8 +384,11 @@ export function childRow( template, child, context ) {
 			.find( ( name ) => name.startsWith( 'column-' ) )
 			?.slice( 'column-'.length );
 		if ( 'title' === column && source.hasAttribute( 'aria-label' ) ) {
-			// WordPress 7.1 names the row by its title alone.
-			cell.setAttribute( 'aria-label', child.title );
+			// WordPress 7.1 names the row by its title alone, or "no title".
+			cell.setAttribute(
+				'aria-label',
+				child.untitled ? labels.noTitle : child.title
+			);
 		}
 		fill( doc, cell, column || '', child, context, labels );
 		row.appendChild( cell );

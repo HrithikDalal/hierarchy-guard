@@ -222,7 +222,7 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$tree    = $this->get( $route, $params + [ 'tree' => '1' ] )->get_data();
 		$cost    = $wpdb->num_queries - $queries;
 
-		$this->assertSame( [ 'id', 'children', 'children_total', 'children_capped', 'has_more' ], array_keys( $tree ), 'What the tree reads: no ancestors, descendants, redirects or trash policy.' );
+		$this->assertSame( [ 'id', 'untitled', 'children', 'children_total', 'children_capped', 'has_more' ], array_keys( $tree ), 'What the tree reads: no ancestors, descendants, redirects or trash policy.' );
 		foreach ( array_keys( $tree ) as $key ) {
 			$this->assertSame( $full[ $key ], $tree[ $key ], "The panel's {$key} too." );
 		}
@@ -589,6 +589,40 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$this->assertSame( '<b>Bold</b> & Co', $children[ $this->ids['team'] ]['title'], 'Core’s list escapes the markup, so it reads as text, and decodes the entity.' );
 		$this->assertSame( html_entity_decode( _draft_or_post_title( $this->ids['team'] ), ENT_QUOTES, 'UTF-8' ), $children[ $this->ids['team'] ]['title'] );
+	}
+
+	public function test_an_untitled_page_is_marked_so_the_script_names_it_as_core_s_row_does(): void {
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		$parent = $this->page( 'untitled-parent' );
+		$child  = $this->page( 'untitled-child', $parent );
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '' ], [ 'ID' => $parent ] );
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '' ], [ 'ID' => $child ] );
+		clean_post_cache( $parent );
+		clean_post_cache( $child );
+
+		$about = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'tree' => '1' ] )->get_data();
+		$data  = $this->get( '/posts/' . $parent . '/hierarchy', [ 'tree' => '1' ] )->get_data();
+
+		$this->assertFalse( $about['untitled'] );
+		$this->assertSame( [ false, false ], array_column( $about['children'], 'untitled' ) );
+		$this->assertTrue( $data['untitled'], 'Its subpages are “Child of” no name, as core prints them.' );
+		$this->assertTrue( $data['children'][0]['untitled'] );
+		$this->assertSame( '(no title)', $data['children'][0]['title'] );
+
+		// What core's own row prints for the untitled child, on the versions that print it.
+		set_current_screen( 'edit-page' );
+		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
+		ob_start();
+		$table->display_rows( [ get_post( $child ) ] );
+		$html = (string) ob_get_clean();
+		remove_filter( 'the_title', 'esc_html' );
+		set_current_screen( 'front' );
+		if ( 1 === preg_match( '/<th [^>]*column-title/', $html ) ) {
+			// WordPress 7.1 names an untitled row "no title", and its subpage "Child of" no one.
+			$this->assertStringContainsString( 'aria-label="no title"', $html );
+			$this->assertStringContainsString( 'class="hidden">Child of </span>', $html );
+		}
 	}
 
 	public function test_each_child_carries_core_s_row_classes(): void {

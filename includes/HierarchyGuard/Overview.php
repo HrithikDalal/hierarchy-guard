@@ -107,7 +107,7 @@ final class Overview {
 	 * @param WP_Post $post          Post.
 	 * @param int     $children_page Page of children, from 1.
 	 * @param int     $per_page      Children per page, at most MAX_CHILDREN_PER_PAGE.
-	 * @return array{id:int,children:array<int,array<string,mixed>>,children_total:int,children_capped:bool,has_more:bool}
+	 * @return array{id:int,untitled:bool,children:array<int,array<string,mixed>>,children_total:int,children_capped:bool,has_more:bool}
 	 */
 	public function subpages( WP_Post $post, int $children_page = 1, int $per_page = self::CHILDREN_PER_PAGE ): array {
 		$id            = (int) $post->ID;
@@ -119,6 +119,8 @@ final class Overview {
 
 		return [
 			'id'              => $id,
+			// Core's "Child of" under an untitled page names no one.
+			'untitled'        => '' === (string) $post->post_title,
 			'children'        => $this->children( $id, $type, $children_page, $per_page, $total > $cap ? null : $total ),
 			'children_total'  => min( $total, $cap ),
 			'children_capped' => $total > $cap,
@@ -268,6 +270,8 @@ final class Overview {
 			$out[]  = [
 				'id'              => $child_id,
 				'title'           => self::title( $child_id, false ),
+				// Core's row names an untitled post "no title" for assistive technology.
+				'untitled'        => empty( $child->post_title ),
 				// A live child, never in the Trash.
 				'edit_link'       => self::edit_link( $child_id ),
 				'status'          => $status,

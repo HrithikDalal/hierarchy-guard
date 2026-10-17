@@ -139,7 +139,7 @@ describe( 'a loaded subpage’s row', () => {
 		);
 	} );
 
-	it( 'links only to web addresses and paths, as esc_url() leaves core’s links', () => {
+	it( 'links only to http(s) addresses and paths, stricter than core’s View link, which core prints unescaped', () => {
 		const row = childRow(
 			template,
 			child( 5, 'About', {
@@ -163,6 +163,27 @@ describe( 'a loaded subpage’s row', () => {
 			'HTTPS://example.org/'
 		);
 		expect( safeHref( 'mailto:a@example.org' ) ).toBe( '' );
+	} );
+
+	it( 'names an untitled row “no title”, and says it is “Child of” no one under an untitled page, as WordPress 7.1 does', () => {
+		const row = childRow(
+			template,
+			child( 5, '(no title)', { untitled: true } ),
+			context( { parentTitle: '' } )
+		);
+
+		expect( row.children[ 0 ].getAttribute( 'aria-label' ) ).toBe(
+			'no title'
+		);
+		expect( row.querySelector( '.row-title' ).textContent ).toBe(
+			'(no title)'
+		);
+		expect(
+			row.querySelector( '.row-title' ).getAttribute( 'aria-describedby' )
+		).toBe( 'post-hierarchy-5' );
+		expect( row.querySelector( '#post-hierarchy-5' ).textContent ).toBe(
+			'Child of '
+		);
 	} );
 
 	it( 'copies WordPress 6.6’s title cell, a plain cell with no name', () => {

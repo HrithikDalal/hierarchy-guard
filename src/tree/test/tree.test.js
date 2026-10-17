@@ -465,6 +465,21 @@ describe( 'the tree grid', () => {
 		expect( document.activeElement ).toBe( row( 9 ) );
 	} );
 
+	it( 'says a subpage of an untitled page is “Child of” no one, as core does', async () => {
+		const tree = bindTree( document, () =>
+			Promise.resolve( {
+				...page( [ child( 5, 'About' ) ], 1 ),
+				untitled: true,
+			} )
+		);
+
+		await tree.toggle( row( 4 ) );
+
+		expect( row( 5 ).querySelector( '.hidden' ).textContent ).toBe(
+			'Child of '
+		);
+	} );
+
 	it( 'moves the tab stop to the closed row when its subpages go', async () => {
 		const tree = bindTree( document, fetchChildren );
 		await tree.toggle( row( 4 ) );
