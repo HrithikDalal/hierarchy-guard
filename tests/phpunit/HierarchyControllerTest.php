@@ -372,9 +372,15 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 	public function test_a_page_of_50_children_reads_their_locks_in_one_query(): void {
 		global $wpdb;
 		for ( $i = 1; $i <= 50; $i++ ) {
-			$this->page( sprintf( 'bulk-%02d', $i ), $this->ids['about'] );
+			$child = $this->page( sprintf( 'bulk-%02d', $i ), $this->ids['about'] );
+			// Each by an author of its own, so a user read per row would show.
+			$wpdb->update( $wpdb->posts, [ 'post_author' => self::factory()->user->create( [ 'role' => 'author' ] ) ], [ 'ID' => $child ] );
+			clean_post_cache( $child );
 		}
 		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		// The first request after a flush also reads options that core loads once a request.
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
 
 		wp_cache_flush();
 		$queries = $wpdb->num_queries;
@@ -387,6 +393,87 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$fifty = $wpdb->num_queries - $queries;
 
 		$this->assertSame( $one, $fifty, 'Fifty editable rows cost the queries of one: their meta, edit locks included, loads in one query.' );
+	}
+
+	public function test_children_whose_authors_are_gone_cost_the_queries_of_one(): void {
+		global $wpdb;
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$child = $this->page( sprintf( 'orphan-%02d', $i ), $this->ids['about'] );
+			// Users deleted without reassigning their pages: no such user, one for each row.
+			$wpdb->update( $wpdb->posts, [ 'post_author' => 900000 + $i ], [ 'ID' => $child ] );
+			clean_post_cache( $child );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		// The first request after a flush also reads options that core loads once a request.
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertCount( 1, $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries  = $wpdb->num_queries;
+		$children = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'];
+		$fifty    = $wpdb->num_queries - $queries;
+
+		$this->assertSame( $one, $fifty, 'The authors are read once a page, found or not.' );
+		$this->assertSame( [ '' ], array_values( array_unique( array_column( array_slice( $children, 2 ), 'author' ) ) ), 'No author for a deleted user.' );
+	}
+
+	public function test_each_child_carries_its_place_among_its_siblings(): void {
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+
+		$second = $this->get(
+			$route,
+			[
+				'children_page'     => 2,
+				'children_per_page' => 1,
+			]
+		)->get_data()['children'][0];
+		$this->assertSame( $this->ids['team'], $second['id'] );
+		$this->assertSame( 2, $second['position'], 'History, then Team.' );
+		$this->assertSame( 2, $second['setsize'] );
+
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
+		$capped = $this->get( $route )->get_data()['children'][0];
+		$this->assertNull( $capped['position'], 'Past the cap no place is known, as the server prints none.' );
+		$this->assertNull( $capped['setsize'] );
+	}
+
+	public function test_a_child_s_title_reads_as_core_s_list_prints_it(): void {
+		global $wpdb;
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '<b>Bold</b> &amp; Co' ], [ 'ID' => $this->ids['team'] ] );
+		clean_post_cache( $this->ids['team'] );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( '<b>Bold</b> & Co', $children[ $this->ids['team'] ]['title'], 'Core’s list escapes the markup, so it reads as text, and decodes the entity.' );
+		$this->assertSame( html_entity_decode( _draft_or_post_title( $this->ids['team'] ), ENT_QUOTES, 'UTF-8' ), $children[ $this->ids['team'] ]['title'] );
+	}
+
+	public function test_each_child_carries_core_s_row_classes(): void {
+		$other = self::factory()->user->create( [ 'role' => 'editor' ] );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_author' => $other,
+				'post_status' => 'private',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_author' => $this->admin,
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( [ 'iedit', 'author-other', 'post-' . $this->ids['history'], 'type-page', 'status-private', 'hentry' ], $children[ $this->ids['history'] ]['classes'] );
+		$this->assertSame( [ 'iedit', 'author-self', 'post-' . $this->ids['team'], 'type-page', 'status-publish', 'hentry' ], $children[ $this->ids['team'] ]['classes'], 'Not the bare type name core adds outside wp-admin.' );
 	}
 
 	public function test_a_child_the_user_may_not_trash_has_no_trash_link(): void {

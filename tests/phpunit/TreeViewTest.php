@@ -513,6 +513,57 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( 121, $this->tree->row( (int) end( $third )->ID )['position'] );
 	}
 
+	/**
+	 * One page of a page's subpages, as the hierarchy route sends them to the script, by ID.
+	 *
+	 * @param int $parent_id Page.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function loaded( int $parent_id ): array {
+		$request = new \WP_REST_Request( 'GET', '/hierarchy-guard/v1/posts/' . $parent_id . '/hierarchy' );
+		$request->set_query_params( [ 'children_per_page' => Tree_View::PER_PAGE ] );
+		return array_column( rest_do_request( $request )->get_data()['children'], null, 'id' );
+	}
+
+	public function test_both_paths_number_the_subpages_alike_around_one_the_user_may_not_read(): void {
+		$hidden = $this->ids['history'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $hidden === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['about'];
+
+		$this->assertSame( [ 'company', 'about', 'team' ], wp_list_pluck( $this->open_levels( [ $this->ids['company'] ], 1 ), 'post_name' ) );
+		$loaded = self::loaded( $this->ids['about'] );
+
+		$this->assertSame( [ $this->ids['team'] ], array_keys( $loaded ) );
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['position'], 'History keeps its place, unseen.' );
+		$this->assertSame( $this->tree->row( $this->ids['team'] )['position'], $loaded[ $this->ids['team'] ]['position'], 'The script shows the server’s place.' );
+		$this->assertSame( $this->tree->row( $this->ids['team'] )['setsize'], $loaded[ $this->ids['team'] ]['setsize'] );
+	}
+
+	public function test_a_loaded_row_carries_core_s_row_classes_and_reads_its_title_as_core_s_row(): void {
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '<b>Bold</b> &amp; Co' ], [ 'ID' => $this->ids['team'] ] );
+		clean_post_cache( $this->ids['team'] );
+		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
+		ob_start();
+		$table->single_row( get_post( $this->ids['team'] ), 2 );
+		$html = (string) ob_get_clean();
+		preg_match( '/<tr id="post-\d+" class="([^"]*)"/', $html, $row );
+		preg_match( '/<a class="row-title"[^>]*>(.*?)<\/a>/', $html, $title );
+
+		$loaded = self::loaded( $this->ids['about'] )[ $this->ids['team'] ];
+
+		$core = array_values( array_diff( explode( ' ', $row[1] ), [ 'level-2' ] ) );
+		$this->assertSame( $core, $loaded['classes'], 'Core’s classes, but the level, which the script adds.' );
+		$this->assertSame( html_entity_decode( $title[1], ENT_QUOTES, 'UTF-8' ), $loaded['title'], 'The text core’s row shows.' );
+	}
+
 	public function test_past_the_cap_the_opened_page_says_only_the_first_are_shown(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 60 );
 		$this->subpages( $this->ids['team'], 70 );
