@@ -249,9 +249,11 @@ final class List_Table {
 		}
 		if ( null !== $row && $row['more'] ) {
 			$parts[] = sprintf(
-				'<a class="hierarchy-guard-more" href="%1$s" data-page="%2$d">%3$s</a>',
+				'<a class="hierarchy-guard-more" href="%1$s" data-page="%2$d" aria-label="%3$s">%4$s</a>',
 				esc_url( Tree_View::place_url( $type, $id, $row['shown'] + 1 ) ),
 				$row['shown'] + 1,
+				/* translators: %s: page title. */
+				esc_attr( sprintf( __( 'Show more subpages of “%s”', 'hierarchy-guard' ), $title ) ),
 				esc_html__( 'Show more', 'hierarchy-guard' )
 			);
 		} elseif ( null !== $row && $row['capped'] ) {
