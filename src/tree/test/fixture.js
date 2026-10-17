@@ -16,6 +16,8 @@
  * @param {boolean} row.toggle   Whether the user may open it.
  * @param {number}  row.open     The children page the server opened, or 0.
  * @param {string}  row.extra    More cell markup.
+ * @param {string}  row.excerpt  The excerpt WordPress 7.1 adds to an untitled page's title, or ''.
+ * @param {boolean} row.wp66     Whether the title cell is WordPress 6.6's: a td with no name.
  * @return {string} Markup.
  */
 export function coreRow( {
@@ -29,16 +31,24 @@ export function coreRow( {
 	toggle = children > 0,
 	open = 0,
 	extra = '',
+	excerpt = '',
+	wp66 = false,
 } ) {
 	const sep = '<span aria-hidden="true"> · </span>';
 	const toggleLink = toggle
 		? `<a class="hierarchy-guard-toggle" href="edit.php?post_type=page&hierarchy_guard_view=tree&hierarchy_guard_open=${ id }"><span class="dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span><span class="screen-reader-text">Show the subpages of “${ title }”</span></a>${ sep }`
 		: '';
+	// WordPress 7.1 makes the title cell the row's header, named by the title; 6.6 prints a plain cell.
+	const cell = wp66 ? 'td' : 'th';
+	const name = wp66 ? '' : ` scope="row" aria-label="${ title }"`;
+	const trimmed = excerpt
+		? ` <span class="trimmed-post-excerpt">${ excerpt }</span>`
+		: '';
 	const count = children
 		? `<a href="edit.php?post_type=page&hierarchy_guard_under=${ id }">${ children } subpages</a>`
 		: '<span aria-hidden="true">—</span>';
 	return `<tr id="post-${ id }" class="iedit level-${ level }">
-		<th scope="row" class="title column-title has-row-actions column-primary page-title" data-colname="Title" aria-label="${ title }"><div class="locked-info"><span class="locked-avatar"></span> <span class="locked-text"></span></div><strong><a class="row-title" href="post.php?post=${ id }&action=edit">${ title }</a></strong><div class="row-actions"><span class="trash"><a href="post.php?post=${ id }&action=trash" class="submitdelete">Trash</a></span></div></th>
+		<${ cell } class="title column-title has-row-actions column-primary page-title" data-colname="Title"${ name }><div class="locked-info"><span class="locked-avatar"></span> <span class="locked-text"></span></div><strong><a class="row-title" href="post.php?post=${ id }&action=edit">${ title }${ trimmed }</a></strong><div class="row-actions"><span class="trash"><a href="post.php?post=${ id }&action=trash" class="submitdelete">Trash</a></span></div></${ cell }>
 		<td class="hierarchy_guard column-hierarchy_guard" data-colname="Hierarchy"><span class="hierarchy-guard-cell" data-id="${ id }" data-children="${ children }" data-status="publish" data-level="${ level }" data-parent="${ parent }" data-page="1" data-position="${ position }" data-setsize="${ setsize }"${ open ? ` data-open="${ open }"` : '' }>${ toggleLink }${ count }${ extra }</span></td>
 		<td class="author column-author" data-colname="Author">Sam</td>
 		<td class="comments column-comments hidden" data-colname="Comments"></td>

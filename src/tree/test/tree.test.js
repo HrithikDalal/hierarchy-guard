@@ -393,6 +393,34 @@ describe( 'the tree grid', () => {
 		);
 	} );
 
+	it( 'names an untitled page “(no title)”, as the server does, without the excerpt WordPress 7.1 adds', async () => {
+		mountScreen(
+			coreRow( {
+				id: 9,
+				title: '(no title)',
+				excerpt: 'Body text of the page',
+				children: 128,
+			} )
+		);
+		const tree = bindTree( document, fetchChildren );
+
+		const button = row( 9 ).querySelector(
+			'button.hierarchy-guard-toggle'
+		);
+		expect( button.getAttribute( 'aria-label' ) ).toBe(
+			'Show the subpages of “(no title)”'
+		);
+		await tree.toggle( row( 9 ) );
+		expect( row( 1000 ).querySelector( '.hidden' ).textContent ).toBe(
+			'Child of (no title)'
+		);
+		expect(
+			document
+				.querySelector( '.hierarchy-guard-more button' )
+				.getAttribute( 'aria-label' )
+		).toBe( 'Show more subpages of “(no title)”' );
+	} );
+
 	it( 'moves the tab stop to the closed row when its subpages go', async () => {
 		const tree = bindTree( document, fetchChildren );
 		await tree.toggle( row( 4 ) );

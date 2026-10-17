@@ -86,14 +86,22 @@ export function parentOf( row ) {
 }
 
 /**
- * A row's title, as its title link reads.
+ * A row's title, as its title link reads, without the excerpt WordPress 7.1
+ * adds to an untitled page's: "(no title)", as the server names it.
  *
  * @param {HTMLTableRowElement} row Row.
  * @return {string} Title.
  */
 function titleOf( row ) {
 	const title = row.querySelector( '.row-title' );
-	return title ? title.textContent.trim() : '';
+	if ( ! title ) {
+		return '';
+	}
+	const text = title.cloneNode( true );
+	text.querySelectorAll( '.trimmed-post-excerpt' ).forEach( ( excerpt ) =>
+		excerpt.remove()
+	);
+	return text.textContent.trim();
 }
 
 /**

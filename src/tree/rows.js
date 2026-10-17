@@ -34,6 +34,23 @@ function el( doc, tag, className = '', text = '' ) {
 }
 
 /**
+ * A link's address when it is a web address or a path, or '' for any other
+ * scheme, such as javascript:, as core's esc_url() leaves its rows' links.
+ *
+ * @param {string} href URL.
+ * @return {string} The URL, or ''.
+ */
+export function safeHref( href ) {
+	const value = String( href || '' );
+	// Browsers drop spaces and control characters from a scheme, as in "java\tscript:".
+	const bare = Array.from( value )
+		.filter( ( char ) => char.charCodeAt( 0 ) > 32 )
+		.join( '' );
+	const scheme = bare.match( /^([a-z][a-z0-9+.-]*):/i );
+	return ! scheme || /^https?$/i.test( scheme[ 1 ] ) ? value : '';
+}
+
+/**
  * A link.
  *
  * @param {Document} doc   The document.
@@ -44,7 +61,7 @@ function el( doc, tag, className = '', text = '' ) {
  */
 function link( doc, href, text, label = '' ) {
 	const node = el( doc, 'a', '', text );
-	node.href = href;
+	node.setAttribute( 'href', safeHref( href ) );
 	if ( label ) {
 		node.setAttribute( 'aria-label', label );
 	}
@@ -71,14 +88,16 @@ export function placeUrl( place, parent, page = 1 ) {
 }
 
 /**
- * The list filtered to a page's subtree, as "View subpages" links it.
+ * The list filtered to a page's subtree, as "View subpages" links it: on the
+ * admin screen of the tree's place, as the server's absolute links are.
  *
- * @param {string} type Post type.
- * @param {number} id   Page ID.
+ * @param {string} place The view's URL at its page and sort.
+ * @param {string} type  Post type.
+ * @param {number} id    Page ID.
  * @return {string} URL.
  */
-export function subtreeUrl( type, id ) {
-	return addQueryArgs( 'edit.php', {
+function subtreeUrl( place, type, id ) {
+	return addQueryArgs( place.split( '?' )[ 0 ] || 'edit.php', {
 		post_type: type,
 		hierarchy_guard_under: id,
 	} );
@@ -218,7 +237,7 @@ function titleContent( doc, child, context, labels ) {
 			'hierarchy_guard_subpages',
 			link(
 				doc,
-				subtreeUrl( context.type, child.id ),
+				subtreeUrl( context.place, context.type, child.id ),
 				labels.subpages,
 				labels.subpagesLabel
 			),
@@ -272,7 +291,7 @@ function hierarchyContent( doc, child, context, labels ) {
 		cell.appendChild(
 			link(
 				doc,
-				subtreeUrl( context.type, child.id ),
+				subtreeUrl( context.place, context.type, child.id ),
 				subpagesLabel( count, child.children_capped ),
 				viewSubpagesLabel( count, child.children_capped, child.title )
 			)

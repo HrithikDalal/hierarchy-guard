@@ -3,7 +3,7 @@
  * The rows the Tree view adds: a loaded subpage reads as one core prints.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { childRow, placeUrl, statusRow, subtreeUrl } from '../rows';
+import { childRow, placeUrl, safeHref, statusRow } from '../rows';
 import { child, coreRow, mountScreen } from './fixture';
 
 const PLACE =
@@ -112,12 +112,75 @@ describe( 'a loaded subpage’s row', () => {
 			row
 				.querySelector( '.hierarchy_guard_subpages a' )
 				.getAttribute( 'href' )
-		).toBe( subtreeUrl( 'page', 5 ) );
+		).toBe(
+			'https://example.org/wp-admin/edit.php?post_type=page&hierarchy_guard_under=5'
+		);
 		expect( row.querySelector( '.trash a' ).className ).toBe(
 			'submitdelete'
 		);
 		expect( row.querySelector( 'button.toggle-row' ).textContent ).toBe(
 			'Show more details'
+		);
+	} );
+
+	it( 'links the subpage count, as View subpages, to the list on the same admin screen', () => {
+		const row = childRow(
+			template,
+			child( 5, 'About', { children_count: 2 } ),
+			context()
+		);
+
+		expect(
+			row
+				.querySelector( '.hierarchy-guard-cell a' )
+				.getAttribute( 'href' )
+		).toBe(
+			'https://example.org/wp-admin/edit.php?post_type=page&hierarchy_guard_under=5'
+		);
+	} );
+
+	it( 'links only to web addresses and paths, as esc_url() leaves core’s links', () => {
+		const row = childRow(
+			template,
+			child( 5, 'About', {
+				edit_link: 'javascript:alert(1)',
+				view_link: ' JaVa\tScRiPt:alert(1)',
+				trash_link: 'data:text/html,<b>x</b>',
+			} ),
+			context()
+		);
+
+		expect(
+			Array.from( row.querySelectorAll( '.column-title a' ) ).map(
+				( link ) => link.getAttribute( 'href' )
+			)
+		).toEqual( [ '', '', '', '' ] );
+		expect( safeHref( '/about/team/' ) ).toBe( '/about/team/' );
+		expect( safeHref( 'edit.php?post_type=page&x=a:b' ) ).toBe(
+			'edit.php?post_type=page&x=a:b'
+		);
+		expect( safeHref( 'HTTPS://example.org/' ) ).toBe(
+			'HTTPS://example.org/'
+		);
+		expect( safeHref( 'mailto:a@example.org' ) ).toBe( '' );
+	} );
+
+	it( 'copies WordPress 6.6’s title cell, a plain cell with no name', () => {
+		mountScreen(
+			coreRow( { id: 4, title: 'Company', children: 3, wp66: true } )
+		);
+
+		const cell = childRow(
+			document.getElementById( 'post-4' ),
+			child( 5, 'About' ),
+			context( { parentTitle: 'Company' } )
+		).children[ 0 ];
+
+		expect( cell.tagName ).toBe( 'TD' );
+		expect( cell.hasAttribute( 'scope' ) ).toBe( false );
+		expect( cell.hasAttribute( 'aria-label' ) ).toBe( false );
+		expect( cell.querySelector( '.row-title' ).textContent ).toBe(
+			'About'
 		);
 	} );
 
