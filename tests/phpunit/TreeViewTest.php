@@ -430,7 +430,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 				'shown'    => 0,
 				'more'     => false,
 				'capped'   => false,
-				'empty'    => false,
+				'hidden'   => false,
 			],
 			$this->tree->row( $this->ids['company'] ),
 			'Page 2 of 20 a page starts at 21; the size is core’s item count.'
@@ -650,23 +650,66 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( 0, $this->tree->row( $this->ids['history'] )['shown'] );
 	}
 
-	public function test_opening_a_page_whose_only_subpages_the_user_may_not_read_shows_it_without_subpages(): void {
-		$hidden = $this->ids['leadership'];
+	/**
+	 * Keeps pages from the user, as a role without read rights on them would.
+	 *
+	 * @param int[] $hidden Post IDs the user may not read.
+	 */
+	private static function unreadable( array $hidden ): void {
 		add_filter(
 			'map_meta_cap',
 			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
-				return 'read_post' === $cap && isset( $args[0] ) && $hidden === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+				return 'read_post' === $cap && isset( $args[0] ) && in_array( (int) $args[0], $hidden, true ) ? [ 'do_not_allow' ] : $caps;
 			},
 			10,
 			4
 		);
+	}
+
+	public function test_opening_a_page_whose_subpages_the_user_may_not_read_keeps_it_open_and_says_so(): void {
+		self::unreadable( [ $this->ids['leadership'] ] );
 		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
 
 		$this->assertSame( [ 'company', 'about', 'team' ], wp_list_pluck( $this->open_levels( [ $this->ids['company'] ], 1 ), 'post_name' ) );
 		$row = $this->tree->row( $this->ids['team'] );
-		$this->assertFalse( $row['open'] );
-		$this->assertTrue( $row['empty'], 'As the script shows a page whose first load brings none: without a toggle, so it is not opened again for nothing.' );
-		$this->assertFalse( $this->tree->row( $this->ids['about'] )['empty'] );
+		$this->assertTrue( $row['open'], 'It has subpages: it is no leaf, and keeps its toggle and its count.' );
+		$this->assertTrue( $row['hidden'], 'Its row says the user can’t view them.' );
+		$this->assertSame( 1, $row['shown'] );
+		$this->assertFalse( $row['more'] );
+		$this->assertFalse( $this->tree->row( $this->ids['about'] )['hidden'] );
+	}
+
+	public function test_a_first_page_the_user_may_not_read_leads_on_to_the_readable_ones(): void {
+		// Team's subpages sort as Leadership, sub-001 … sub-051: the first 50 are kept from the user.
+		$subpages = $this->subpages( $this->ids['team'], 51 );
+		self::unreadable( array_merge( [ $this->ids['leadership'] ], array_slice( $subpages, 0, 49 ) ) );
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+
+		$this->assertCount( 3, $this->open_levels( [ $this->ids['company'] ], 1 ) );
+		$row = $this->tree->row( $this->ids['team'] );
+		$this->assertTrue( $row['hidden'] );
+		$this->assertTrue( $row['more'], 'Show more leads to the readable ones on page 2.' );
+
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+		$second                               = array_slice( $this->open_levels( [ $this->ids['company'] ], 1 ), 3 );
+		$this->assertSame( array_slice( $subpages, 49 ), array_map( 'intval', wp_list_pluck( $second, 'ID' ) ) );
+		$this->assertSame( 51, $this->tree->row( $subpages[49] )['position'] );
+		$this->assertFalse( $this->tree->row( $this->ids['team'] )['hidden'] );
+	}
+
+	public function test_a_later_page_the_user_may_not_read_says_so_in_place(): void {
+		// Team's subpages sort as Leadership, sub-001 … sub-099: page 2 is sub-050 to sub-099.
+		$subpages = $this->subpages( $this->ids['team'], 99 );
+		self::unreadable( array_slice( $subpages, 49 ) );
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['team'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+
+		$this->assertCount( 3, $this->open_levels( [ $this->ids['company'] ], 1 ) );
+		$row = $this->tree->row( $this->ids['team'] );
+		$this->assertTrue( $row['open'] );
+		$this->assertTrue( $row['hidden'] );
+		$this->assertSame( 2, $row['shown'] );
+		$this->assertFalse( $row['more'] );
 	}
 
 	public function test_a_level_the_user_may_not_edit_stays_closed(): void {

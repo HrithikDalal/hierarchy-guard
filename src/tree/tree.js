@@ -235,6 +235,30 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	};
 
 	/**
+	 * Says under an opened row that the user can't view its subpages: those
+	 * on the page loaded, when none of them is readable. One such row is
+	 * enough, however many pages bring none.
+	 *
+	 * @param {HTMLTableRowElement} row The opened row.
+	 * @return {HTMLTableRowElement} The row that says so.
+	 */
+	const addHidden = ( row ) => {
+		const said = descendantsOf( row ).find( ( other ) =>
+			other.classList.contains( 'hierarchy-guard-hidden' )
+		);
+		if ( said ) {
+			return said;
+		}
+		const status = addStatus( row );
+		status.row.classList.add( 'hierarchy-guard-hidden' );
+		status.cell.textContent = __(
+			'You can’t view these subpages.',
+			'hierarchy-guard'
+		);
+		return status.row;
+	};
+
+	/**
 	 * "Show more" under an opened row, or the cap's sentence past it. While
 	 * the next page loads the row stays, busy, so the keyboard stays on it.
 	 *
@@ -432,7 +456,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		const hadStop = '0' === status.row.getAttribute( 'tabindex' );
 		status.row.remove();
 		const children = result.children || [];
-		if ( 1 === page && ! children.length ) {
+		if ( 1 === page && ! children.length && ! result.children_total ) {
 			showEmpty( row, hadFocus, hadStop );
 			return;
 		}
@@ -460,6 +484,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			anchor = node;
 			first = first || node;
 		} );
+		// Subpages exist, but none on this page the user may read: a row says so, once.
+		const notice = first ? null : addHidden( row );
 		addMore(
 			row,
 			page + 1,
@@ -479,9 +505,9 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			);
 		}
 		if ( moveFocus || hadFocus ) {
-			focus( first || row );
+			focus( first || notice || row );
 		} else if ( hadStop ) {
-			setTabStop( first || row );
+			setTabStop( first || notice || row );
 		}
 	};
 
@@ -635,22 +661,37 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			addToggle( row, titleOf( row ), !! cell.dataset.open );
 		}
 	} );
-	// "Show more" and the cap's sentence, printed in an opened row's cell, become rows under it.
+	/**
+	 * Takes a part the server printed in an opened row's cell out of it,
+	 * with the separator before it.
+	 *
+	 * @param {Element} part The part.
+	 */
+	const takeOut = ( part ) => {
+		const separator = part.previousElementSibling;
+		if ( separator && separator.matches( '[aria-hidden="true"]' ) ) {
+			separator.remove();
+		}
+		part.remove();
+	};
+
+	// The sentence on subpages the user can't view, "Show more" and the cap's sentence, printed in an opened row's cell, become rows under it.
 	rows()
 		.filter( ( row ) => 'true' === row.getAttribute( 'aria-expanded' ) )
 		.forEach( ( row ) => {
 			const cell = row.querySelector( '.hierarchy-guard-cell' );
+			const hidden = cell.querySelector( '.hierarchy-guard-hidden' );
+			if ( hidden ) {
+				takeOut( hidden );
+				addHidden( row );
+			}
 			const more = cell.querySelector(
 				'a.hierarchy-guard-more, .hierarchy-guard-capped'
 			);
 			if ( ! more ) {
 				return;
 			}
-			const separator = more.previousElementSibling;
-			if ( separator && separator.matches( '[aria-hidden="true"]' ) ) {
-				separator.remove();
-			}
-			more.remove();
+			takeOut( more );
 			const total = Number( cell.dataset.children || 0 );
 			addMore(
 				row,

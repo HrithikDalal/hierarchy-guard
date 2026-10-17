@@ -805,6 +805,83 @@ describe( 'the tree grid', () => {
 		expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'false' );
 	} );
 
+	it( 'keeps a row open, with its toggle and count, and says so when the user can’t view its subpages', async () => {
+		const tree = bindTree( document, () =>
+			Promise.resolve( page( [], 3 ) )
+		);
+		const toggleButton = row( 4 ).querySelector(
+			'.hierarchy-guard-toggle'
+		);
+		toggleButton.focus();
+
+		await tree.toggle( row( 4 ) );
+
+		expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+		expect( row( 4 ).querySelector( '.hierarchy-guard-toggle' ) ).toBe(
+			toggleButton
+		);
+		const cell = row( 4 ).querySelector( '.hierarchy-guard-cell' );
+		expect( cell.dataset.children ).toBe( '3' );
+		expect( cell.textContent ).toBe( '3 subpages' );
+		const notice = rows()[ 1 ];
+		expect( notice.className ).toBe(
+			'level-1 hierarchy-guard-status hierarchy-guard-hidden'
+		);
+		expect( notice.textContent ).toBe( 'You can’t view these subpages.' );
+		expect( document.activeElement ).toBe( toggleButton );
+	} );
+
+	it( 'leads on past a page the user can’t view to the subpages they can', async () => {
+		const load = vi.fn( ( id, number ) =>
+			Promise.resolve(
+				1 === number
+					? page( [], 52, true )
+					: page( [ child( 60, 'Open' ) ], 52, false, false, 50 )
+			)
+		);
+		const tree = bindTree( document, load );
+
+		await tree.toggle( row( 9 ) );
+
+		expect( rows()[ 3 ].textContent ).toBe(
+			'You can’t view these subpages.'
+		);
+		const more = document.querySelector( '.hierarchy-guard-more' );
+		expect( more.textContent ).toBe( 'Show more · 0 of 52 subpages shown' );
+		more.querySelector( 'button' ).click();
+		await settle();
+		expect( load ).toHaveBeenLastCalledWith( 9, 2 );
+		expect( row( 60 ).getAttribute( 'aria-posinset' ) ).toBe( '51' );
+		expect(
+			document.querySelectorAll( '.hierarchy-guard-hidden' )
+		).toHaveLength( 1 );
+	} );
+
+	it( 'keeps the row the server opened onto subpages the user can’t view, and says so in a row', () => {
+		mountScreen(
+			coreRow( {
+				id: 9,
+				title: 'Locations',
+				children: 128,
+				open: 1,
+				extra: '<span aria-hidden="true"> · </span><span class="hierarchy-guard-hidden">You can’t view these subpages.</span><span aria-hidden="true"> · </span><a class="hierarchy-guard-more" href="edit.php?hierarchy_guard_children_page=2" data-page="2">Show more</a>',
+			} ) + coreRow( { id: 8, title: 'Contact', position: 2 } )
+		);
+
+		bindTree( document, fetchChildren );
+
+		expect( row( 9 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+		expect(
+			row( 9 ).querySelector( '.hierarchy-guard-cell' ).textContent
+		).toBe( '128 subpages' );
+		expect( rows().map( ( item ) => item.textContent ) ).toEqual( [
+			expect.any( String ),
+			'You can’t view these subpages.',
+			'Show more · 0 of 128 subpages shown',
+			expect.any( String ),
+		] );
+	} );
+
 	it( 'keeps the levels the server opened, with their Show more', () => {
 		mountScreen(
 			coreRow( {

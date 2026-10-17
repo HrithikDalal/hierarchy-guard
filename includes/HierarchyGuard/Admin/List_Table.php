@@ -161,7 +161,7 @@ final class List_Table {
 		}
 
 		$type   = (string) $post->post_type;
-		$count  = $this->shown_count( $post );
+		$count  = $this->child_count( (int) $post->ID, $type );
 		$cap    = Subtree::count_cap();
 		$parts  = [];
 		$parent = (int) $post->post_parent;
@@ -208,8 +208,10 @@ final class List_Table {
 
 	/**
 	 * The Tree view's cell: the toggle for a page the user may edit, the
-	 * count, and under an opened page with more subpages a link to the next
-	 * 50, with the row's place in the tree for the script.
+	 * count, for an opened page whose page of subpages holds none the user
+	 * may read a sentence saying so, and under an opened page with more
+	 * subpages a link to the next 50, with the row's place in the tree for
+	 * the script.
 	 *
 	 * @param WP_Post  $post  Row's post.
 	 * @param int      $count Live children, up to the cap plus one.
@@ -241,6 +243,9 @@ final class List_Table {
 						: sprintf( esc_html__( 'Show the subpages of “%s”', 'hierarchy-guard' ), $title )
 				)
 			);
+		}
+		if ( null !== $row && $row['hidden'] ) {
+			$parts[] = '<span class="hierarchy-guard-hidden">' . esc_html__( 'You can’t view these subpages.', 'hierarchy-guard' ) . '</span>';
 		}
 		if ( null !== $row && $row['more'] ) {
 			$parts[] = sprintf(
@@ -326,7 +331,7 @@ final class List_Table {
 		if ( ! is_array( $actions ) || ! $post instanceof WP_Post || ! Post_Types::is_supported( (string) $post->post_type ) ) {
 			return $actions;
 		}
-		if ( 0 === $this->shown_count( $post ) ) {
+		if ( 0 === $this->child_count( (int) $post->ID, (string) $post->post_type ) ) {
 			return $actions;
 		}
 
@@ -416,19 +421,6 @@ final class List_Table {
 		}
 		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Show all pages', 'hierarchy-guard' ) );
 		echo '</span>';
-	}
-
-	/**
-	 * A row's live child count as the screen shows it: none for a page the
-	 * Tree view opened without JavaScript and found no subpages the user may
-	 * read under, as the script shows it.
-	 *
-	 * @param WP_Post $post Row's post.
-	 * @return int Count, up to the cap plus one.
-	 */
-	private function shown_count( WP_Post $post ): int {
-		$row = null !== $this->tree ? $this->tree->row( (int) $post->ID ) : null;
-		return null !== $row && $row['empty'] ? 0 : $this->child_count( (int) $post->ID, (string) $post->post_type );
 	}
 
 	/**

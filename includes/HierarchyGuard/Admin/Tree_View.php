@@ -37,10 +37,10 @@ final class Tree_View {
 	/**
 	 * What the screen knows about each tree row, by post ID: its level, its
 	 * parent, its place among its siblings, for an opened row the page of
-	 * subpages shown and whether more follow, and whether opening it found
+	 * subpages shown, whether more follow, and whether that page holds
 	 * none the user may read.
 	 *
-	 * @var array<int,array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,empty:bool}>
+	 * @var array<int,array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,hidden:bool}>
 	 */
 	private array $rows = [];
 
@@ -276,7 +276,7 @@ final class Tree_View {
 	 * What the screen knows about a tree row, or null when it is not one.
 	 *
 	 * @param int $post_id Post ID.
-	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,empty:bool}|null
+	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,hidden:bool}|null
 	 */
 	public function row( int $post_id ): ?array {
 		return $this->rows[ $post_id ] ?? null;
@@ -546,9 +546,8 @@ final class Tree_View {
 			$out[]             = $child;
 			++$shown;
 		}
-		if ( 0 === $shown ) {
-			// None to show, as for a stale link or subpages the user may not read: on its first page it shows as a page without any, as the script shows it.
-			$this->rows[ $node ]['empty'] = 1 === $page;
+		if ( 0 === $total ) {
+			// A stale link to a page whose subpages have gone: it has none, and stays closed.
 			return;
 		}
 		$this->rows[ $node ] = array_merge(
@@ -558,6 +557,8 @@ final class Tree_View {
 				'shown'  => $page,
 				'more'   => $page * self::PER_PAGE < min( $total, $cap ),
 				'capped' => $capped && $page * self::PER_PAGE >= $cap,
+				// Subpages exist, but none on this page the user may read: the row says so, and keeps its toggle and count.
+				'hidden' => 0 === $shown,
 			]
 		);
 	}
@@ -570,7 +571,7 @@ final class Tree_View {
 	 * @param int|null $position  Place among its siblings, from 1, when known.
 	 * @param int|null $setsize   Number of its siblings, when known.
 	 * @param int      $page      The page of its parent's subpages it is on.
-	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,empty:bool}
+	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,hidden:bool}
 	 */
 	private static function fact( int $level, int $parent_id, ?int $position, ?int $setsize, int $page ): array {
 		return [
@@ -583,7 +584,7 @@ final class Tree_View {
 			'shown'    => 0,
 			'more'     => false,
 			'capped'   => false,
-			'empty'    => false,
+			'hidden'   => false,
 		];
 	}
 

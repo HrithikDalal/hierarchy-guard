@@ -520,12 +520,16 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '2 subpages</a>', $cell, 'Its count still links to what sits under it.' );
 	}
 
-	public function test_a_page_opened_whose_only_subpages_the_user_may_not_read_prints_without_subpages(): void {
-		$hidden = $this->ids['leadership'];
+	public function test_a_page_opened_whose_subpages_the_user_may_not_read_keeps_its_toggle_and_count_and_says_so(): void {
+		$hidden = [ $this->ids['leadership'] ];
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$hidden[] = $this->page( sprintf( 'kept-%02d', $i ), $this->ids['team'] );
+		}
+		$readable = $this->page( 'zz-open', $this->ids['team'] );
 		add_filter(
 			'map_meta_cap',
 			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
-				return 'read_post' === $cap && isset( $args[0] ) && $hidden === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+				return 'read_post' === $cap && isset( $args[0] ) && in_array( (int) $args[0], $hidden, true ) ? [ 'do_not_allow' ] : $caps;
 			},
 			10,
 			4
@@ -534,11 +538,13 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		$cell = $this->cell( $this->ids['team'] );
 
-		$this->assertStringNotContainsString( 'hierarchy-guard-toggle', $cell, 'Opening it again would show nothing.' );
-		$this->assertStringContainsString( 'data-children="0"', $cell );
-		$this->assertStringContainsString( '<span aria-hidden="true">—</span><span class="screen-reader-text">No subpages</span>', $cell, 'As the script shows it.' );
-		$this->assertArrayNotHasKey( 'hierarchy_guard_subpages', $this->table->row_actions( [], get_post( $this->ids['team'] ) ) );
-		$this->assertArrayHasKey( 'hierarchy_guard_subpages', $this->table->row_actions( [], get_post( $this->ids['about'] ) ) );
+		$this->assertStringContainsString( '<span class="screen-reader-text">Hide the subpages of “Team”</span>', $cell, 'Open, with its toggle.' );
+		$this->assertStringContainsString( 'data-children="52"', $cell, 'The live count, so Trash still asks what happens to them.' );
+		$this->assertStringContainsString( '52 subpages</a>', $cell );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-hidden">You can’t view these subpages.</span>', $cell );
+		$this->assertStringContainsString( 'hierarchy_guard_children_page=2', $cell, 'Show more leads to the readable one.' );
+		$this->assertArrayHasKey( 'hierarchy_guard_subpages', $this->table->row_actions( [], get_post( $this->ids['team'] ) ) );
+		$this->assertNotContains( $readable, wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ) );
 	}
 
 	public function test_a_tree_screen_counts_its_opened_levels_in_the_same_one_query(): void {
