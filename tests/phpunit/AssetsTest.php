@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\Assets;
+use HierarchyGuard\Admin\Tree_View;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
@@ -42,6 +43,10 @@ final class AssetsTest extends WP_UnitTestCase {
 			wp_deregister_script( 'hierarchy-guard-' . $bundle );
 		}
 		unset( $_GET['tab'] );
+		foreach ( [ 'list-table', 'editor' ] as $bundle ) {
+			wp_dequeue_style( 'hierarchy-guard-' . $bundle );
+			wp_deregister_style( 'hierarchy-guard-' . $bundle );
+		}
 		wp_dequeue_style( 'wp-components' );
 		set_current_screen( 'front' );
 		parent::tear_down();
@@ -77,6 +82,30 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'window.hierarchyGuard = {', implode( '', (array) $script->extra['before'] ) );
 		$this->assertSame( 'hierarchy-guard', $script->textdomain );
 		$this->assertTrue( wp_style_is( 'wp-components', 'enqueued' ), 'Components need their styles.' );
+	}
+
+	public function test_a_bundle_s_right_to_left_stylesheet_replaces_it_right_to_left(): void {
+		$assets = new Assets( new Providers(), $this->dir );
+		foreach ( [ 'list-table', 'editor' ] as $bundle ) {
+			$this->build( $bundle, [] );
+			// phpcs:disable WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Throwaway files in the temp directory.
+			file_put_contents( $this->dir . '/build/' . $bundle . '.css', '' );
+			file_put_contents( $this->dir . '/build/' . $bundle . '-rtl.css', '' );
+			// phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+
+			$assets->enqueue( $bundle );
+
+			$this->assertSame( 'replace', wp_styles()->get_data( 'hierarchy-guard-' . $bundle, 'rtl' ), "{$bundle}-rtl.css loads in its place right to left." );
+		}
+	}
+
+	public function test_a_stylesheet_without_a_right_to_left_build_is_left_alone(): void {
+		$this->build( 'list-table', [] );
+		file_put_contents( $this->dir . '/build/list-table.css', '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- A throwaway file in the temp directory.
+
+		( new Assets( new Providers(), $this->dir ) )->enqueue( 'list-table' );
+
+		$this->assertFalse( wp_styles()->get_data( 'hierarchy-guard-list-table', 'rtl' ) );
 	}
 
 	public function test_the_settings_every_bundle_reads(): void {
@@ -129,6 +158,32 @@ final class AssetsTest extends WP_UnitTestCase {
 		global $wp_filter;
 		$found = false;
 		foreach ( $wp_filter['hierarchy_guard_list_script']->callbacks[10] ?? [] as $callback ) {
+			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets );
+		}
+
+		$this->assertTrue( $found );
+	}
+
+	public function test_the_tree_s_stylesheet_loads_in_the_head_and_its_script_in_the_footer(): void {
+		$this->build( 'list-table', [] );
+		file_put_contents( $this->dir . '/build/list-table.css', '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- A throwaway file in the temp directory.
+		set_current_screen( 'edit-page' );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		$assets->enqueue_admin( 'edit.php' );
+		$this->assertFalse( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The list keeps its stylesheet in the footer.' );
+
+		$assets->want_list_style();
+		$assets->enqueue_admin( 'edit.php' );
+		$this->assertTrue( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The tree’s indents print with the head, before its rows.' );
+		$this->assertSame( 'abc123', wp_styles()->registered['hierarchy-guard-list-table']->ver );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The script still waits for the footer.' );
+	}
+
+	public function test_the_plugin_listens_for_the_tree_s_stylesheet(): void {
+		global $wp_filter;
+		$found = false;
+		foreach ( $wp_filter[ Tree_View::STYLE ]->callbacks[10] ?? [] as $callback ) {
 			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets );
 		}
 

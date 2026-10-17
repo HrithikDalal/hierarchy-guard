@@ -23,8 +23,9 @@ use WP_REST_Response;
 use WP_REST_Server;
 
 /**
- * Backs the editor panel, the Quick Edit warning and the trash dialog. Every
- * route is read-only and needs edit rights on the post it reads.
+ * Backs the editor panel, the Quick Edit warning, the trash dialog and the
+ * Tree view's subpages, 50 at a time with tree=1. Every route is read-only
+ * and needs edit rights on the post it reads.
  */
 final class Hierarchy_Controller {
 
@@ -72,11 +73,22 @@ final class Hierarchy_Controller {
 				'callback'            => [ $this, 'hierarchy' ],
 				'permission_callback' => [ $this, 'can_edit' ],
 				'args'                => [
-					'id'            => $id,
-					'children_page' => [
+					'id'                => $id,
+					'children_page'     => [
 						'type'    => 'integer',
 						'minimum' => 1,
 						'default' => 1,
+					],
+					'children_per_page' => [
+						'type'    => 'integer',
+						'minimum' => 1,
+						'maximum' => Overview::MAX_CHILDREN_PER_PAGE,
+						'default' => Overview::CHILDREN_PER_PAGE,
+					],
+					// The Tree view reads only the subpages, without the editor panel's fields.
+					'tree'              => [
+						'type'    => 'boolean',
+						'default' => false,
 					],
 				],
 			]
@@ -123,14 +135,18 @@ final class Hierarchy_Controller {
 	}
 
 	/**
-	 * GET /posts/{id}/hierarchy.
+	 * GET /posts/{id}/hierarchy: the editor panel's summary, or with tree=1
+	 * only one page of the subpages.
 	 *
 	 * @param WP_REST_Request $request Request.
 	 * @return WP_REST_Response
 	 */
 	public function hierarchy( WP_REST_Request $request ): WP_REST_Response {
 		$post = get_post( (int) $request['id'] );
-		return new WP_REST_Response( $this->overview->describe( $post, (int) $request['children_page'] ) );
+		if ( true === $request['tree'] ) {
+			return new WP_REST_Response( $this->overview->subpages( $post, (int) $request['children_page'], (int) $request['children_per_page'] ) );
+		}
+		return new WP_REST_Response( $this->overview->describe( $post, (int) $request['children_page'], (int) $request['children_per_page'] ) );
 	}
 
 	/**

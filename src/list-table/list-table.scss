@@ -44,3 +44,72 @@
 .fixed .column-hierarchy_guard {
 	width: 20%;
 }
+
+// The Tree view: each level indents its title by one step, and a row's
+// toggle sits in the step before its title, so titles line up by level.
+// A status row (Show more, loading, a failure, the cap) lines up with the
+// titles of the subpages it is about. A row deeper than level 20 indents
+// as level 20: $deep matches a level class that is none of level-0 to 20.
+// On a desktop the steps are 24 pixels until a smaller step takes over, which
+// brings level 20 to a fifth of the screen, so every level still steps and a
+// deep title keeps its room: a cell's percentage padding would be the table's.
+// The smaller step is 8 pixels, or less where 19 of them don't fit.
+$small: min(8px, (20vw - 58px) / 19);
+
+@function indent($level) {
+
+	@return min(#{34px + 24px * $level}, calc(20vw - #{20 - $level} * #{$small}));
+}
+
+$deep: '[class*="level-"]';
+
+@for $level from 0 through 20 {
+	$deep: $deep + ":not(.level-#{$level})";
+}
+
+.hierarchy-guard-tree-view #the-list {
+
+	.column-title {
+		padding-inline-start: 34px;
+	}
+
+	@for $level from 1 through 20 {
+		.level-#{$level} .column-title,
+		.level-#{$level}.hierarchy-guard-status > .colspanchange {
+			padding-inline-start: indent($level);
+		}
+	}
+
+	#{$deep} .column-title,
+	#{$deep}.hierarchy-guard-status > .colspanchange {
+		padding-inline-start: indent(20);
+	}
+
+	.column-title .hierarchy-guard-toggle {
+		display: inline-block;
+		width: 24px;
+		margin-inline-start: -24px;
+		vertical-align: top;
+		text-decoration: none;
+	}
+}
+
+// On a phone, at core's own breakpoint, the step halves and the indent
+// stops at half the row, so a deep title keeps its room.
+@media screen and (max-width: 782px) {
+
+	.hierarchy-guard-tree-view #the-list {
+
+		@for $level from 1 through 20 {
+			.level-#{$level} .column-title,
+			.level-#{$level}.hierarchy-guard-status > .colspanchange {
+				padding-inline-start: min(#{34px + 12px * $level}, 50%);
+			}
+		}
+
+		#{$deep} .column-title,
+		#{$deep}.hierarchy-guard-status > .colspanchange {
+			padding-inline-start: min(#{34px + 12px * 20}, 50%);
+		}
+	}
+}

@@ -2,12 +2,24 @@
  * Routes and download URLs.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { csvUrl, sourceRoute } from '../api';
+import { csvUrl, hierarchyPath, sourceRoute } from '../api';
 import config from '../config';
 
 describe( 'routes', () => {
 	beforeEach( () => {
 		config.restNonce = 'abc';
+	} );
+
+	it( 'asks for a page of children, 50 at a time for the tree', () => {
+		expect( hierarchyPath( 42 ) ).toBe(
+			'/hierarchy-guard/v1/posts/42/hierarchy?children_page=1'
+		);
+		expect( hierarchyPath( 42, 2, 50 ) ).toBe(
+			'/hierarchy-guard/v1/posts/42/hierarchy?children_page=2&children_per_page=50'
+		);
+		expect( hierarchyPath( 42, 2, 50, true ) ).toBe(
+			'/hierarchy-guard/v1/posts/42/hierarchy?children_page=2&children_per_page=50&tree=1'
+		);
 	} );
 
 	it( 'names the change routes', () => {

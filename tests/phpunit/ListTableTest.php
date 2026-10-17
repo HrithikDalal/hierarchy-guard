@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\List_Table;
+use HierarchyGuard\Admin\Tree_View;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
 use WP_Query;
@@ -44,8 +45,12 @@ final class ListTableTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		unset( $_GET[ List_Table::QUERY_VAR ], $GLOBALS['pagenow'] );
-		$GLOBALS['wp_query'] = new WP_Query();
+		unset( $_GET[ List_Table::QUERY_VAR ], $_GET[ Tree_View::QUERY_VAR ], $_GET[ Tree_View::OPEN_VAR ], $_GET['s'], $GLOBALS['pagenow'] );
+		$GLOBALS['wp_query']     = new WP_Query();
+		$GLOBALS['wp_the_query'] = $GLOBALS['wp_query'];
+		if ( isset( $GLOBALS['wp_locale'] ) ) {
+			$GLOBALS['wp_locale']->text_direction = 'ltr';
+		}
 		set_current_screen( 'front' );
 		parent::tear_down();
 	}
@@ -315,6 +320,13 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertSame( $vars, $this->table->filter_request( $vars ), 'The filtered ID is not a page.' );
 	}
 
+	public function test_an_array_post_type_is_left_alone_without_a_warning(): void {
+		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
+		$vars                          = [ 'post_type' => [ 'post', 'page' ] ];
+
+		$this->assertSame( $vars, $this->table->filter_request( $vars ) );
+	}
+
 	public function test_the_filter_stops_at_the_cap_and_says_so(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
 		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
@@ -427,5 +439,215 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->cell( $this->ids['about'] );
 		$this->cell( $this->ids['team'] );
 		$this->assertSame( 1, $asked );
+	}
+
+	/**
+	 * A list table on the Tree view, its rows placed as core's main query
+	 * holds them: the top-level pages given, and the opened levels.
+	 *
+	 * @param int[] $top  Top-level post IDs on the screen.
+	 * @param int   $open Page opened without JavaScript, or 0.
+	 * @return List_Table
+	 */
+	private function tree_table( array $top, int $open = 0 ): List_Table {
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		if ( $open > 0 ) {
+			$_GET[ Tree_View::OPEN_VAR ] = (string) $open;
+		}
+		$tree  = new Tree_View();
+		$query = new WP_Query();
+		$query->set( 'post_type', 'page' );
+		$query->found_posts      = count( $top );
+		$GLOBALS['wp_the_query'] = $query;
+		$query->posts            = (array) $tree->open_levels( array_map( 'get_post', $top ), $query );
+		$GLOBALS['wp_query']     = $query;
+		$this->table             = new List_Table( $tree );
+		return $this->table;
+	}
+
+	public function test_a_tree_cell_holds_the_toggle_and_the_count_but_not_the_parent(): void {
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringNotContainsString( 'Parent:', $cell, 'The indent shows the parent.' );
+		$this->assertStringContainsString( '<a class="hierarchy-guard-toggle" href="' . esc_url( Tree_View::place_url( 'page', $this->ids['team'] ) ) . '"><span class="dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span><span class="screen-reader-text">Show the subpages of “Team”</span></a>', $cell, 'Without JavaScript the toggle reloads the view opened at the page.' );
+		$this->assertStringContainsString( 'aria-label="View the 1 subpage of “Team”">1 subpage</a>', $cell );
+		$this->assertStringContainsString( 'data-id="' . $this->ids['team'] . '" data-children="1" data-status="publish" data-level="2" data-parent="' . $this->ids['about'] . '" data-page="1" data-position="2" data-setsize="2"', $cell );
+	}
+
+	public function test_an_opened_tree_row_closes_to_its_parent_and_says_what_it_shows(): void {
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
+
+		$cell = $this->cell( $this->ids['about'] );
+
+		$this->assertStringContainsString( 'href="' . esc_url( Tree_View::place_url( 'page', $this->ids['company'] ) ) . '"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span><span class="screen-reader-text">Hide the subpages of “About”</span>', $cell );
+		$this->assertStringContainsString( 'data-open="1"', $cell );
+		$this->assertStringContainsString( '<span aria-hidden="true">—</span><span class="screen-reader-text">No subpages</span>', $this->cell( $this->ids['history'] ) );
+	}
+
+	public function test_an_opened_tree_row_with_more_links_to_its_next_50(): void {
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$this->page( sprintf( 'more-%02d', $i ), $this->ids['about'] );
+		}
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
+
+		$this->assertStringContainsString( '<a class="hierarchy-guard-more" href="' . esc_url( Tree_View::place_url( 'page', $this->ids['about'], 2 ) ) . '" data-page="2" aria-label="Show more subpages of “About”">Show more</a>', $this->cell( $this->ids['about'] ), 'Named for its page, as the script’s button is.' );
+	}
+
+	public function test_past_the_cap_an_opened_tree_row_says_only_the_first_are_shown(): void {
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
+
+		$this->assertStringContainsString( '<span class="hierarchy-guard-capped">Only the first 1 subpage is shown.</span>', $this->cell( $this->ids['about'] ) );
+	}
+
+	public function test_a_tree_row_the_user_may_not_edit_has_no_toggle_but_keeps_its_count(): void {
+		$locked = $this->ids['about'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $locked ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $locked === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['company'] );
+
+		$cell = $this->cell( $this->ids['about'] );
+
+		$this->assertStringNotContainsString( 'hierarchy-guard-toggle', $cell, 'The route needs edit rights on the page it opens.' );
+		$this->assertStringContainsString( '2 subpages</a>', $cell, 'Its count still links to what sits under it.' );
+	}
+
+	public function test_a_page_opened_whose_subpages_the_user_may_not_read_keeps_its_toggle_and_count_and_says_so(): void {
+		$hidden = [ $this->ids['leadership'] ];
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$hidden[] = $this->page( sprintf( 'kept-%02d', $i ), $this->ids['team'] );
+		}
+		$readable = $this->page( 'zz-open', $this->ids['team'] );
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && in_array( (int) $args[0], $hidden, true ) ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['team'] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringContainsString( '<span class="screen-reader-text">Hide the subpages of “Team”</span>', $cell, 'Open, with its toggle.' );
+		$this->assertStringContainsString( 'data-children="52"', $cell, 'The live count, so Trash still asks what happens to them.' );
+		$this->assertStringContainsString( '52 subpages</a>', $cell );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-hidden">You can’t view these subpages.</span>', $cell );
+		$this->assertStringContainsString( 'hierarchy_guard_children_page=2', $cell, 'Show more leads to the readable one.' );
+		$this->assertArrayHasKey( 'hierarchy_guard_subpages', $this->table->row_actions( [], get_post( $this->ids['team'] ) ) );
+		$this->assertNotContains( $readable, wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ) );
+	}
+
+	public function test_a_tree_screen_counts_its_opened_levels_in_the_same_one_query(): void {
+		for ( $i = 1; $i <= 30; $i++ ) {
+			$this->page( sprintf( 'wide-%02d', $i ), $this->ids['about'] );
+		}
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
+		$rows = wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' );
+
+		$queries = get_num_queries();
+		foreach ( $rows as $id ) {
+			$this->cell( (int) $id );
+		}
+
+		$this->assertCount( 34, $rows );
+		$this->assertSame( 1, get_num_queries() - $queries, 'The 34 rows, opened levels included, are counted in one statement.' );
+	}
+
+	public function test_a_tree_search_shows_each_parent_path_with_ancestor_links(): void {
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'lead';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['leadership'], $this->ids['company'] ] );
+
+		$cell = $this->cell( $this->ids['leadership'] );
+
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent pages: </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['company'] ) ) . '">Company</a><span aria-hidden="true"> › </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '">About</a><span aria-hidden="true"> › </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['team'] ) ) . '">Team</a>', $cell, 'Every ancestor links to its own subtree.' );
+		$this->assertStringContainsString( 'Top level, no subpages', $this->cell( $this->page( 'lonely-lead' ) ) );
+		$this->assertStringContainsString( '1 subpage</a>', $this->cell( $this->ids['company'] ) );
+	}
+
+	public function test_a_tree_search_names_one_parent_page_in_the_singular(): void {
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'about';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['about'] ] );
+
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent page: </span><a href="', $this->cell( $this->ids['about'] ) );
+	}
+
+	public function test_a_closed_toggle_points_toward_the_title_right_to_left(): void {
+		$GLOBALS['wp_locale']->text_direction = 'rtl';
+		$this->tree_table( [ $this->ids['company'] ] );
+
+		$this->assertStringContainsString( 'dashicons-arrow-left-alt2', $this->cell( $this->ids['company'] ), 'tear_down() sets the direction back.' );
+	}
+
+	public function test_an_opened_top_level_row_closes_to_the_tree_with_nothing_opened(): void {
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['company'] );
+
+		$this->assertStringContainsString( '<a class="hierarchy-guard-toggle" href="' . esc_url( Tree_View::place_url( 'page' ) ) . '"><span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span>', $this->cell( $this->ids['company'] ), 'No hierarchy_guard_open and no children page.' );
+	}
+
+	public function test_a_tree_search_names_a_parent_in_the_trash_without_a_link(): void {
+		$this->trash_raw( $this->ids['about'] );
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'team';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['team'] ] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span>About (in the Trash)<span aria-hidden="true"> · </span>', $cell );
+		$this->assertStringNotContainsString( 'href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '"', $cell, 'A page in the Trash is no filter.' );
+	}
+
+	public function test_a_tree_search_hides_a_parent_the_user_may_not_read(): void {
+		$private = $this->ids['about'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $private ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $private === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'team';
+		$this->table                  = new List_Table( new Tree_View() );
+		$this->screen_rows( [ $this->ids['team'] ] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span>(private page)<span aria-hidden="true"> · </span>', $cell );
+		$this->assertStringNotContainsString( 'About', $cell, 'Neither its title nor a link to it.' );
+	}
+
+	public function test_a_tree_search_loads_the_screen_s_ancestors_one_level_at_a_time(): void {
+		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
+		$_GET['s']                    = 'e';
+		$this->table                  = new List_Table( new Tree_View() );
+		$deep                         = $this->page( 'deep', $this->ids['leadership'] );
+		$this->screen_rows( [ $deep, $this->ids['history'] ] );
+		foreach ( [ 'company', 'about', 'team', 'leadership' ] as $slug ) {
+			clean_post_cache( $this->ids[ $slug ] );
+		}
+
+		$queries = get_num_queries();
+		$this->cell( $deep );
+		$this->cell( $this->ids['history'] );
+
+		// The counts; the rows' parents, Leadership and About; then Team; then Company: one query per level, whatever the rows.
+		$this->assertSame( 4, get_num_queries() - $queries );
+		$this->assertStringContainsString( '>Leadership</a>', $this->cell( $deep ) );
 	}
 }

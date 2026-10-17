@@ -778,3 +778,184 @@ export function copiedSentence( count, capped ) {
 export function pairsText( pairs ) {
 	return pairs.map( ( pair ) => pair.old + ' ' + pair.new ).join( '\n' );
 }
+
+/**
+ * The Tree view's toggle: "Show the subpages of “About”", or "Hide …" once open.
+ *
+ * @param {boolean} open  Whether the row is open.
+ * @param {string}  title Page title.
+ * @return {string} Label.
+ */
+export function treeToggleLabel( open, title ) {
+	return open
+		? sprintf(
+				/* translators: %s: page title. */
+				__( 'Hide the subpages of “%s”', 'hierarchy-guard' ),
+				title
+			)
+		: sprintf(
+				/* translators: %s: page title. */
+				__( 'Show the subpages of “%s”', 'hierarchy-guard' ),
+				title
+			);
+}
+
+/**
+ * The name of the Tree view's "Show more" button: "Show more subpages of “About”".
+ *
+ * @param {string} title The opened page's title.
+ * @return {string} Label.
+ */
+export function treeMoreLabel( title ) {
+	return sprintf(
+		/* translators: %s: page title. */
+		__( 'Show more subpages of “%s”', 'hierarchy-guard' ),
+		title
+	);
+}
+
+/**
+ * The name of the Tree view's "Try again" button: "Try again loading subpages of “About”".
+ *
+ * @param {string} title The opened page's title.
+ * @return {string} Label.
+ */
+export function treeRetryLabel( title ) {
+	return sprintf(
+		/* translators: %s: page title. */
+		__( 'Try again loading subpages of “%s”', 'hierarchy-guard' ),
+		title
+	);
+}
+
+/**
+ * The Tree view's "Show more" row: "50 of 128 subpages shown".
+ *
+ * @param {number}  shown  Subpages on the screen.
+ * @param {number}  total  Subpages in all, at most the cap.
+ * @param {boolean} capped Whether more than the cap exist.
+ * @return {string} Line.
+ */
+export function treeShownLine( shown, total, capped = false ) {
+	return sprintf(
+		/* translators: 1: subpages on the screen, such as 50, 2: subpages in all, such as 128 or 1,000+. */
+		_n(
+			'%1$s of %2$s subpage shown',
+			'%1$s of %2$s subpages shown',
+			total,
+			'hierarchy-guard'
+		),
+		formatCount( shown ),
+		formatCount( total, capped )
+	);
+}
+
+/**
+ * The Tree view's last row past the cap: "Only the first 1,000 subpages are shown."
+ *
+ * @param {number} cap The most subpages the tree shows.
+ * @return {string} Sentence.
+ */
+export function treeCappedSentence( cap ) {
+	return sprintf(
+		/* translators: %s: the most subpages the tree shows, such as 1,000. */
+		_n(
+			'Only the first %s subpage is shown.',
+			'Only the first %s subpages are shown.',
+			cap,
+			'hierarchy-guard'
+		),
+		formatCount( cap )
+	);
+}
+
+/**
+ * The row actions and labels of a subpage the Tree view loaded, as core
+ * words them for the rows it prints.
+ *
+ * @param {string} title Page title.
+ * @return {Object<string,string>} Labels.
+ */
+export function treeRowLabels( title ) {
+	return {
+		edit: __( 'Edit', 'hierarchy-guard' ),
+		editLabel: sprintf(
+			/* translators: %s: page title. */
+			__( 'Edit “%s”', 'hierarchy-guard' ),
+			title
+		),
+		trash: __( 'Trash', 'hierarchy-guard' ),
+		trashLabel: sprintf(
+			/* translators: %s: page title. */
+			__( 'Move “%s” to the Trash', 'hierarchy-guard' ),
+			title
+		),
+		view: __( 'View', 'hierarchy-guard' ),
+		viewLabel: sprintf(
+			/* translators: %s: page title. */
+			__( 'View “%s”', 'hierarchy-guard' ),
+			title
+		),
+		subpages: __( 'View subpages', 'hierarchy-guard' ),
+		subpagesLabel: sprintf(
+			/* translators: %s: page title. */
+			__( 'View subpages of “%s”', 'hierarchy-guard' ),
+			title
+		),
+		details: __( 'Show more details', 'hierarchy-guard' ),
+		noSubpages: __( 'No subpages', 'hierarchy-guard' ),
+		noAuthor: __( '(no author)', 'hierarchy-guard' ),
+		// The name WordPress 7.1 gives an untitled row's title cell.
+		noTitle: __( 'no title', 'hierarchy-guard' ),
+	};
+}
+
+/**
+ * "View the 3 subpages of “About”", the label of a row's count link.
+ *
+ * @param {number}  count  Subpages.
+ * @param {boolean} capped Whether more exist.
+ * @param {string}  title  Page title.
+ * @return {string} Label.
+ */
+export function viewSubpagesLabel( count, capped, title ) {
+	return sprintf(
+		/* translators: 1: number of subpages, such as 3 or 1,000+, 2: page title. */
+		_n(
+			'View the %1$s subpage of “%2$s”',
+			'View the %1$s subpages of “%2$s”',
+			count,
+			'hierarchy-guard'
+		),
+		formatCount( count, capped ),
+		title
+	);
+}
+
+/**
+ * A loaded row's description, as core gives its own rows: "Child of About".
+ *
+ * @param {string} title The parent page's title.
+ * @return {string} Description.
+ */
+export function childOfLabel( title ) {
+	return sprintf(
+		/* translators: %s: parent page title. */
+		__( 'Child of %s', 'hierarchy-guard' ),
+		title
+	);
+}
+
+/**
+ * Core's lock notice on a row: "Priya is currently editing".
+ *
+ * @param {string} name The display name of the user holding the lock.
+ * @return {string} Notice.
+ */
+export function lockedLabel( name ) {
+	return sprintf(
+		/* translators: %s: user's display name. */
+		__( '%s is currently editing', 'hierarchy-guard' ),
+		name
+	);
+}
