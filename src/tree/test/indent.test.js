@@ -22,6 +22,50 @@ const indent = ( level, status = false ) => {
 		.getPropertyValue( 'padding-inline-start' );
 };
 
+/**
+ * A CSS length of pixels, vw, calc() and min(), in pixels at a screen width,
+ * worked out as the browser would: happy-dom keeps the expression, but lays
+ * nothing out.
+ *
+ * @param {string} value CSS length.
+ * @param {number} width Screen width in pixels.
+ * @return {number} Pixels.
+ */
+const pixels = ( value, width ) => {
+	const expression = value
+		.replace(
+			/([\d.]+)vw/g,
+			( match, number ) => `(${ number } * ${ width } / 100)`
+		)
+		.replace( /px/g, '' )
+		.replace( /calc\(/g, '(' )
+		.replace( /min\(/g, 'Math.min(' );
+	if (
+		! /^[\d.\s+\-*/(),]*$/.test( expression.replace( /Math\.min/g, '' ) )
+	) {
+		throw new Error( `Not a length this test reads: ${ value }` );
+	}
+
+	return Function( `return ${ expression };` )();
+};
+
+/**
+ * The indents of levels 0 to 21 at a screen width, in pixels.
+ *
+ * @param {number} width Screen width in pixels.
+ * @return {number[]} Pixels.
+ */
+const indents = ( width ) => {
+	window.happyDOM.setViewport( { width, height: 768 } );
+	try {
+		return Array.from( { length: 22 }, ( unused, level ) =>
+			pixels( indent( level ), width )
+		);
+	} finally {
+		window.happyDOM.setViewport( { width: 1024, height: 768 } );
+	}
+};
+
 describe( 'the indent per level', () => {
 	beforeAll( () => {
 		const style = document.createElement( 'style' );
@@ -34,30 +78,31 @@ describe( 'the indent per level', () => {
 			'<table><tbody id="the-list"></tbody></table>';
 	} );
 
-	// A table cell's percentage padding resolves against the table, so the ceiling is the screen's:
-	// at 1024 pixels a title cell is about 342 wide, and 20vw leaves a deep title 137 of them.
-	it( 'steps by level up to a fifth of the screen, and a row deeper than 20 indents as level 20', () => {
-		expect(
-			[ 0, 1, 20, 21, 25, 120 ].map( ( level ) => indent( level ) )
-		).toEqual( [
-			'34px',
-			'min(58px, 20vw)',
-			'min(514px, 20vw)',
-			'min(514px, 20vw)',
-			'min(514px, 20vw)',
-			'min(514px, 20vw)',
-		] );
+	it.each( [ 1024, 800 ] )(
+		'steps at every level to 20, 24 pixels first, and stops at a fifth of a %i-pixel screen',
+		( width ) => {
+			const steps = indents( width );
+			steps
+				.slice( 1, 21 )
+				.forEach( ( offset, index ) =>
+					expect( offset ).toBeGreaterThan( steps[ index ] )
+				);
+			expect( steps[ 1 ] - steps[ 0 ] ).toBeCloseTo( 24 );
+			expect( steps[ 20 ] ).toBeLessThanOrEqual( 0.2 * width + 0.001 );
+			expect( steps[ 21 ] ).toBe( steps[ 20 ] );
+		}
+	);
+
+	it( 'keeps 24-pixel steps for more levels on a wider screen, and never passes 514 pixels', () => {
+		const wide = indents( 1440 );
+		expect( wide.slice( 0, 6 ) ).toEqual( [ 34, 58, 82, 106, 130, 154 ] );
+		expect( indents( 3000 )[ 20 ] ).toBe( 514 );
 	} );
 
 	it( 'lines a status row deeper than 20 up with its level-20 subpages', () => {
 		expect(
 			[ 1, 20, 21, 40 ].map( ( level ) => indent( level, true ) )
-		).toEqual( [
-			'min(58px, 20vw)',
-			'min(514px, 20vw)',
-			'min(514px, 20vw)',
-			'min(514px, 20vw)',
-		] );
+		).toEqual( [ 1, 20, 20, 20 ].map( ( level ) => indent( level ) ) );
 	} );
 
 	it( 'halves the step on a phone, and a row deeper than 20 stops as level 20 does', () => {
