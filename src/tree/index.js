@@ -9,13 +9,14 @@ import { PER_PAGE } from './rows';
 import { createTree } from './tree';
 
 /**
- * One page of a page's subpages, 50 at a time.
+ * One page of a page's subpages, 50 at a time, without the editor panel's fields.
  *
  * @param {number} id   Page ID.
  * @param {number} page Page of its subpages, from 1.
- * @return {Promise<Object>} The page's hierarchy.
+ * @return {Promise<Object>} The page's subpages.
  */
-const fetchChildren = ( id, page ) => fetchHierarchy( id, page, PER_PAGE );
+const fetchChildren = ( id, page ) =>
+	fetchHierarchy( id, page, PER_PAGE, 'tree' );
 
 /**
  * Sets up the Tree view, if the screen is one.

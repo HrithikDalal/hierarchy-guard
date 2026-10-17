@@ -3,6 +3,7 @@
  * The tree grid on core's list table.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import apiFetch from '@wordpress/api-fetch';
 import { speak } from '@wordpress/a11y';
 import { setLocaleData } from '@wordpress/i18n';
 import bindTree from '..';
@@ -21,6 +22,7 @@ const tabStops = () =>
 		.map( ( item ) => item.id );
 
 vi.mock( '@wordpress/a11y', () => ( { speak: vi.fn() } ) );
+vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 
 /**
  * Company (3 subpages), Contact, Locations (128 subpages) on page 2 of the top level.
@@ -754,6 +756,18 @@ describe( 'the tree grid', () => {
 		expect( document.querySelector( '.hierarchy-guard-back' ) ).toBe(
 			null
 		);
+	} );
+
+	it( 'loads a page of 50 subpages from the route, without the editor panel’s fields', async () => {
+		apiFetch.mockResolvedValue( page( [ child( 5, 'About' ) ], 1 ) );
+		const tree = bindTree( document );
+
+		await tree.toggle( row( 4 ) );
+
+		expect( apiFetch ).toHaveBeenCalledWith( {
+			path: '/hierarchy-guard/v1/posts/4/hierarchy?children_page=1&children_per_page=50&context=tree',
+		} );
+		expect( row( 5 ) ).not.toBe( null );
 	} );
 
 	it( 'does nothing outside the Tree view', () => {

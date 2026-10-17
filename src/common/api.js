@@ -13,12 +13,14 @@ const base = () => '/' + config.namespace;
  * @param {number} id      Post ID.
  * @param {number} page    Page of children.
  * @param {number} perPage Children per page; the route's own 10 when omitted.
+ * @param {string} context 'tree' for the subpages alone, or '' for the whole summary.
  * @return {string} Path.
  */
-export function hierarchyPath( id, page = 1, perPage = 0 ) {
+export function hierarchyPath( id, page = 1, perPage = 0, context = '' ) {
 	return addQueryArgs( `${ base() }/posts/${ id }/hierarchy`, {
 		children_page: page,
 		...( perPage ? { children_per_page: perPage } : {} ),
+		...( context ? { context } : {} ),
 	} );
 }
 
@@ -28,10 +30,11 @@ export function hierarchyPath( id, page = 1, perPage = 0 ) {
  * @param {number} id      Post ID.
  * @param {number} page    Page of children.
  * @param {number} perPage Children per page; the route's own 10 when omitted.
+ * @param {string} context 'tree' for the subpages alone, or '' for the whole summary.
  * @return {Promise<Object>} Hierarchy.
  */
-export function fetchHierarchy( id, page = 1, perPage = 0 ) {
-	return apiFetch( { path: hierarchyPath( id, page, perPage ) } );
+export function fetchHierarchy( id, page = 1, perPage = 0, context = '' ) {
+	return apiFetch( { path: hierarchyPath( id, page, perPage, context ) } );
 }
 
 /**

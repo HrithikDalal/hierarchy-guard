@@ -61,34 +61,28 @@ final class Overview {
 	 * @return array<string,mixed>
 	 */
 	public function describe( WP_Post $post, int $children_page = 1, int $per_page = self::CHILDREN_PER_PAGE ): array {
-		$id            = (int) $post->ID;
-		$type          = (string) $post->post_type;
-		$cap           = Subtree::count_cap();
-		$children_page = max( 1, $children_page );
-		$per_page      = max( 1, min( self::MAX_CHILDREN_PER_PAGE, $per_page ) );
+		$id       = (int) $post->ID;
+		$type     = (string) $post->post_type;
+		$cap      = Subtree::count_cap();
+		$subpages = $this->subpages( $post, $children_page, $per_page );
 
-		$children_total = Subtree::count_live_children( $id, $type, $cap + 1 );
-		$descendants    = $children_total > 0 ? Subtree::count_live_descendants( $id, $type, $cap ) : 0;
-		$children       = $this->children( $id, $type, $children_page, $per_page, $children_total > $cap ? null : $children_total );
-		$policy         = Trash_Handler::policy_for( $post );
-		$fallback       = Settings::POLICY_TRASH_CHILDREN === $policy && $descendants > $cap;
-		$to             = Subtree::nearest_live_ancestor( $post );
-		$provider       = $this->providers->detect();
+		$descendants = $subpages['children_total'] > 0 ? Subtree::count_live_descendants( $id, $type, $cap ) : 0;
+		$policy      = Trash_Handler::policy_for( $post );
+		$fallback    = Settings::POLICY_TRASH_CHILDREN === $policy && $descendants > $cap;
+		$to          = Subtree::nearest_live_ancestor( $post );
+		$provider    = $this->providers->detect();
 
 		return [
-			'id'              => $id,
-			'status'          => (string) $post->post_status,
-			'ancestors'       => $this->ancestors( $post ),
-			'children'        => $children,
-			'children_total'  => min( $children_total, $cap ),
-			'children_capped' => $children_total > $cap,
-			'has_more'        => $children_page * $per_page < min( $children_total, $cap ),
-			'descendants'     => [
+			'id'        => $id,
+			'status'    => (string) $post->post_status,
+			'ancestors' => $this->ancestors( $post ),
+		] + $subpages + [
+			'descendants'    => [
 				'count'  => min( $descendants, $cap ),
 				'capped' => $descendants > $cap,
 			],
-			'latest_change'   => $this->latest_change( $id ),
-			'redirects'       => [
+			'latest_change'  => $this->latest_change( $id ),
+			'redirects'      => [
 				// The server redirects only to a page anyone can view, outside the trash.
 				'serving'      => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
 				// The pairs list only pages the server redirects to, so it serves them whenever it serves the type.
@@ -99,10 +93,36 @@ final class Overview {
 					'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
 				],
 			],
-			'trash_policy'    => $fallback ? Settings::POLICY_REPARENT : $policy,
-			'trash_fallback'  => $fallback,
-			'trash_to'        => $to > 0 ? self::ref( $to ) : null,
-			'list_url'        => List_Table::filter_url( $type, $id ),
+			'trash_policy'   => $fallback ? Settings::POLICY_REPARENT : $policy,
+			'trash_fallback' => $fallback,
+			'trash_to'       => $to > 0 ? self::ref( $to ) : null,
+			'list_url'       => List_Table::filter_url( $type, $id ),
+		];
+	}
+
+	/**
+	 * One page of a post's subpages and their count, the part of the summary
+	 * the Tree view reads.
+	 *
+	 * @param WP_Post $post          Post.
+	 * @param int     $children_page Page of children, from 1.
+	 * @param int     $per_page      Children per page, at most MAX_CHILDREN_PER_PAGE.
+	 * @return array{id:int,children:array<int,array<string,mixed>>,children_total:int,children_capped:bool,has_more:bool}
+	 */
+	public function subpages( WP_Post $post, int $children_page = 1, int $per_page = self::CHILDREN_PER_PAGE ): array {
+		$id            = (int) $post->ID;
+		$type          = (string) $post->post_type;
+		$cap           = Subtree::count_cap();
+		$children_page = max( 1, $children_page );
+		$per_page      = max( 1, min( self::MAX_CHILDREN_PER_PAGE, $per_page ) );
+		$total         = Subtree::count_live_children( $id, $type, $cap + 1 );
+
+		return [
+			'id'              => $id,
+			'children'        => $this->children( $id, $type, $children_page, $per_page, $total > $cap ? null : $total ),
+			'children_total'  => min( $total, $cap ),
+			'children_capped' => $total > $cap,
+			'has_more'        => $children_page * $per_page < min( $total, $cap ),
 		];
 	}
 

@@ -521,7 +521,12 @@ final class TreeViewTest extends WP_UnitTestCase {
 	 */
 	private static function loaded( int $parent_id ): array {
 		$request = new \WP_REST_Request( 'GET', '/hierarchy-guard/v1/posts/' . $parent_id . '/hierarchy' );
-		$request->set_query_params( [ 'children_per_page' => Tree_View::PER_PAGE ] );
+		$request->set_query_params(
+			[
+				'children_per_page' => Tree_View::PER_PAGE,
+				'context'           => 'tree',
+			]
+		);
 		return array_column( rest_do_request( $request )->get_data()['children'], null, 'id' );
 	}
 
