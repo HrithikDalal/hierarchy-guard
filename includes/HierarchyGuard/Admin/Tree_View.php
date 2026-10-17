@@ -498,7 +498,8 @@ final class Tree_View {
 		$found   = $next > 0 ? array_search( $next, $ordered, true ) : false;
 		$total   = Subtree::count_live_children( $node, $type, $cap + 1 );
 		$capped  = $total > $cap;
-		$fact    = $this->rows[ $node ] ?? self::fact( $level, 0, null, null, 1 );
+		// Every node already has its row: the top level's from open_levels(), a deeper one's from the level above.
+		$fact = $this->rows[ $node ];
 
 		if ( false !== $found ) {
 			// A level above the opened page: only the path down.
@@ -524,6 +525,21 @@ final class Tree_View {
 		$ids  = array_slice( $ordered, ( $page - 1 ) * self::PER_PAGE, self::PER_PAGE );
 		// Every row put in core's results, the path down included, with its meta and terms in one go, as core's own query reads its rows.
 		_prime_post_caches( array_merge( array_slice( $chain, 1, $level ), $ids ), true, true );
+		$shown = 0;
+		foreach ( $ids as $index => $id ) {
+			$child = get_post( $id );
+			if ( ! $child instanceof WP_Post || ! current_user_can( 'read_post', $id ) ) {
+				continue;
+			}
+			$position          = ( $page - 1 ) * self::PER_PAGE + $index + 1;
+			$this->rows[ $id ] = self::fact( $level + 1, $node, $capped ? null : $position, $capped ? null : $total, $page );
+			$out[]             = $child;
+			++$shown;
+		}
+		if ( 0 === $shown ) {
+			// No subpages to show, as for a stale link to a page whose subpages have gone: it stays closed.
+			return;
+		}
 		$this->rows[ $node ] = array_merge(
 			$fact,
 			[
@@ -533,25 +549,16 @@ final class Tree_View {
 				'capped' => $capped && $page * self::PER_PAGE >= $cap,
 			]
 		);
-		foreach ( $ids as $index => $id ) {
-			$child = get_post( $id );
-			if ( ! $child instanceof WP_Post || ! current_user_can( 'read_post', $id ) ) {
-				continue;
-			}
-			$position          = ( $page - 1 ) * self::PER_PAGE + $index + 1;
-			$this->rows[ $id ] = self::fact( $level + 1, $node, $capped ? null : $position, $capped ? null : $total, $page );
-			$out[]             = $child;
-		}
 	}
 
 	/**
 	 * One row's facts.
 	 *
-	 * @param int      $level    Depth, 0 for the top level.
+	 * @param int      $level     Depth, 0 for the top level.
 	 * @param int      $parent_id Parent post ID, 0 for the top level.
-	 * @param int|null $position Place among its siblings, from 1, when known.
-	 * @param int|null $setsize  Number of its siblings, when known.
-	 * @param int      $page     The page of its parent's subpages it is on.
+	 * @param int|null $position  Place among its siblings, from 1, when known.
+	 * @param int|null $setsize   Number of its siblings, when known.
+	 * @param int      $page      The page of its parent's subpages it is on.
 	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool}
 	 */
 	private static function fact( int $level, int $parent_id, ?int $position, ?int $setsize, int $page ): array {

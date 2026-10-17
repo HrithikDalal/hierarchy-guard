@@ -528,6 +528,17 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertNull( $this->tree->row( (int) end( $rows )->ID )['setsize'], 'No set size past the cap.' );
 	}
 
+	public function test_opening_a_page_without_subpages_leaves_it_closed(): void {
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['history'];
+
+		$rows = $this->open_levels( [ $this->ids['company'] ], 1 );
+
+		$this->assertSame( [ 'company', 'about', 'history' ], wp_list_pluck( $rows, 'post_name' ), 'The path down to it.' );
+		$this->assertTrue( $this->tree->row( $this->ids['about'] )['open'] );
+		$this->assertFalse( $this->tree->row( $this->ids['history'] )['open'], 'A stale link to a page whose subpages have gone: it has none to show.' );
+		$this->assertSame( 0, $this->tree->row( $this->ids['history'] )['shown'] );
+	}
+
 	public function test_a_level_the_user_may_not_edit_stays_closed(): void {
 		$closed = $this->ids['about'];
 		add_filter(
