@@ -244,15 +244,18 @@ final class Overview {
 		_prime_post_caches( $ids, true, true );
 		$counts  = Subtree::child_counts( $ids, $type, $cap + 1 );
 		$posts   = array_filter( array_map( 'get_post', $ids ) );
-		$authors = self::author_names( $posts );
-		// Core's helpers for the states and the edit lock live with its list screens.
+		$holders = [];
+		foreach ( $posts as $post ) {
+			$holders[ (int) $post->ID ] = self::lock_holder( $post );
+		}
+		// The authors and the lock holders, in one query, found or not.
+		$names = self::user_names( array_merge( array_map( static fn( WP_Post $post ): int => (int) $post->post_author, $posts ), $holders ) );
+		// Core's helper for the states lives with its list screens.
 		require_once ABSPATH . 'wp-admin/includes/template.php';
-		require_once ABSPATH . 'wp-admin/includes/post.php';
 		// A display_post_states callback may ask for the screen, as on core's list; a REST request has none, so it gets null.
 		if ( ! function_exists( 'get_current_screen' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/screen.php';
 		}
-		self::cache_lock_holders( $posts );
 
 		$out = [];
 		foreach ( $posts as $index => $child ) {
@@ -275,10 +278,10 @@ final class Overview {
 				'children_count'  => min( $counts[ $child_id ] ?? 0, $cap ),
 				'children_capped' => ( $counts[ $child_id ] ?? 0 ) > $cap,
 				// Not get_the_author_meta(), which reads the loop's author for a post_author of 0.
-				'author'          => $authors[ (int) $child->post_author ] ?? '',
+				'author'          => $names[ (int) $child->post_author ] ?? '',
 				// Core prints each state as HTML; the script sets text, so it gets the text the browser reads.
 				'states'          => array_values( array_map( static fn( $state ): string => self::text( wp_strip_all_tags( (string) $state ) ), (array) get_post_states( $child ) ) ),
-				'locked_by'       => self::locked_by( $child ),
+				'locked_by'       => $names[ $holders[ $child_id ] ] ?? null,
 				'date'            => self::date( $child ),
 				// As core's row: View for a page anyone can view, and for a private page of a viewable type, which this user may read.
 				'view_link'       => is_post_publicly_viewable( $child ) || ( 'private' === $status && is_post_type_viewable( $type ) ) ? (string) get_permalink( $child ) : null,
@@ -289,16 +292,16 @@ final class Overview {
 	}
 
 	/**
-	 * The display names of the posts' authors, by user ID, read in one query
-	 * whether or not each author still exists; a missing one is left out.
-	 * Core's user cache keeps no misses, so a deleted author read per row
-	 * would cost a query a row.
+	 * Display names by user ID, read in one query whether or not each user
+	 * still exists; a missing one is left out. Core's user cache keeps no
+	 * misses, so a deleted author or lock holder read per row would cost a
+	 * query a row.
 	 *
-	 * @param WP_Post[] $posts Posts.
+	 * @param int[] $ids User IDs; 0 is none.
 	 * @return array<int,string>
 	 */
-	private static function author_names( array $posts ): array {
-		$ids = array_values( array_unique( array_filter( array_map( static fn( WP_Post $post ): int => (int) $post->post_author, $posts ) ) ) );
+	private static function user_names( array $ids ): array {
+		$ids = array_values( array_unique( array_filter( array_map( 'intval', $ids ) ) ) );
 		if ( [] === $ids ) {
 			return [];
 		}
@@ -318,25 +321,26 @@ final class Overview {
 	}
 
 	/**
-	 * Reads the users named by the posts' edit locks in one go, from the
-	 * primed meta, so wp_check_post_lock(), which reads the user of every
-	 * lock it finds, and locked_by() find them in the cache.
+	 * The user holding the edit lock on a post the current user may edit, as
+	 * core's row says "… is currently editing", or 0. It reads the lock as
+	 * wp_check_post_lock() does, but leaves finding the user, who may have
+	 * been deleted, to the page's one read of names.
 	 *
-	 * @param WP_Post[] $posts Posts.
+	 * @param WP_Post $post Post.
+	 * @return int User ID, or 0.
 	 */
-	private static function cache_lock_holders( array $posts ): void {
-		$ids = [];
-		foreach ( $posts as $post ) {
-			$lock = explode( ':', (string) get_post_meta( (int) $post->ID, '_edit_lock', true ) );
-			if ( '' !== $lock[0] ) {
-				// As wp_check_post_lock() reads it: a lock without a user is the last editor's.
-				$ids[] = (int) ( $lock[1] ?? get_post_meta( (int) $post->ID, '_edit_last', true ) );
-			}
+	private static function lock_holder( WP_Post $post ): int {
+		$id = (int) $post->ID;
+		if ( 'trash' === $post->post_status || ! current_user_can( 'edit_post', $id ) ) {
+			return 0;
 		}
-		$ids = array_values( array_unique( array_filter( $ids ) ) );
-		if ( [] !== $ids ) {
-			cache_users( $ids );
-		}
+		$lock = explode( ':', (string) get_post_meta( $id, '_edit_lock', true ) );
+		$time = (int) $lock[0];
+		// A lock without a user is the last editor's.
+		$user = isset( $lock[1] ) ? (int) $lock[1] : (int) get_post_meta( $id, '_edit_last', true );
+		/** This filter is documented in wp-admin/includes/ajax-actions.php */
+		$window = (int) apply_filters( 'wp_check_post_lock_window', 150 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own filter.
+		return $time > time() - $window && get_current_user_id() !== $user ? $user : 0;
 	}
 
 	/**
@@ -435,22 +439,6 @@ final class Overview {
 			'date'   => $date,
 			'missed' => $missed,
 		];
-	}
-
-	/**
-	 * Who holds the edit lock on a post the current user may edit, as core's
-	 * row says "… is currently editing", or null.
-	 *
-	 * @param WP_Post $post Post.
-	 * @return string|null Display name.
-	 */
-	public static function locked_by( WP_Post $post ): ?string {
-		if ( 'trash' === $post->post_status || ! current_user_can( 'edit_post', (int) $post->ID ) ) {
-			return null;
-		}
-		$holder = wp_check_post_lock( $post );
-		$user   = false !== $holder ? get_userdata( (int) $holder ) : false;
-		return false !== $user ? self::text( (string) $user->display_name ) : null;
 	}
 
 	/**

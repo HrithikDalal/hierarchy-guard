@@ -504,6 +504,34 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( $one, $fifty, 'The lock holders are read in one go, however many.' );
 	}
 
+	public function test_children_locked_by_a_deleted_user_cost_the_queries_of_one_and_name_no_one(): void {
+		global $wpdb;
+		$children = [ $this->ids['history'], $this->ids['team'] ];
+		for ( $i = 1; $i <= 48; $i++ ) {
+			$children[] = $this->page( sprintf( 'gone-%02d', $i ), $this->ids['about'] );
+		}
+		foreach ( $children as $child ) {
+			// WordPress leaves a page's lock behind when its user is deleted.
+			update_post_meta( $child, '_edit_lock', time() . ':999999' );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertNull( $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'][0]['locked_by'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$found   = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'];
+		$fifty   = $wpdb->num_queries - $queries;
+
+		$this->assertSame( [ null ], array_values( array_unique( array_column( $found, 'locked_by' ) ) ), 'No such user: no one is editing, as core says.' );
+		$this->assertSame( $one, $fifty, 'A missing user is looked up once a page, with the authors.' );
+	}
+
 	public function test_children_whose_authors_are_gone_cost_the_queries_of_one(): void {
 		global $wpdb;
 		for ( $i = 1; $i <= 50; $i++ ) {
