@@ -719,6 +719,30 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( $cost( $small ), $cost( $big ), 'One page of 50 per opened level, read the same way.' );
 	}
 
+	public function test_a_level_under_the_cap_is_counted_from_its_page_without_a_count_query(): void {
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+		$counted                     = function (): array {
+			$parents = [];
+			$log     = static function ( string $statement ) use ( &$parents ): string {
+				if ( preg_match( '/^SELECT COUNT\(\*\) FROM \( SELECT ID FROM \S+ WHERE post_parent = (\d+)/', $statement, $match ) ) {
+					$parents[] = (int) $match[1];
+				}
+				return $statement;
+			};
+			add_filter( 'query', $log );
+			$this->open_levels( [ $this->ids['company'] ], 1 );
+			remove_filter( 'query', $log );
+			return $parents;
+		};
+
+		$this->assertSame( [], $counted(), 'Fewer subpages than the cap: the ordered read already counts them.' );
+
+		// About has two subpages, as many as the cap: only a count says whether more follow.
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 2 );
+		$this->assertSame( [ $this->ids['about'] ], $counted() );
+		$this->assertSame( 2, $this->tree->row( $this->ids['team'] )['setsize'] );
+	}
+
 	public function test_the_opened_rows_meta_is_read_with_their_page(): void {
 		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
 		wp_cache_flush();

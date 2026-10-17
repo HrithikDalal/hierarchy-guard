@@ -504,8 +504,9 @@ final class Tree_View {
 		$cap     = Subtree::count_cap();
 		$ordered = array_map( 'intval', array_column( Subtree::ordered_children( [ $node ], $type, $cap ), 'ID' ) );
 		$found   = $next > 0 ? array_search( $next, $ordered, true ) : false;
-		$total   = Subtree::count_live_children( $node, $type, $cap + 1 );
-		$capped  = $total > $cap;
+		// Fewer than the cap read in order are all of them; only a full read needs a count to know if more follow.
+		$total  = count( $ordered ) < $cap ? count( $ordered ) : Subtree::count_live_children( $node, $type, $cap + 1 );
+		$capped = $total > $cap;
 		// Every node already has its row: the top level's from open_levels(), a deeper one's from the level above.
 		$fact = $this->rows[ $node ];
 
