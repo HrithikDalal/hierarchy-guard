@@ -161,7 +161,7 @@ final class List_Table {
 		}
 
 		$type   = (string) $post->post_type;
-		$count  = $this->child_count( (int) $post->ID, $type );
+		$count  = $this->shown_count( $post );
 		$cap    = Subtree::count_cap();
 		$parts  = [];
 		$parent = (int) $post->post_parent;
@@ -326,7 +326,7 @@ final class List_Table {
 		if ( ! is_array( $actions ) || ! $post instanceof WP_Post || ! Post_Types::is_supported( (string) $post->post_type ) ) {
 			return $actions;
 		}
-		if ( 0 === $this->child_count( (int) $post->ID, (string) $post->post_type ) ) {
+		if ( 0 === $this->shown_count( $post ) ) {
 			return $actions;
 		}
 
@@ -416,6 +416,19 @@ final class List_Table {
 		}
 		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Show all pages', 'hierarchy-guard' ) );
 		echo '</span>';
+	}
+
+	/**
+	 * A row's live child count as the screen shows it: none for a page the
+	 * Tree view opened without JavaScript and found no subpages the user may
+	 * read under, as the script shows it.
+	 *
+	 * @param WP_Post $post Row's post.
+	 * @return int Count, up to the cap plus one.
+	 */
+	private function shown_count( WP_Post $post ): int {
+		$row = null !== $this->tree ? $this->tree->row( (int) $post->ID ) : null;
+		return null !== $row && $row['empty'] ? 0 : $this->child_count( (int) $post->ID, (string) $post->post_type );
 	}
 
 	/**

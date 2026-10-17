@@ -520,6 +520,27 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '2 subpages</a>', $cell, 'Its count still links to what sits under it.' );
 	}
 
+	public function test_a_page_opened_whose_only_subpages_the_user_may_not_read_prints_without_subpages(): void {
+		$hidden = $this->ids['leadership'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $hidden === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$this->tree_table( [ $this->ids['company'] ], $this->ids['team'] );
+
+		$cell = $this->cell( $this->ids['team'] );
+
+		$this->assertStringNotContainsString( 'hierarchy-guard-toggle', $cell, 'Opening it again would show nothing.' );
+		$this->assertStringContainsString( 'data-children="0"', $cell );
+		$this->assertStringContainsString( '<span aria-hidden="true">—</span><span class="screen-reader-text">No subpages</span>', $cell, 'As the script shows it.' );
+		$this->assertArrayNotHasKey( 'hierarchy_guard_subpages', $this->table->row_actions( [], get_post( $this->ids['team'] ) ) );
+		$this->assertArrayHasKey( 'hierarchy_guard_subpages', $this->table->row_actions( [], get_post( $this->ids['about'] ) ) );
+	}
+
 	public function test_a_tree_screen_counts_its_opened_levels_in_the_same_one_query(): void {
 		for ( $i = 1; $i <= 30; $i++ ) {
 			$this->page( sprintf( 'wide-%02d', $i ), $this->ids['about'] );

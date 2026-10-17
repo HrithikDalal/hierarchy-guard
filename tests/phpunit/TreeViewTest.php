@@ -223,6 +223,21 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( 20, $vars['posts_per_page'] );
 	}
 
+	public function test_a_search_of_percent_encoded_text_searches_it_as_the_list_does(): void {
+		$octets = $this->page( 'octets' );
+		wp_update_post(
+			[
+				'ID'         => $octets,
+				'post_title' => 'Use %20 or %ab in URLs',
+			]
+		);
+
+		foreach ( [ '%20', '%ab' ] as $search ) {
+			$_GET['s'] = $search;
+			$this->assertSame( [ $octets ], wp_list_pluck( $this->list_query()->posts, 'ID' ), "{$search} is text to find, not markup." );
+		}
+	}
+
 	public function test_a_search_of_markup_alone_is_a_search_that_finds_nothing(): void {
 		$bold      = self::factory()->post->create(
 			[
@@ -415,6 +430,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 				'shown'    => 0,
 				'more'     => false,
 				'capped'   => false,
+				'empty'    => false,
 			],
 			$this->tree->row( $this->ids['company'] ),
 			'Page 2 of 20 a page starts at 21; the size is core’s item count.'
@@ -626,6 +642,25 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertTrue( $this->tree->row( $this->ids['about'] )['open'] );
 		$this->assertFalse( $this->tree->row( $this->ids['history'] )['open'], 'A stale link to a page whose subpages have gone: it has none to show.' );
 		$this->assertSame( 0, $this->tree->row( $this->ids['history'] )['shown'] );
+	}
+
+	public function test_opening_a_page_whose_only_subpages_the_user_may_not_read_shows_it_without_subpages(): void {
+		$hidden = $this->ids['leadership'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $hidden ): array {
+				return 'read_post' === $cap && isset( $args[0] ) && $hidden === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['team'];
+
+		$this->assertSame( [ 'company', 'about', 'team' ], wp_list_pluck( $this->open_levels( [ $this->ids['company'] ], 1 ), 'post_name' ) );
+		$row = $this->tree->row( $this->ids['team'] );
+		$this->assertFalse( $row['open'] );
+		$this->assertTrue( $row['empty'], 'As the script shows a page whose first load brings none: without a toggle, so it is not opened again for nothing.' );
+		$this->assertFalse( $this->tree->row( $this->ids['about'] )['empty'] );
 	}
 
 	public function test_a_level_the_user_may_not_edit_stays_closed(): void {

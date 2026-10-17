@@ -36,10 +36,11 @@ final class Tree_View {
 
 	/**
 	 * What the screen knows about each tree row, by post ID: its level, its
-	 * parent, its place among its siblings, and for an opened row the page of
-	 * subpages shown and whether more follow.
+	 * parent, its place among its siblings, for an opened row the page of
+	 * subpages shown and whether more follow, and whether opening it found
+	 * none the user may read.
 	 *
-	 * @var array<int,array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool}>
+	 * @var array<int,array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,empty:bool}>
 	 */
 	private array $rows = [];
 
@@ -92,13 +93,13 @@ final class Tree_View {
 
 	/**
 	 * The search as it was typed, unslashed and trimmed, not sanitized: ''
-	 * for no search. A search that sanitizing empties, as one of tags only,
-	 * is still a search, which finds nothing. It is only compared here.
+	 * for no search. A search of tags only is still a search, which finds
+	 * nothing. It is only compared here.
 	 *
 	 * @return string
 	 */
 	private static function searched(): string {
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A read-only list argument, only checked for being empty here and sanitized below.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- A read-only list argument, only checked for being empty or markup alone.
 		return isset( $_GET['s'] ) && is_string( $_GET['s'] ) ? trim( wp_unslash( $_GET['s'] ) ) : '';
 	}
 
@@ -192,8 +193,8 @@ final class Tree_View {
 		}
 		if ( 'tree' === $mode ) {
 			$vars['post_parent'] = 0;
-		} elseif ( '' === trim( sanitize_text_field( self::searched() ) ) ) {
-			// Nothing is left to search for once sanitized: no page matches it, as on the Redirects tab.
+		} elseif ( '' === wp_strip_all_tags( wp_pre_kses_less_than( self::searched() ) ) ) {
+			// Markup alone leaves nothing to search for: no page matches it, as on the Redirects tab. Text such as "%20" is searched as the list searches it.
 			$vars['post__in'] = [ 0 ];
 		}
 		if ( 'menu_order title' === ( $vars['orderby'] ?? '' ) ) {
@@ -275,7 +276,7 @@ final class Tree_View {
 	 * What the screen knows about a tree row, or null when it is not one.
 	 *
 	 * @param int $post_id Post ID.
-	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool}|null
+	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,empty:bool}|null
 	 */
 	public function row( int $post_id ): ?array {
 		return $this->rows[ $post_id ] ?? null;
@@ -546,7 +547,8 @@ final class Tree_View {
 			++$shown;
 		}
 		if ( 0 === $shown ) {
-			// No subpages to show, as for a stale link to a page whose subpages have gone: it stays closed.
+			// None to show, as for a stale link or subpages the user may not read: on its first page it shows as a page without any, as the script shows it.
+			$this->rows[ $node ]['empty'] = 1 === $page;
 			return;
 		}
 		$this->rows[ $node ] = array_merge(
@@ -568,7 +570,7 @@ final class Tree_View {
 	 * @param int|null $position  Place among its siblings, from 1, when known.
 	 * @param int|null $setsize   Number of its siblings, when known.
 	 * @param int      $page      The page of its parent's subpages it is on.
-	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool}
+	 * @return array{level:int,parent:int,position:int|null,setsize:int|null,page:int,open:bool,shown:int,more:bool,capped:bool,empty:bool}
 	 */
 	private static function fact( int $level, int $parent_id, ?int $position, ?int $setsize, int $page ): array {
 		return [
@@ -581,6 +583,7 @@ final class Tree_View {
 			'shown'    => 0,
 			'more'     => false,
 			'capped'   => false,
+			'empty'    => false,
 		];
 	}
 
