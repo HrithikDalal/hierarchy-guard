@@ -476,6 +476,32 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( [ 'iedit', 'author-self', 'post-' . $this->ids['team'], 'type-page', 'status-publish', 'hentry' ], $children[ $this->ids['team'] ]['classes'], 'Not the bare type name core adds outside wp-admin.' );
 	}
 
+	public function test_the_route_builds_the_row_classes_without_the_post_class_filter(): void {
+		$called = 0;
+		add_filter(
+			'post_class',
+			static function ( $classes ) use ( &$called ) {
+				// A theme's callback that assumes the front-end loop could warn or fail in a REST request.
+				++$called;
+				return $classes;
+			}
+		);
+		update_post_meta( $this->ids['team'], '_thumbnail_id', self::factory()->attachment->create() );
+		add_theme_support( 'post-thumbnails' );
+		wp_update_post(
+			[
+				'ID'            => $this->ids['history'],
+				'post_password' => 'secret',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 0, $called, 'The route never runs post_class.' );
+		$this->assertContains( 'has-post-thumbnail', $children[ $this->ids['team'] ]['classes'] );
+		$this->assertContains( 'post-password-required', $children[ $this->ids['history'] ]['classes'], 'As get_post_class() marks it without the password cookie.' );
+	}
+
 	public function test_a_child_the_user_may_not_trash_has_no_trash_link(): void {
 		$kept = $this->ids['team'];
 		add_filter(

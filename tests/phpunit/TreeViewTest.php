@@ -548,8 +548,18 @@ final class TreeViewTest extends WP_UnitTestCase {
 
 	public function test_a_loaded_row_carries_core_s_row_classes_and_reads_its_title_as_core_s_row(): void {
 		global $wpdb;
-		$wpdb->update( $wpdb->posts, [ 'post_title' => '<b>Bold</b> &amp; Co' ], [ 'ID' => $this->ids['team'] ] );
+		$wpdb->update(
+			$wpdb->posts,
+			[
+				'post_title'    => '<b>Bold</b> &amp; Co',
+				'post_password' => 'secret',
+			],
+			[ 'ID' => $this->ids['team'] ]
+		);
 		clean_post_cache( $this->ids['team'] );
+		// A public taxonomy on pages: core's row names each term.
+		register_taxonomy_for_object_type( 'category', 'page' );
+		wp_set_post_categories( $this->ids['team'], [ self::factory()->category->create( [ 'slug' => 'press' ] ) ] );
 		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
 		ob_start();
 		$table->single_row( get_post( $this->ids['team'] ), 2 );
@@ -559,7 +569,11 @@ final class TreeViewTest extends WP_UnitTestCase {
 
 		$loaded = self::loaded( $this->ids['about'] )[ $this->ids['team'] ];
 
+		unregister_taxonomy_for_object_type( 'category', 'page' );
+
 		$core = array_values( array_diff( explode( ' ', $row[1] ), [ 'level-2' ] ) );
+		$this->assertContains( 'category-press', $core );
+		$this->assertContains( 'post-password-required', $core );
 		$this->assertSame( $core, $loaded['classes'], 'Core’s classes, but the level, which the script adds.' );
 		$this->assertSame( html_entity_decode( $title[1], ENT_QUOTES, 'UTF-8' ), $loaded['title'], 'The text core’s row shows.' );
 	}

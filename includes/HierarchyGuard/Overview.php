@@ -274,18 +274,60 @@ final class Overview {
 
 	/**
 	 * The classes core's list gives a post's row, but its level-N, which
-	 * depends on where the row sits.
+	 * depends on where the row sits: get_post_class()'s own classes as
+	 * wp-admin prints them, built here without its post_class filters, which
+	 * a theme may write for the front-end loop and which a REST request must
+	 * not run.
 	 *
 	 * @param WP_Post $post Post.
 	 * @return string[]
 	 */
 	public static function row_classes( WP_Post $post ): array {
-		$classes = get_post_class( [ 'iedit', 'author-' . ( get_current_user_id() === (int) $post->post_author ? 'self' : 'other' ) ], $post );
-		if ( ! is_admin() ) {
-			// Outside wp-admin core adds the bare post type name, which its list's rows don't have.
-			$classes = array_diff( $classes, [ (string) $post->post_type ] );
+		$id      = (int) $post->ID;
+		$type    = (string) $post->post_type;
+		$classes = [
+			'iedit',
+			'author-' . ( get_current_user_id() === (int) $post->post_author ? 'self' : 'other' ),
+			'post-' . $id,
+			'type-' . $type,
+			'status-' . $post->post_status,
+		];
+		if ( post_type_supports( $type, 'post-formats' ) ) {
+			$format    = get_post_format( $post );
+			$classes[] = is_string( $format ) && '' !== $format ? 'format-' . sanitize_html_class( $format ) : 'format-standard';
 		}
-		return array_values( $classes );
+		$locked = post_password_required( $post );
+		if ( $locked ) {
+			$classes[] = 'post-password-required';
+		} elseif ( '' !== (string) $post->post_password ) {
+			$classes[] = 'post-password-protected';
+		}
+		if ( current_theme_supports( 'post-thumbnails' ) && has_post_thumbnail( $post ) && ! $locked ) {
+			$classes[] = 'has-post-thumbnail';
+		}
+		if ( is_sticky( $id ) ) {
+			// As wp-admin marks a sticky post.
+			$classes[] = 'status-sticky';
+		}
+		$classes[] = 'hentry';
+		foreach ( get_taxonomies( [ 'public' => true ] ) as $taxonomy ) {
+			if ( ! is_object_in_taxonomy( $type, $taxonomy ) ) {
+				continue;
+			}
+			$terms = get_the_terms( $post, $taxonomy );
+			foreach ( is_array( $terms ) ? $terms : [] as $term ) {
+				if ( '' === (string) $term->slug ) {
+					continue;
+				}
+				$term_class = sanitize_html_class( $term->slug, (string) $term->term_id );
+				if ( is_numeric( $term_class ) || '' === trim( $term_class, '-' ) ) {
+					$term_class = (string) $term->term_id;
+				}
+				// As core: 'post_tag' takes the 'tag' prefix.
+				$classes[] = 'post_tag' === $taxonomy ? 'tag-' . $term_class : sanitize_html_class( $taxonomy . '-' . $term_class, $taxonomy . '-' . $term->term_id );
+			}
+		}
+		return array_values( array_unique( array_map( 'esc_attr', $classes ) ) );
 	}
 
 	/**
