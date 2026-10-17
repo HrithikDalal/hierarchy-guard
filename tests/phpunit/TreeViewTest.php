@@ -595,15 +595,21 @@ final class TreeViewTest extends WP_UnitTestCase {
 		// A public taxonomy on pages: core's row names each term.
 		register_taxonomy_for_object_type( 'category', 'page' );
 		wp_set_post_categories( $this->ids['team'], [ self::factory()->category->create( [ 'slug' => 'press' ] ) ] );
-		// Core prints the opened levels as the Tree view's screen does: its query isn't core's indented
-		// tree, so each row goes through display_rows() at level 0, with no level dashes on any version.
-		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
+		// Core's own list, opened at About without JavaScript: prepare_items() runs the Tree view's query
+		// and decides from it whether to print core's indented tree, then display_rows() prints the rows.
+		$_GET[ Tree_View::OPEN_VAR ] = (string) $this->ids['about'];
+		$server                      = $_SERVER;
+		$_SERVER['REQUEST_URI']      = '/wp-admin/edit.php';
+		$_SERVER['PHP_SELF']         = '/wp-admin/edit.php';
+		$table                       = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
+		$table->prepare_items();
+		$_SERVER = $server;
 		ob_start();
-		$table->display_rows( [ get_post( $this->ids['team'] ) ] );
+		$table->display_rows();
 		$html = (string) ob_get_clean();
 		remove_filter( 'the_title', 'esc_html' );
-		preg_match( '/<tr id="post-\d+" class="([^"]*)"/', $html, $row );
-		preg_match( '/<a class="row-title"[^>]*>(.*?)<\/a>/', $html, $title );
+		$this->assertSame( 1, preg_match( '/<tr id="post-' . $this->ids['team'] . '" class="([^"]*)">(.*?)<\/tr>/s', $html, $row ), 'Core prints Team, opened under About, as one of its own rows.' );
+		preg_match( '/<a class="row-title"[^>]*>(.*?)<\/a>/', $row[2], $title );
 
 		$loaded = self::loaded( $this->ids['about'] )[ $this->ids['team'] ];
 
@@ -614,7 +620,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertContains( 'category-press', $core );
 		$this->assertContains( 'post-password-required', $core );
 		$this->assertSame( $core, $loaded['classes'], 'Core’s classes, but the level, which the script adds.' );
-		$this->assertStringContainsString( '<strong><a class="row-title"', $html, 'No level dashes before the title: the indent shows the level.' );
+		$this->assertStringContainsString( '<strong><a class="row-title"', $row[2], 'No level dashes before the title on any version: the indent shows the level.' );
 		$this->assertSame( html_entity_decode( $title[1], ENT_QUOTES, 'UTF-8' ), $loaded['title'], 'The text core’s row shows.' );
 	}
 
