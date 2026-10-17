@@ -801,6 +801,34 @@ export function treeToggleLabel( open, title ) {
 }
 
 /**
+ * The name of the Tree view's "Show more" button: "Show more subpages of “About”".
+ *
+ * @param {string} title The opened page's title.
+ * @return {string} Label.
+ */
+export function treeMoreLabel( title ) {
+	return sprintf(
+		/* translators: %s: page title. */
+		__( 'Show more subpages of “%s”', 'hierarchy-guard' ),
+		title
+	);
+}
+
+/**
+ * The name of the Tree view's "Try again" button: "Try again loading subpages of “About”".
+ *
+ * @param {string} title The opened page's title.
+ * @return {string} Label.
+ */
+export function treeRetryLabel( title ) {
+	return sprintf(
+		/* translators: %s: page title. */
+		__( 'Try again loading subpages of “%s”', 'hierarchy-guard' ),
+		title
+	);
+}
+
+/**
  * The Tree view's "Show more" row: "50 of 128 subpages shown".
  *
  * @param {number}  shown  Subpages on the screen.

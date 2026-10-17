@@ -7,6 +7,8 @@ import { speak } from '@wordpress/a11y';
 import { __, isRTL } from '@wordpress/i18n';
 import {
 	treeCappedSentence,
+	treeMoreLabel,
+	treeRetryLabel,
 	treeShownLine,
 	treeToggleLabel,
 } from '../common/copy';
@@ -235,6 +237,10 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			button.type = 'button';
 			button.className = 'button-link';
 			button.textContent = __( 'Show more', 'hierarchy-guard' );
+			button.setAttribute(
+				'aria-label',
+				treeMoreLabel( titleOf( row ) )
+			);
 			button.addEventListener( 'click', () => {
 				if ( pending.has( row ) ) {
 					return;
@@ -256,7 +262,9 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 
 	/**
 	 * Says a load failed, in its status row, with a button to try again
-	 * without closing the row, and gives the keyboard back to the toggle.
+	 * without closing the row. A failed first page gives the keyboard back
+	 * to the toggle, just above; a failed "Show more" keeps it on the
+	 * failure's "Try again", where the rows end.
 	 *
 	 * @param {HTMLTableRowElement}                                    row    The opened row.
 	 * @param {number}                                                 page   The page that failed.
@@ -279,6 +287,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		retry.type = 'button';
 		retry.className = 'button-link';
 		retry.textContent = __( 'Try again', 'hierarchy-guard' );
+		retry.setAttribute( 'aria-label', treeRetryLabel( titleOf( row ) ) );
 		retry.addEventListener( 'click', () => {
 			if ( ! pending.has( row ) ) {
 				retry.setAttribute( 'aria-disabled', 'true' );
@@ -290,7 +299,10 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			__( 'The subpages couldn’t be loaded.', 'hierarchy-guard' ),
 			'assertive'
 		);
-		if ( here ) {
+		if ( here && page > 1 ) {
+			setTabStop( status.row );
+			retry.focus();
+		} else if ( here ) {
 			setTabStop( row );
 			(
 				row.querySelector( 'button.hierarchy-guard-toggle' ) || row

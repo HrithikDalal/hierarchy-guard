@@ -187,8 +187,10 @@ describe( 'the tree grid', () => {
 		expect( more.textContent ).toBe(
 			'Show more · 50 of 128 subpages shown'
 		);
-		expect( more.getAttribute( 'aria-level' ) ).toBe( '2' );
 		expect( more.firstElementChild.colSpan ).toBe( 4 );
+		expect(
+			more.querySelector( 'button' ).getAttribute( 'aria-label' )
+		).toBe( 'Show more subpages of “Locations”' );
 
 		more.querySelector( 'button' ).click();
 		await settle();
@@ -311,7 +313,9 @@ describe( 'the tree grid', () => {
 		expect( rows()[ 1 ].textContent ).toBe(
 			'The subpages couldn’t be loaded. Try again'
 		);
-		expect( rows()[ 1 ].getAttribute( 'aria-level' ) ).toBe( '2' );
+		expect(
+			rows()[ 1 ].querySelector( 'button' ).getAttribute( 'aria-label' )
+		).toBe( 'Try again loading subpages of “Company”' );
 		expect( document.activeElement ).toBe( toggleButton );
 		expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
 
@@ -356,10 +360,13 @@ describe( 'the tree grid', () => {
 		expect(
 			rows().filter( ( item ) => item.id.startsWith( 'post-10' ) )
 		).toHaveLength( 50 );
-		expect( document.activeElement ).toBe(
-			row( 9 ).querySelector( '.hierarchy-guard-toggle' )
-		);
 		const failure = document.querySelector( '.hierarchy-guard-failed' );
+		// Where the failure is, 50 rows below the toggle: the keyboard stays by it.
+		expect( document.activeElement ).toBe(
+			failure.querySelector( 'button' )
+		);
+		expect( tabStops() ).toEqual( [ '' ] );
+		expect( failure.tabIndex ).toBe( 0 );
 		failure.querySelector( 'button' ).click();
 		await settle();
 		expect( fetchChildren ).toHaveBeenLastCalledWith( 9, 2 );
