@@ -26,7 +26,8 @@ use WP_Screen;
  * translations and the plugin's settings. A bundle that was never built is
  * skipped, so a checkout without npm still runs. The list-screen bundle
  * loads only when the screen prints something it acts on: a row with
- * subpages, the breadcrumb, a URLs notice or the nudge.
+ * subpages, the breadcrumb, a URLs notice or the nudge. In the Tree view its
+ * stylesheet, which holds the indents, loads in the head.
  */
 final class Assets {
 
@@ -54,6 +55,13 @@ final class Assets {
 	private bool $wanted = false;
 
 	/**
+	 * Whether the Tree view asked for its stylesheet in the head.
+	 *
+	 * @var bool
+	 */
+	private bool $styled = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Providers $providers Redirect plugin detection.
@@ -71,6 +79,7 @@ final class Assets {
 		add_action( 'enqueue_block_editor_assets', [ $this, 'enqueue_editor' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
 		add_action( List_Table::SCRIPT, [ $this, 'want_list_table' ] );
+		add_action( Tree_View::STYLE, [ $this, 'want_list_style' ] );
 		add_action( 'admin_footer', [ $this, 'enqueue_list_table' ] );
 	}
 
@@ -79,6 +88,14 @@ final class Assets {
 	 */
 	public function want_list_table(): void {
 		$this->wanted = true;
+	}
+
+	/**
+	 * Notes that the Tree view loads, so the list screen's stylesheet goes in
+	 * the head: the indents are in it.
+	 */
+	public function want_list_style(): void {
+		$this->styled = true;
 	}
 
 	/**
@@ -121,6 +138,10 @@ final class Assets {
 		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
 		}
+		if ( $this->styled && 'edit.php' === $hook_suffix ) {
+			// The Tree view's indents print with the head; its script follows in the footer.
+			$this->enqueue_style( 'list-table' );
+		}
 		if ( in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true ) && ! $screen->is_block_editor() ) {
 			// It binds a jQuery submit handler, which core's own handler runs after.
 			$this->enqueue( 'classic', [ 'jquery' ] );
@@ -137,26 +158,72 @@ final class Assets {
 	 * @return bool Whether the bundle was built and enqueued.
 	 */
 	public function enqueue( string $name, array $extra = [], bool $settings = true ): bool {
-		$asset_file = $this->dir . '/build/' . $name . '.asset.php';
-		if ( ! is_readable( $asset_file ) ) {
-			return false;
-		}
-		$asset = require $asset_file;
-		if ( ! is_array( $asset ) ) {
+		$asset = $this->asset( $name );
+		if ( null === $asset ) {
 			return false;
 		}
 
-		$handle  = self::HANDLE_PREFIX . $name;
-		$deps    = array_values( array_unique( array_merge( array_map( 'strval', (array) ( $asset['dependencies'] ?? [] ) ), $extra ) ) );
-		$version = (string) ( $asset['version'] ?? HIERARCHY_GUARD_VERSION );
-		$url     = plugins_url( 'build/' . $name . '.js', $this->dir . '/hierarchy-guard.php' );
+		$handle = self::HANDLE_PREFIX . $name;
+		$deps   = array_values( array_unique( array_merge( $asset['dependencies'], $extra ) ) );
+		$url    = plugins_url( 'build/' . $name . '.js', $this->dir . '/hierarchy-guard.php' );
 
-		wp_enqueue_script( $handle, $url, $deps, $version, true );
+		wp_enqueue_script( $handle, $url, $deps, $asset['version'], true );
 		if ( $settings ) {
 			wp_set_script_translations( $handle, 'hierarchy-guard' );
 			wp_add_inline_script( $handle, 'window.hierarchyGuard = ' . wp_json_encode( $this->config() ) . ';', 'before' );
 		}
+		$this->style( $name, $deps, $asset['version'] );
 
+		return true;
+	}
+
+	/**
+	 * Enqueues one bundle's styles alone, as its script would.
+	 *
+	 * @param string $name Bundle name, as in build/{name}.css.
+	 * @return bool Whether the bundle was built.
+	 */
+	public function enqueue_style( string $name ): bool {
+		$asset = $this->asset( $name );
+		if ( null === $asset ) {
+			return false;
+		}
+		$this->style( $name, $asset['dependencies'], $asset['version'] );
+		return true;
+	}
+
+	/**
+	 * A built bundle's dependencies and version, from its .asset.php file, or
+	 * null when it was never built.
+	 *
+	 * @param string $name Bundle name.
+	 * @return array{dependencies:string[],version:string}|null
+	 */
+	private function asset( string $name ): ?array {
+		$asset_file = $this->dir . '/build/' . $name . '.asset.php';
+		if ( ! is_readable( $asset_file ) ) {
+			return null;
+		}
+		$asset = require $asset_file;
+		if ( ! is_array( $asset ) ) {
+			return null;
+		}
+		return [
+			'dependencies' => array_map( 'strval', (array) ( $asset['dependencies'] ?? [] ) ),
+			'version'      => (string) ( $asset['version'] ?? HIERARCHY_GUARD_VERSION ),
+		];
+	}
+
+	/**
+	 * Enqueues a bundle's stylesheet, with its right-to-left build, and the
+	 * components' styles when the bundle uses them.
+	 *
+	 * @param string   $name    Bundle name.
+	 * @param string[] $deps    The bundle's script dependencies.
+	 * @param string   $version Build version.
+	 */
+	private function style( string $name, array $deps, string $version ): void {
+		$handle = self::HANDLE_PREFIX . $name;
 		$styles = in_array( 'wp-components', $deps, true ) ? [ 'wp-components' ] : [];
 		if ( is_readable( $this->dir . '/build/' . $name . '.css' ) ) {
 			wp_enqueue_style( $handle, plugins_url( 'build/' . $name . '.css', $this->dir . '/hierarchy-guard.php' ), $styles, $version );
@@ -167,8 +234,6 @@ final class Assets {
 		} elseif ( [] !== $styles ) {
 			wp_enqueue_style( 'wp-components' );
 		}
-
-		return true;
 	}
 
 	/**

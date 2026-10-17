@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Admin\Assets;
+use HierarchyGuard\Admin\Tree_View;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
@@ -157,6 +158,32 @@ final class AssetsTest extends WP_UnitTestCase {
 		global $wp_filter;
 		$found = false;
 		foreach ( $wp_filter['hierarchy_guard_list_script']->callbacks[10] ?? [] as $callback ) {
+			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets );
+		}
+
+		$this->assertTrue( $found );
+	}
+
+	public function test_the_tree_s_stylesheet_loads_in_the_head_and_its_script_in_the_footer(): void {
+		$this->build( 'list-table', [] );
+		file_put_contents( $this->dir . '/build/list-table.css', '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- A throwaway file in the temp directory.
+		set_current_screen( 'edit-page' );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		$assets->enqueue_admin( 'edit.php' );
+		$this->assertFalse( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The list keeps its stylesheet in the footer.' );
+
+		$assets->want_list_style();
+		$assets->enqueue_admin( 'edit.php' );
+		$this->assertTrue( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The tree’s indents print with the head, before its rows.' );
+		$this->assertSame( 'abc123', wp_styles()->registered['hierarchy-guard-list-table']->ver );
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The script still waits for the footer.' );
+	}
+
+	public function test_the_plugin_listens_for_the_tree_s_stylesheet(): void {
+		global $wp_filter;
+		$found = false;
+		foreach ( $wp_filter[ Tree_View::STYLE ]->callbacks[10] ?? [] as $callback ) {
 			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets );
 		}
 

@@ -32,6 +32,7 @@ final class Tree_View {
 	public const OPEN_VAR          = 'hierarchy_guard_open';
 	public const CHILDREN_PAGE_VAR = 'hierarchy_guard_children_page';
 	public const PER_PAGE          = 50;
+	public const STYLE             = 'hierarchy_guard_tree_style';
 
 	/**
 	 * What the screen knows about each tree row, by post ID: its level, its
@@ -115,6 +116,13 @@ final class Tree_View {
 		if ( '' === $mode ) {
 			return;
 		}
+		/**
+		 * Fires when the Tree view, or a search in it, loads: its stylesheet
+		 * prints in the head, so the rows are indented as they arrive.
+		 *
+		 * @internal
+		 */
+		do_action( 'hierarchy_guard_tree_style' );
 		add_filter( "manage_{$type}_posts_columns", [ $this, 'columns' ], 20 );
 		add_filter( "bulk_actions-edit-{$type}", [ $this, 'bulk_actions' ] );
 		add_filter( 'quick_edit_enabled_for_post_type', '__return_false' );
