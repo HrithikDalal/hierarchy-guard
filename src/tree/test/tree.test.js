@@ -59,7 +59,9 @@ describe( 'the tree grid', () => {
 								)
 							),
 							128,
-							number < 3
+							number < 3,
+							false,
+							( number - 1 ) * 50
 						)
 			)
 		);
@@ -137,9 +139,24 @@ describe( 'the tree grid', () => {
 				row( id ).className,
 			] )
 		).toEqual( [
-			[ '2', '1', '3', 'level-1 status-publish hierarchy-guard-loaded' ],
-			[ '2', '2', '3', 'level-1 status-publish hierarchy-guard-loaded' ],
-			[ '2', '3', '3', 'level-1 status-draft hierarchy-guard-loaded' ],
+			[
+				'2',
+				'1',
+				'3',
+				'iedit author-other post-5 type-page status-publish hentry level-1 hierarchy-guard-loaded',
+			],
+			[
+				'2',
+				'2',
+				'3',
+				'iedit author-other post-6 type-page status-publish hentry level-1 hierarchy-guard-loaded',
+			],
+			[
+				'2',
+				'3',
+				'3',
+				'iedit author-other post-7 type-page status-draft hentry level-1 hierarchy-guard-loaded',
+			],
 		] );
 		expect( row( 5 ).getAttribute( 'aria-expanded' ) ).toBe( 'false' );
 		expect( row( 6 ).hasAttribute( 'aria-expanded' ) ).toBe( false );
@@ -517,7 +534,50 @@ describe( 'the tree grid', () => {
 		expect( tabStops() ).toEqual( [ 'post-5' ] );
 	} );
 
+	it( 'shows each loaded row at the place the server gives it, as without JavaScript', async () => {
+		// Team's sibling History is one the user may not read: it keeps its place, unseen.
+		const tree = bindTree( document, () =>
+			Promise.resolve(
+				page( [ child( 6, 'Team', { position: 2, setsize: 2 } ) ], 2 )
+			)
+		);
+
+		await tree.toggle( row( 4 ) );
+
+		expect( row( 6 ).getAttribute( 'aria-posinset' ) ).toBe( '2' );
+		expect( row( 6 ).getAttribute( 'aria-setsize' ) ).toBe( '2' );
+		const cell = row( 6 ).querySelector( '.hierarchy-guard-cell' );
+		expect( [ cell.dataset.position, cell.dataset.setsize ] ).toEqual( [
+			'2',
+			'2',
+		] );
+	} );
+
+	it( 'reads a loaded title as core’s row reads the same title', async () => {
+		mountScreen(
+			coreRow( {
+				id: 4,
+				title: '&lt;b&gt;Bold&lt;/b&gt; &amp; Co',
+				children: 1,
+			} )
+		);
+		const tree = bindTree( document, () =>
+			Promise.resolve( page( [ child( 5, '<b>Bold</b> & Co' ) ], 1 ) )
+		);
+
+		await tree.toggle( row( 4 ) );
+
+		const title = ( id ) =>
+			row( id ).querySelector( '.row-title' ).textContent;
+		expect( title( 5 ) ).toBe( '<b>Bold</b> & Co' );
+		expect( title( 5 ) ).toBe( title( 4 ) );
+		expect( row( 5 ).querySelector( 'b' ) ).toBe( null );
+	} );
+
 	it( 'shows a row whose subpages have all gone as having none', async () => {
+		// Core's row actions, "Trash | View subpages", as the list prints them.
+		row( 4 ).querySelector( '.row-actions' ).innerHTML =
+			'<span class="trash"><a href="post.php?post=4&amp;action=trash" class="submitdelete">Trash</a> | </span><span class="hierarchy_guard_subpages"><a href="edit.php?post_type=page&amp;hierarchy_guard_under=4">View subpages</a></span>';
 		const tree = bindTree( document, () =>
 			Promise.resolve( page( [], 0 ) )
 		);
@@ -539,6 +599,9 @@ describe( 'the tree grid', () => {
 			'<span aria-hidden="true">—</span><span class="screen-reader-text">No subpages</span>'
 		);
 		expect( cell.dataset.children ).toBe( '0' );
+		expect( row( 4 ).querySelector( '.row-actions' ).textContent ).toBe(
+			'Trash'
+		);
 		expect( document.activeElement ).toBe( row( 4 ) );
 		expect( tabStops() ).toEqual( [ 'post-4' ] );
 	} );

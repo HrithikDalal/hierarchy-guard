@@ -10,7 +10,7 @@ import {
 	treeShownLine,
 	treeToggleLabel,
 } from '../common/copy';
-import { PER_PAGE, childRow, statusRow } from './rows';
+import { childRow, statusRow } from './rows';
 
 const OPEN = 'dashicons-arrow-down-alt2';
 const RIGHT = 'dashicons-arrow-right-alt2';
@@ -335,7 +335,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 
 	/**
 	 * Shows a row whose subpages have all gone since the screen loaded as a
-	 * page without any: no toggle, and the cell's "No subpages" as the server prints it.
+	 * page without any: no toggle, no "View subpages", and the cell's "No
+	 * subpages" as the server prints it.
 	 *
 	 * @param {HTMLTableRowElement} row      The row.
 	 * @param {boolean}             hadFocus Whether a row removed under it had the keyboard.
@@ -349,6 +350,23 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		}
 		row.removeAttribute( 'aria-expanded' );
 		const cell = row.querySelector( '.hierarchy-guard-cell' );
+		// "View subpages" would lead to an empty subtree; core leaves no separator after the last action.
+		const subpages = row.querySelector(
+			'.row-actions .hierarchy_guard_subpages'
+		);
+		if ( subpages ) {
+			const before = subpages.previousElementSibling;
+			const separator = before && before.lastChild;
+			if (
+				! subpages.nextElementSibling &&
+				separator &&
+				separator.nodeType === separator.TEXT_NODE &&
+				'|' === separator.textContent.trim()
+			) {
+				separator.remove();
+			}
+			subpages.remove();
+		}
 		if ( cell ) {
 			cell.dataset.children = '0';
 			delete cell.dataset.open;
@@ -390,16 +408,15 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		const id = idOf( row );
 		let anchor = lastOf( row );
 		let first = null;
-		children.forEach( ( child, index ) => {
+		children.forEach( ( child ) => {
 			const node = childRow( template, child, {
 				level: levelOf( row ),
 				parent: id,
 				parentTitle: titleOf( row ),
 				page,
-				position: result.children_capped
-					? null
-					: ( page - 1 ) * PER_PAGE + index + 1,
-				setsize: result.children_capped ? null : result.children_total,
+				// The server's place, so a page reads the same opened either way; none past the cap.
+				position: child.position,
+				setsize: child.setsize,
 				place: data.place,
 				type: data.type,
 			} );

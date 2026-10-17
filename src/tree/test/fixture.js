@@ -69,11 +69,20 @@ export function mountScreen( rows ) {
  * @return {Object} Child.
  */
 export function child( id, title, overrides = {} ) {
+	const status = overrides.status || 'publish';
 	return {
 		id,
 		title,
-		status: 'publish',
+		status,
 		status_label: 'Published',
+		classes: [
+			'iedit',
+			'author-other',
+			`post-${ id }`,
+			'type-page',
+			`status-${ status }`,
+			'hentry',
+		],
 		children_count: 0,
 		children_capped: false,
 		author: 'Priya',
@@ -86,17 +95,29 @@ export function child( id, title, overrides = {} ) {
 }
 
 /**
- * A page of subpages as the hierarchy route sends it.
+ * A page of subpages as the hierarchy route sends it, each child with its
+ * place among all its siblings unless it names its own.
  *
  * @param {Object[]} children Children.
  * @param {number}   total    Children in all.
  * @param {boolean}  hasMore  Whether a next page exists.
  * @param {boolean}  capped   Whether more than the cap exist.
+ * @param {number}   start    How many siblings come before the first.
  * @return {Object} Hierarchy.
  */
-export function page( children, total, hasMore = false, capped = false ) {
+export function page(
+	children,
+	total,
+	hasMore = false,
+	capped = false,
+	start = 0
+) {
 	return {
-		children,
+		children: children.map( ( item, index ) => ( {
+			position: capped ? null : start + index + 1,
+			setsize: capped ? null : total,
+			...item,
+		} ) ),
 		children_total: total,
 		children_capped: capped,
 		has_more: hasMore,

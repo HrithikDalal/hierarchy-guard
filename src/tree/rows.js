@@ -338,11 +338,16 @@ function fill( doc, cell, column, child, context, labels ) {
 export function childRow( template, child, context ) {
 	const doc = template.ownerDocument;
 	const labels = treeRowLabels( child.title );
+	// Core's classes for the row, from the route, then the level and the lock, as core adds them.
 	const row = el(
 		doc,
 		'tr',
-		`level-${ context.level } status-${ child.status } hierarchy-guard-loaded` +
-			( child.locked_by ? ' wp-locked' : '' )
+		[
+			...( child.classes || [ `status-${ child.status }` ] ),
+			`level-${ context.level }`,
+			'hierarchy-guard-loaded',
+			...( child.locked_by ? [ 'wp-locked' ] : [] ),
+		].join( ' ' )
 	);
 	row.id = `post-${ child.id }`;
 	Array.from( template.children ).forEach( ( source ) => {

@@ -27,6 +27,30 @@ describe( 'a loaded subpage’s row', () => {
 		template = document.getElementById( 'post-4' );
 	} );
 
+	it( 'carries core’s row classes, with its level', () => {
+		const row = childRow(
+			template,
+			child( 5, 'About', {
+				status: 'private',
+				locked_by: 'Priya',
+				classes: [
+					'iedit',
+					'author-self',
+					'post-5',
+					'type-page',
+					'status-private',
+					'post-password-protected',
+					'hentry',
+				],
+			} ),
+			context()
+		);
+
+		expect( row.className ).toBe(
+			'iedit author-self post-5 type-page status-private post-password-protected hentry level-1 hierarchy-guard-loaded wp-locked'
+		);
+	} );
+
 	it( 'has the list’s columns, in core’s cells, hidden ones hidden', () => {
 		const row = childRow( template, child( 5, 'About' ), context() );
 
