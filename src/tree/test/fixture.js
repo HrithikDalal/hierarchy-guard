@@ -54,7 +54,7 @@ export function coreRow( {
  */
 export function mountScreen( rows ) {
 	document.body.innerHTML = `<div class="wrap">
-		<span class="hierarchy-guard-tree" hidden data-type="page" data-place="https://example.org/wp-admin/edit.php?post_type=page&hierarchy_guard_view=tree&paged=2" data-total="3" data-start="20" data-per-page="50"></span>
+		<span class="hierarchy-guard-tree" hidden data-type="page" data-place="https://example.org/wp-admin/edit.php?post_type=page&hierarchy_guard_view=tree&paged=2"></span>
 		<div class="alignleft actions"><a class="hierarchy-guard-collapse" href="edit.php?post_type=page&hierarchy_guard_view=tree">Collapse all</a></div>
 		<table class="wp-list-table widefat fixed striped pages"><thead><tr><th id="title">Title</th><th id="hierarchy_guard">Hierarchy</th><th id="author">Author</th><th id="comments" class="hidden">Comments</th><th id="date">Date</th></tr></thead>
 		<tbody id="the-list">${ rows }</tbody></table></div>`;

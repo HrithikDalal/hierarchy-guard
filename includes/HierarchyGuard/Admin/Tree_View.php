@@ -356,16 +356,10 @@ final class Tree_View {
 			return;
 		}
 
-		global $wp_query;
-		$per_page = List_Table::per_page( $type );
-		$paged    = $wp_query instanceof WP_Query ? max( 1, (int) $wp_query->get( 'paged' ) ) : 1;
 		printf(
-			'<span class="hierarchy-guard-tree" hidden data-type="%1$s" data-place="%2$s" data-total="%3$d" data-start="%4$d" data-per-page="%5$d"></span>',
+			'<span class="hierarchy-guard-tree" hidden data-type="%1$s" data-place="%2$s"></span>',
 			esc_attr( $type ),
-			esc_url( self::place_url( $type ) ),
-			$wp_query instanceof WP_Query ? (int) $wp_query->found_posts : 0,
-			(int) ( ( $paged - 1 ) * $per_page ),
-			(int) self::PER_PAGE
+			esc_url( self::place_url( $type ) )
 		);
 	}
 

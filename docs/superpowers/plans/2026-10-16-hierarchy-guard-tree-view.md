@@ -1882,7 +1882,7 @@ git commit -m "feat: without JavaScript an opened page's levels follow it in cor
 - Produces: `List_Table::__construct( ?Tree_View $tree = null )`.
 - Produces: the tree's cell: `<span class="hierarchy-guard-cell" data-id data-children data-status data-level data-parent data-page [data-position data-setsize] [data-open]>` holding, separated by `<span aria-hidden="true"> · </span>`, `a.hierarchy-guard-toggle` (only for a page with subpages the user may edit; `href` opens it, or for an opened page goes back to its parent; a dashicon and a screen-reader label), the count link, then `a.hierarchy-guard-more[data-page]` or `span.hierarchy-guard-capped` under an opened page. `data-children` is the count up to the cap plus one; `data-open` is the page of subpages shown.
 - Produces: in a search, the cell's parent path, each ancestor linked to `List_Table::filter_url()`, after `Parent page:` or `Parent pages:` for screen readers. The closed toggle's dashicon is `arrow-left-alt2` when `is_rtl()`, so it points toward the title.
-- Produces: `Tree_View::controls( $post_type, $which )` on `restrict_manage_posts`: asks for the list-table script, prints `<input type="hidden" name="hierarchy_guard_view" value="tree">`, then in a search `span.hierarchy-guard-back` with the "Back to the tree" link, otherwise `<span class="hierarchy-guard-tree" hidden data-type data-place data-total data-start data-per-page>`; `Tree_View::collapse_all( $which )` on `manage_posts_extra_tablenav` prints `a.hierarchy-guard-collapse` in the tree.
+- Produces: `Tree_View::controls( $post_type, $which )` on `restrict_manage_posts`: asks for the list-table script, prints `<input type="hidden" name="hierarchy_guard_view" value="tree">`, then in a search `span.hierarchy-guard-back` with the "Back to the tree" link, otherwise `<span class="hierarchy-guard-tree" hidden data-type data-place>`; `Tree_View::collapse_all( $which )` on `manage_posts_extra_tablenav` prints `a.hierarchy-guard-collapse` in the tree.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2104,7 +2104,7 @@ with:
 
 		$this->assertSame( 1, $asked, 'The Tree view always loads the list-table script.' );
 		$this->assertStringContainsString( '<input type="hidden" name="hierarchy_guard_view" value="tree">', $html, 'Search and the date filter stay in the tree.' );
-		$this->assertStringContainsString( '<span class="hierarchy-guard-tree" hidden data-type="page" data-place="' . esc_url( Tree_View::place_url( 'page' ) ) . '" data-total="1" data-start="0" data-per-page="50"></span>', $html );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-tree" hidden data-type="page" data-place="' . esc_url( Tree_View::place_url( 'page' ) ) . '"></span>', $html, 'The type and the place: all the script reads.' );
 		$this->assertStringContainsString( '<a class="hierarchy-guard-collapse" href="' . esc_url( Tree_View::place_url( 'page' ) ) . '">Collapse all</a>', $html );
 
 		ob_start();
@@ -2432,16 +2432,10 @@ with:
 			return;
 		}
 
-		global $wp_query;
-		$per_page = List_Table::per_page( $type );
-		$paged    = $wp_query instanceof WP_Query ? max( 1, (int) $wp_query->get( 'paged' ) ) : 1;
 		printf(
-			'<span class="hierarchy-guard-tree" hidden data-type="%1$s" data-place="%2$s" data-total="%3$d" data-start="%4$d" data-per-page="%5$d"></span>',
+			'<span class="hierarchy-guard-tree" hidden data-type="%1$s" data-place="%2$s"></span>',
 			esc_attr( $type ),
-			esc_url( self::place_url( $type ) ),
-			$wp_query instanceof WP_Query ? (int) $wp_query->found_posts : 0,
-			(int) ( ( $paged - 1 ) * $per_page ),
-			(int) self::PER_PAGE
+			esc_url( self::place_url( $type ) )
 		);
 	}
 
@@ -2816,7 +2810,7 @@ export function coreRow( {
  */
 export function mountScreen( rows ) {
 	document.body.innerHTML = `<div class="wrap">
-		<span class="hierarchy-guard-tree" hidden data-type="page" data-place="https://example.org/wp-admin/edit.php?post_type=page&hierarchy_guard_view=tree&paged=2" data-total="3" data-start="20" data-per-page="50"></span>
+		<span class="hierarchy-guard-tree" hidden data-type="page" data-place="https://example.org/wp-admin/edit.php?post_type=page&hierarchy_guard_view=tree&paged=2"></span>
 		<div class="alignleft actions"><a class="hierarchy-guard-collapse" href="edit.php?post_type=page&hierarchy_guard_view=tree">Collapse all</a></div>
 		<table class="wp-list-table widefat fixed striped pages"><thead><tr><th id="title">Title</th><th id="hierarchy_guard">Hierarchy</th><th id="author">Author</th><th id="comments" class="hidden">Comments</th><th id="date">Date</th></tr></thead>
 		<tbody id="the-list">${ rows }</tbody></table></div>`;

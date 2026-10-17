@@ -821,7 +821,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 
 		$this->assertSame( 1, $asked, 'The Tree view always loads the list-table script.' );
 		$this->assertStringContainsString( '<input type="hidden" name="hierarchy_guard_view" value="tree">', $html, 'Search and the date filter stay in the tree.' );
-		$this->assertStringContainsString( '<span class="hierarchy-guard-tree" hidden data-type="page" data-place="' . esc_url( Tree_View::place_url( 'page' ) ) . '" data-total="1" data-start="0" data-per-page="50"></span>', $html );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-tree" hidden data-type="page" data-place="' . esc_url( Tree_View::place_url( 'page' ) ) . '"></span>', $html, 'The type and the place: all the script reads.' );
 		$this->assertStringContainsString( '<a class="hierarchy-guard-collapse" href="' . esc_url( Tree_View::place_url( 'page' ) ) . '">Collapse all</a>', $html );
 
 		ob_start();
