@@ -353,8 +353,8 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$_GET = [ 'post_type' => 'page' ];
 		$this->tree->load();
 		$list = self::inline_edit_forms();
-		$this->assertStringContainsString( "name='post_parent' id='post_parent'", $list, 'The list keeps core’s Parent dropdowns.' );
-		$this->assertStringContainsString( "id='bulk_edit_post_parent'", $list );
+		// Quick Edit's and Bulk Edit's; WordPress 7.1 gives the second its own ID, 6.6 doesn't.
+		$this->assertSame( 2, substr_count( $list, "<select name='post_parent'" ), 'The list keeps core’s Parent dropdowns.' );
 		$this->assertStringContainsString( '>Company</option>', $list );
 
 		$_GET = [
@@ -560,10 +560,13 @@ final class TreeViewTest extends WP_UnitTestCase {
 		// A public taxonomy on pages: core's row names each term.
 		register_taxonomy_for_object_type( 'category', 'page' );
 		wp_set_post_categories( $this->ids['team'], [ self::factory()->category->create( [ 'slug' => 'press' ] ) ] );
+		// Core prints the opened levels as the Tree view's screen does: its query isn't core's indented
+		// tree, so each row goes through display_rows() at level 0, with no level dashes on any version.
 		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
 		ob_start();
-		$table->single_row( get_post( $this->ids['team'] ), 2 );
+		$table->display_rows( [ get_post( $this->ids['team'] ) ] );
 		$html = (string) ob_get_clean();
+		remove_filter( 'the_title', 'esc_html' );
 		preg_match( '/<tr id="post-\d+" class="([^"]*)"/', $html, $row );
 		preg_match( '/<a class="row-title"[^>]*>(.*?)<\/a>/', $html, $title );
 
@@ -572,9 +575,11 @@ final class TreeViewTest extends WP_UnitTestCase {
 		unregister_taxonomy_for_object_type( 'category', 'page' );
 
 		$core = array_values( array_diff( explode( ' ', $row[1] ), [ 'level-2' ] ) );
+		$this->assertContains( 'level-2', explode( ' ', $row[1] ) );
 		$this->assertContains( 'category-press', $core );
 		$this->assertContains( 'post-password-required', $core );
 		$this->assertSame( $core, $loaded['classes'], 'Core’s classes, but the level, which the script adds.' );
+		$this->assertStringContainsString( '<strong><a class="row-title"', $html, 'No level dashes before the title: the indent shows the level.' );
 		$this->assertSame( html_entity_decode( $title[1], ENT_QUOTES, 'UTF-8' ), $loaded['title'], 'The text core’s row shows.' );
 	}
 
