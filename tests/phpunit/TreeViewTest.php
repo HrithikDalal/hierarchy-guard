@@ -316,6 +316,45 @@ final class TreeViewTest extends WP_UnitTestCase {
 		// phpcs:enable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound,WordPress.NamingConventions.ValidHookName.UseUnderscores
 	}
 
+	/**
+	 * Core's hidden Quick Edit and Bulk Edit forms, as edit.php prints them under the table.
+	 *
+	 * @return string
+	 */
+	private static function inline_edit_forms(): string {
+		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
+		// Core prints the forms after its rows, with the last row's post still global.
+		$GLOBALS['post'] = get_post( (int) get_page_by_path( 'company' )->ID ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Core's list leaves it set.
+		ob_start();
+		$table->inline_edit();
+		$html = (string) ob_get_clean();
+		unset( $GLOBALS['post'] );
+		return $html;
+	}
+
+	public function test_core_s_hidden_edit_forms_list_no_pages_in_the_tree_or_its_search(): void {
+		$_GET = [ 'post_type' => 'page' ];
+		$this->tree->load();
+		$list = self::inline_edit_forms();
+		$this->assertStringContainsString( "name='post_parent' id='post_parent'", $list, 'The list keeps core’s Parent dropdowns.' );
+		$this->assertStringContainsString( "id='bulk_edit_post_parent'", $list );
+		$this->assertStringContainsString( '>Company</option>', $list );
+
+		$_GET = [
+			'post_type'          => 'page',
+			Tree_View::QUERY_VAR => Tree_View::VIEW,
+		];
+		$this->tree->load();
+		$tree = self::inline_edit_forms();
+		$this->assertStringNotContainsString( "name='post_parent'", $tree, 'The forms can’t be reached from the tree, so they read no pages.' );
+		$this->assertStringNotContainsString( '>Company</option>', $tree );
+
+		remove_all_filters( 'quick_edit_dropdown_pages_args' );
+		$_GET['s'] = 'team';
+		$this->tree->load();
+		$this->assertStringNotContainsString( "name='post_parent'", self::inline_edit_forms(), 'Nor from a search in the tree.' );
+	}
+
 	public function test_the_plugin_hooks_the_view_into_core(): void {
 		global $wp_filter;
 		$found = [];

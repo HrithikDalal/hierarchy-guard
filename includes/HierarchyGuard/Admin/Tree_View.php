@@ -107,6 +107,8 @@ final class Tree_View {
 		add_filter( "manage_{$type}_posts_columns", [ $this, 'columns' ], 20 );
 		add_filter( "bulk_actions-edit-{$type}", [ $this, 'bulk_actions' ] );
 		add_filter( 'quick_edit_enabled_for_post_type', '__return_false' );
+		// Core still prints its hidden Quick Edit and Bulk Edit forms, each with a Parent dropdown of every page.
+		add_filter( 'quick_edit_dropdown_pages_args', [ $this, 'no_parent_pages' ] );
 		add_action( 'restrict_manage_posts', [ $this, 'controls' ], 10, 2 );
 		add_action( 'manage_posts_extra_tablenav', [ $this, 'collapse_all' ] );
 		if ( 'tree' === $mode ) {
@@ -114,6 +116,21 @@ final class Tree_View {
 			// A search's rows are core's, and the browser's referrer already returns to the results.
 			add_filter( 'page_row_actions', [ $this, 'row_actions' ], 20, 2 );
 		}
+	}
+
+	/**
+	 * Core's hidden Quick Edit and Bulk Edit forms can't be reached from the
+	 * tree, so their Parent dropdowns read no pages: one ID that matches
+	 * nothing, and core prints no dropdown.
+	 *
+	 * @param mixed $args wp_dropdown_pages() arguments.
+	 * @return mixed
+	 */
+	public function no_parent_pages( $args ) {
+		if ( is_array( $args ) ) {
+			$args['include'] = [ 0 ];
+		}
+		return $args;
 	}
 
 	/**
