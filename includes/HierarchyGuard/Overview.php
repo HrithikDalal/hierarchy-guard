@@ -383,7 +383,8 @@ final class Overview {
 			}
 			$terms = get_the_terms( $post, $taxonomy );
 			foreach ( is_array( $terms ) ? $terms : [] as $term ) {
-				if ( '' === (string) $term->slug ) {
+				// As core: a slug of "0" is as empty as none.
+				if ( empty( $term->slug ) ) {
 					continue;
 				}
 				$term_class = sanitize_html_class( $term->slug, (string) $term->term_id );

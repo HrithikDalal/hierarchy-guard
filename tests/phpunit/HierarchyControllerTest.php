@@ -580,6 +580,22 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( [ 'iedit', 'author-self', 'post-' . $this->ids['team'], 'type-page', 'status-publish', 'hentry' ], $children[ $this->ids['team'] ]['classes'], 'Not the bare type name core adds outside wp-admin.' );
 	}
 
+	public function test_a_term_whose_slug_is_0_gives_no_class_as_core_gives_none(): void {
+		global $wpdb;
+		register_taxonomy_for_object_type( 'category', 'page' );
+		$zero = self::factory()->category->create( [ 'slug' => 'zero' ] );
+		$wpdb->update( $wpdb->terms, [ 'slug' => '0' ], [ 'term_id' => $zero ] );
+		clean_term_cache( $zero, 'category' );
+		wp_set_post_categories( $this->ids['team'], [ $zero ] );
+
+		$classes = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], 'classes', 'id' )[ $this->ids['team'] ];
+		$core    = get_post_class( '', $this->ids['team'] );
+		unregister_taxonomy_for_object_type( 'category', 'page' );
+
+		$this->assertNotContains( 'category-' . $zero, $core, 'Core skips an empty() slug.' );
+		$this->assertNotContains( 'category-' . $zero, $classes );
+	}
+
 	public function test_the_route_builds_the_row_classes_without_the_post_class_filter(): void {
 		$called = 0;
 		add_filter(
