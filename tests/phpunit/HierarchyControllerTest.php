@@ -204,7 +204,7 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_the_tree_s_context_sends_only_the_subpages_for_fewer_queries(): void {
+	public function test_the_tree_s_argument_sends_only_the_subpages_for_fewer_queries(): void {
 		global $wpdb;
 		$route  = '/posts/' . $this->ids['about'] . '/hierarchy';
 		$params = [ 'children_per_page' => 50 ];
@@ -219,7 +219,7 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		wp_cache_flush();
 		$queries = $wpdb->num_queries;
-		$tree    = $this->get( $route, $params + [ 'context' => 'tree' ] )->get_data();
+		$tree    = $this->get( $route, $params + [ 'tree' => '1' ] )->get_data();
 		$cost    = $wpdb->num_queries - $queries;
 
 		$this->assertSame( [ 'id', 'children', 'children_total', 'children_capped', 'has_more' ], array_keys( $tree ), 'What the tree reads: no ancestors, descendants, redirects or trash policy.' );
@@ -227,7 +227,12 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 			$this->assertSame( $full[ $key ], $tree[ $key ], "The panel's {$key} too." );
 		}
 		$this->assertLessThan( $panel, $cost, 'Without the descendants walk, the nearest ancestor and the change log.' );
-		$this->assertSame( 400, $this->get( $route, [ 'context' => 'panel' ] )->get_status(), 'Only the tree has a context of its own.' );
+		$this->assertSame( array_keys( $full ), array_keys( $this->get( $route, [ 'tree' => 'false' ] )->get_data() ), 'Off by default.' );
+		foreach ( [ 'view', 'edit', 'embed' ] as $context ) {
+			$response = $this->get( $route, [ 'context' => $context ] );
+			$this->assertSame( 200, $response->get_status(), "REST's own context={$context} is left to REST." );
+			$this->assertSame( array_keys( $full ), array_keys( $response->get_data() ) );
+		}
 	}
 
 	public function test_each_child_carries_what_the_list_s_columns_show(): void {

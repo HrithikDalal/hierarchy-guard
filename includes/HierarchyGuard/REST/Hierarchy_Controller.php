@@ -24,8 +24,8 @@ use WP_REST_Server;
 
 /**
  * Backs the editor panel, the Quick Edit warning, the trash dialog and the
- * Tree view's subpages, 50 at a time with context=tree. Every route is read-only and needs
- * edit rights on the post it reads.
+ * Tree view's subpages, 50 at a time with tree=1. Every route is read-only
+ * and needs edit rights on the post it reads.
  */
 final class Hierarchy_Controller {
 
@@ -86,9 +86,9 @@ final class Hierarchy_Controller {
 						'default' => Overview::CHILDREN_PER_PAGE,
 					],
 					// The Tree view reads only the subpages, without the editor panel's fields.
-					'context'           => [
-						'type' => 'string',
-						'enum' => [ 'tree' ],
+					'tree'              => [
+						'type'    => 'boolean',
+						'default' => false,
 					],
 				],
 			]
@@ -135,15 +135,15 @@ final class Hierarchy_Controller {
 	}
 
 	/**
-	 * GET /posts/{id}/hierarchy: the editor panel's summary, or with
-	 * context=tree only one page of the subpages.
+	 * GET /posts/{id}/hierarchy: the editor panel's summary, or with tree=1
+	 * only one page of the subpages.
 	 *
 	 * @param WP_REST_Request $request Request.
 	 * @return WP_REST_Response
 	 */
 	public function hierarchy( WP_REST_Request $request ): WP_REST_Response {
 		$post = get_post( (int) $request['id'] );
-		if ( 'tree' === $request['context'] ) {
+		if ( true === $request['tree'] ) {
 			return new WP_REST_Response( $this->overview->subpages( $post, (int) $request['children_page'], (int) $request['children_per_page'] ) );
 		}
 		return new WP_REST_Response( $this->overview->describe( $post, (int) $request['children_page'], (int) $request['children_per_page'] ) );

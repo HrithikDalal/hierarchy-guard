@@ -17,8 +17,8 @@ describe( 'routes', () => {
 		expect( hierarchyPath( 42, 2, 50 ) ).toBe(
 			'/hierarchy-guard/v1/posts/42/hierarchy?children_page=2&children_per_page=50'
 		);
-		expect( hierarchyPath( 42, 2, 50, 'tree' ) ).toBe(
-			'/hierarchy-guard/v1/posts/42/hierarchy?children_page=2&children_per_page=50&context=tree'
+		expect( hierarchyPath( 42, 2, 50, true ) ).toBe(
+			'/hierarchy-guard/v1/posts/42/hierarchy?children_page=2&children_per_page=50&tree=1'
 		);
 	} );
 

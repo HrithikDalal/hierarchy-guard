@@ -817,7 +817,7 @@ describe( 'the tree grid', () => {
 		await tree.toggle( row( 4 ) );
 
 		expect( apiFetch ).toHaveBeenCalledWith( {
-			path: '/hierarchy-guard/v1/posts/4/hierarchy?children_page=1&children_per_page=50&context=tree',
+			path: '/hierarchy-guard/v1/posts/4/hierarchy?children_page=1&children_per_page=50&tree=1',
 		} );
 		expect( row( 5 ) ).not.toBe( null );
 	} );

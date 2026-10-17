@@ -16,7 +16,7 @@ import { createTree } from './tree';
  * @return {Promise<Object>} The page's subpages.
  */
 const fetchChildren = ( id, page ) =>
-	fetchHierarchy( id, page, PER_PAGE, 'tree' );
+	fetchHierarchy( id, page, PER_PAGE, true );
 
 /**
  * Sets up the Tree view, if the screen is one.

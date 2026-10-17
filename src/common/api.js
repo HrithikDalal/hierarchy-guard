@@ -10,31 +10,31 @@ const base = () => '/' + config.namespace;
 /**
  * The route of one post's hierarchy.
  *
- * @param {number} id      Post ID.
- * @param {number} page    Page of children.
- * @param {number} perPage Children per page; the route's own 10 when omitted.
- * @param {string} context 'tree' for the subpages alone, or '' for the whole summary.
+ * @param {number}  id      Post ID.
+ * @param {number}  page    Page of children.
+ * @param {number}  perPage Children per page; the route's own 10 when omitted.
+ * @param {boolean} tree    Whether to read the subpages alone, for the Tree view, without the whole summary.
  * @return {string} Path.
  */
-export function hierarchyPath( id, page = 1, perPage = 0, context = '' ) {
+export function hierarchyPath( id, page = 1, perPage = 0, tree = false ) {
 	return addQueryArgs( `${ base() }/posts/${ id }/hierarchy`, {
 		children_page: page,
 		...( perPage ? { children_per_page: perPage } : {} ),
-		...( context ? { context } : {} ),
+		...( tree ? { tree: 1 } : {} ),
 	} );
 }
 
 /**
  * The hierarchy of one post.
  *
- * @param {number} id      Post ID.
- * @param {number} page    Page of children.
- * @param {number} perPage Children per page; the route's own 10 when omitted.
- * @param {string} context 'tree' for the subpages alone, or '' for the whole summary.
+ * @param {number}  id      Post ID.
+ * @param {number}  page    Page of children.
+ * @param {number}  perPage Children per page; the route's own 10 when omitted.
+ * @param {boolean} tree    Whether to read the subpages alone, for the Tree view, without the whole summary.
  * @return {Promise<Object>} Hierarchy.
  */
-export function fetchHierarchy( id, page = 1, perPage = 0, context = '' ) {
-	return apiFetch( { path: hierarchyPath( id, page, perPage, context ) } );
+export function fetchHierarchy( id, page = 1, perPage = 0, tree = false ) {
+	return apiFetch( { path: hierarchyPath( id, page, perPage, tree ) } );
 }
 
 /**

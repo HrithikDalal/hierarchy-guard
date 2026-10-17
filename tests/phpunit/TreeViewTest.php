@@ -554,7 +554,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$request->set_query_params(
 			[
 				'children_per_page' => Tree_View::PER_PAGE,
-				'context'           => 'tree',
+				'tree'              => true,
 			]
 		);
 		return array_column( rest_do_request( $request )->get_data()['children'], null, 'id' );
