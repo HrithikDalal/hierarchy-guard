@@ -376,6 +376,23 @@ describe( 'the tree grid', () => {
 		);
 	} );
 
+	it( 'leaves the status rows out of the tree’s levels and places for assistive technology', async () => {
+		const tree = bindTree( document, fetchChildren );
+
+		await tree.toggle( row( 9 ) );
+
+		const more = document.querySelector( '.hierarchy-guard-more' );
+		expect( more.hasAttribute( 'aria-level' ) ).toBe( false );
+		expect( more.hasAttribute( 'aria-posinset' ) ).toBe( false );
+		expect( more.hasAttribute( 'aria-setsize' ) ).toBe( false );
+		expect( more.classList.contains( 'level-1' ) ).toBe( true );
+		// It still sits under its row: closing the row takes it away.
+		tree.toggle( row( 9 ) );
+		expect( document.querySelector( '.hierarchy-guard-more' ) ).toBe(
+			null
+		);
+	} );
+
 	it( 'moves the tab stop to the closed row when its subpages go', async () => {
 		const tree = bindTree( document, fetchChildren );
 		await tree.toggle( row( 4 ) );

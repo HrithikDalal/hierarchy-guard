@@ -26,13 +26,14 @@ const LEFT = 'dashicons-arrow-left-alt2';
 const closed = () => ( isRTL() ? LEFT : RIGHT );
 
 /**
- * A row's level, from 1.
+ * A row's level, from 1: a page row's aria-level, or for a status row, which
+ * assistive technology doesn't count among the pages, the level it sits at.
  *
  * @param {HTMLTableRowElement} row Row.
  * @return {number} Level.
  */
 export function levelOf( row ) {
-	return Number( row.getAttribute( 'aria-level' ) || 1 );
+	return Number( row.getAttribute( 'aria-level' ) || row.dataset.level || 1 );
 }
 
 /**
@@ -213,7 +214,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 */
 	const addStatus = ( row ) => {
 		const status = statusRow( template, idOf( row ), levelOf( row ) );
-		status.row.setAttribute( 'aria-level', String( levelOf( row ) + 1 ) );
+		// At its subpages' level for the keys, but with no aria-level, so it isn't read as one of them.
+		status.row.dataset.level = String( levelOf( row ) + 1 );
 		status.row.setAttribute( 'tabindex', '-1' );
 		lastOf( row ).after( status.row );
 		return status;
