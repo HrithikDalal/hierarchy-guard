@@ -34,16 +34,30 @@ describe( 'the indent per level', () => {
 			'<table><tbody id="the-list"></tbody></table>';
 	} );
 
-	it( 'steps by level, and a row deeper than 20 indents as level 20', () => {
+	// A table cell's percentage padding resolves against the table, so the ceiling is the screen's:
+	// at 1024 pixels a title cell is about 342 wide, and 20vw leaves a deep title 137 of them.
+	it( 'steps by level up to a fifth of the screen, and a row deeper than 20 indents as level 20', () => {
 		expect(
 			[ 0, 1, 20, 21, 25, 120 ].map( ( level ) => indent( level ) )
-		).toEqual( [ '34px', '58px', '514px', '514px', '514px', '514px' ] );
+		).toEqual( [
+			'34px',
+			'min(58px, 20vw)',
+			'min(514px, 20vw)',
+			'min(514px, 20vw)',
+			'min(514px, 20vw)',
+			'min(514px, 20vw)',
+		] );
 	} );
 
 	it( 'lines a status row deeper than 20 up with its level-20 subpages', () => {
 		expect(
 			[ 1, 20, 21, 40 ].map( ( level ) => indent( level, true ) )
-		).toEqual( [ '58px', '514px', '514px', '514px' ] );
+		).toEqual( [
+			'min(58px, 20vw)',
+			'min(514px, 20vw)',
+			'min(514px, 20vw)',
+			'min(514px, 20vw)',
+		] );
 	} );
 
 	it( 'halves the step on a phone, and a row deeper than 20 stops as level 20 does', () => {

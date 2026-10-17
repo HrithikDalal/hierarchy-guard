@@ -50,6 +50,8 @@
 // A status row (Show more, loading, a failure, the cap) lines up with the
 // titles of the subpages it is about. A row deeper than level 20 indents
 // as level 20: $deep matches a level class that is none of level-0 to 20.
+// The indent stops at a fifth of the screen, so a deep title keeps its room
+// on a narrow desktop: a cell's percentage padding would be the table's.
 $deep: '[class*="level-"]';
 
 @for $level from 0 through 20 {
@@ -65,13 +67,13 @@ $deep: '[class*="level-"]';
 	@for $level from 1 through 20 {
 		.level-#{$level} .column-title,
 		.level-#{$level}.hierarchy-guard-status > .colspanchange {
-			padding-inline-start: 34px + 24px * $level;
+			padding-inline-start: min(#{34px + 24px * $level}, 20vw);
 		}
 	}
 
 	#{$deep} .column-title,
 	#{$deep}.hierarchy-guard-status > .colspanchange {
-		padding-inline-start: 34px + 24px * 20;
+		padding-inline-start: min(#{34px + 24px * 20}, 20vw);
 	}
 
 	.column-title .hierarchy-guard-toggle {
