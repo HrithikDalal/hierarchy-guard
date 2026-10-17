@@ -273,18 +273,20 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	/**
 	 * Says a load failed, in its status row, with a button to try again
 	 * without closing the row. A failed first page gives the keyboard back
-	 * to the toggle, just above; a failed "Show more" keeps it on the
-	 * failure's "Try again", where the rows end.
+	 * to the toggle, just above. A failed "Show more" makes "Try again" the
+	 * row Tab reaches, and moves the keyboard there only if it was still on
+	 * the "Show more" row.
 	 *
 	 * @param {HTMLTableRowElement}                                    row    The opened row.
 	 * @param {number}                                                 page   The page that failed.
 	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} status Its status row.
 	 */
 	const failed = ( row, page, status ) => {
-		const here =
+		// Still where the load started: on its status row, or with the keyboard nowhere.
+		const atStatus =
 			doc.activeElement === doc.body ||
-			status.row.contains( doc.activeElement ) ||
-			row.contains( doc.activeElement );
+			status.row.contains( doc.activeElement );
+		const here = atStatus || row.contains( doc.activeElement );
 		status.row.removeAttribute( 'aria-busy' );
 		status.row.classList.remove( 'hierarchy-guard-more' );
 		status.row.classList.add( 'hierarchy-guard-failed' );
@@ -309,9 +311,12 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			__( 'The subpages couldn’t be loaded.', 'hierarchy-guard' ),
 			'assertive'
 		);
-		if ( here && page > 1 ) {
+		if ( page > 1 ) {
+			// Tab reaches Try again; the keyboard moves there only if it hadn't left the Show more row.
 			setTabStop( status.row );
-			retry.focus();
+			if ( atStatus ) {
+				retry.focus();
+			}
 		} else if ( here ) {
 			setTabStop( row );
 			(

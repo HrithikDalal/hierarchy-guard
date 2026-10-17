@@ -421,6 +421,33 @@ describe( 'the tree grid', () => {
 		).toBe( 'Show more subpages of “(no title)”' );
 	} );
 
+	it( 'leaves the keyboard where the user took it when a later page fails, with Tab on Try again', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		let fail;
+		fetchChildren.mockImplementationOnce(
+			() =>
+				new Promise( ( resolve, reject ) => {
+					fail = reject;
+				} )
+		);
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		const toggleButton = row( 9 ).querySelector(
+			'.hierarchy-guard-toggle'
+		);
+		// Back up to the opened row while the next page loads.
+		toggleButton.focus();
+
+		fail( new Error() );
+		await settle();
+
+		expect( document.activeElement ).toBe( toggleButton );
+		expect(
+			document.querySelector( '.hierarchy-guard-failed' ).tabIndex
+		).toBe( 0 );
+		expect( row( 9 ).tabIndex ).toBe( -1 );
+	} );
+
 	it( 'moves the tab stop to the closed row when its subpages go', async () => {
 		const tree = bindTree( document, fetchChildren );
 		await tree.toggle( row( 4 ) );
