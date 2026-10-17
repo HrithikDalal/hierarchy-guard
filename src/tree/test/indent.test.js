@@ -4,7 +4,6 @@
  */
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-// eslint-disable-next-line import/no-extraneous-dependencies -- wp-scripts compiles the stylesheet with it.
 import { compile } from 'sass';
 
 /**
