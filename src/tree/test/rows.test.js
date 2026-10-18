@@ -186,6 +186,21 @@ describe( 'a loaded subpage’s row', () => {
 		);
 	} );
 
+	it( 'says a page the user may not edit is “Child of” no one under an untitled page', () => {
+		const row = childRow(
+			template,
+			child( 7, 'Press', { edit_link: null } ),
+			context( { parentTitle: '' } )
+		);
+
+		expect( row.querySelector( '#post-hierarchy-7' ).textContent ).toBe(
+			' (Child of )'
+		);
+		expect( row.querySelector( '#post-hierarchy-7' ).className ).toBe(
+			'screen-reader-text'
+		);
+	} );
+
 	it( 'copies WordPress 6.6’s title cell, a plain cell with no name', () => {
 		mountScreen(
 			coreRow( { id: 4, title: 'Company', children: 3, wp66: true } )

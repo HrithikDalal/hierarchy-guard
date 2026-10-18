@@ -419,6 +419,30 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'] );
 	}
 
+	public function test_a_lock_on_a_child_the_user_may_read_but_not_edit_names_no_one(): void {
+		$other = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $other );
+		$team = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $team ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $team === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertNull( $children[ $team ]['locked_by'], 'Core’s row prints no lock notice on a page the user may not edit.' );
+		$this->assertNull( $children[ $team ]['edit_link'] );
+	}
+
 	public function test_a_lock_the_user_holds_or_that_expired_names_no_one(): void {
 		$other = self::factory()->user->create( [ 'role' => 'editor' ] );
 		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $this->admin );
