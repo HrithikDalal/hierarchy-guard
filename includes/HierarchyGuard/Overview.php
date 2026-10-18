@@ -107,7 +107,7 @@ final class Overview {
 	 * @param WP_Post $post          Post.
 	 * @param int     $children_page Page of children, from 1.
 	 * @param int     $per_page      Children per page, at most MAX_CHILDREN_PER_PAGE.
-	 * @return array{id:int,untitled:bool,children:array<int,array<string,mixed>>,children_total:int,children_capped:bool,has_more:bool}
+	 * @return array{id:int,child_of:string,children:array<int,array<string,mixed>>,children_total:int,children_capped:bool,has_more:bool}
 	 */
 	public function subpages( WP_Post $post, int $children_page = 1, int $per_page = self::CHILDREN_PER_PAGE ): array {
 		$id            = (int) $post->ID;
@@ -119,8 +119,7 @@ final class Overview {
 
 		return [
 			'id'              => $id,
-			// Core's "Child of" under an untitled page names no one.
-			'untitled'        => '' === (string) $post->post_title,
+			'child_of'        => self::child_of( $post ),
 			'children'        => $this->children( $id, $type, $children_page, $per_page, $total > $cap ? null : $total ),
 			'children_total'  => min( $total, $cap ),
 			'children_capped' => $total > $cap,
@@ -158,7 +157,22 @@ final class Overview {
 		$title = $strip ? wp_strip_all_tags( $title ) : $title;
 		remove_filter( 'private_title_format', $plain );
 		remove_filter( 'protected_title_format', $plain );
-		return '' !== $title ? $title : __( '(no title)', 'hierarchy-guard' );
+		// As _draft_or_post_title(): a title of "0" is no title either.
+		return ! empty( $title ) ? $title : __( '(no title)', 'hierarchy-guard' );
+	}
+
+	/**
+	 * The name core's list gives a post in its subpages' "Child of": the
+	 * title through the_title, as the browser reads it, with no "(no title)"
+	 * for an untitled post, so "0" stays "0" and "" names no one.
+	 *
+	 * @param WP_Post $post Post.
+	 * @return string
+	 */
+	public static function child_of( WP_Post $post ): string {
+		/** This filter is documented in wp-includes/post-template.php */
+		$title = (string) apply_filters( 'the_title', (string) $post->post_title, (int) $post->ID ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own filter, as core's list applies it.
+		return html_entity_decode( $title, ENT_QUOTES, 'UTF-8' );
 	}
 
 	/**

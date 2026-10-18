@@ -222,7 +222,7 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$tree    = $this->get( $route, $params + [ 'tree' => '1' ] )->get_data();
 		$cost    = $wpdb->num_queries - $queries;
 
-		$this->assertSame( [ 'id', 'untitled', 'children', 'children_total', 'children_capped', 'has_more' ], array_keys( $tree ), 'What the tree reads: no ancestors, descendants, redirects or trash policy.' );
+		$this->assertSame( [ 'id', 'child_of', 'children', 'children_total', 'children_capped', 'has_more' ], array_keys( $tree ), 'What the tree reads: no ancestors, descendants, redirects or trash policy.' );
 		foreach ( array_keys( $tree ) as $key ) {
 			$this->assertSame( $full[ $key ], $tree[ $key ], "The panel's {$key} too." );
 		}
@@ -591,37 +591,57 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( html_entity_decode( _draft_or_post_title( $this->ids['team'] ), ENT_QUOTES, 'UTF-8' ), $children[ $this->ids['team'] ]['title'] );
 	}
 
-	public function test_an_untitled_page_is_marked_so_the_script_names_it_as_core_s_row_does(): void {
+	/**
+	 * The title and "Child of" name core's row prints for a post, decoded as
+	 * the browser reads them: [ row-title text, "Child of" name or null ].
+	 * WordPress 6.6 prints no "Child of".
+	 *
+	 * @param int $post_id Post.
+	 * @return array{0:string,1:string|null}
+	 */
+	private static function core_row_text( int $post_id ): array {
 		require_once ABSPATH . 'wp-admin/includes/template.php';
-		$parent = $this->page( 'untitled-parent' );
-		$child  = $this->page( 'untitled-child', $parent );
-		global $wpdb;
-		$wpdb->update( $wpdb->posts, [ 'post_title' => '' ], [ 'ID' => $parent ] );
-		$wpdb->update( $wpdb->posts, [ 'post_title' => '' ], [ 'ID' => $child ] );
-		clean_post_cache( $parent );
-		clean_post_cache( $child );
-
-		$about = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'tree' => '1' ] )->get_data();
-		$data  = $this->get( '/posts/' . $parent . '/hierarchy', [ 'tree' => '1' ] )->get_data();
-
-		$this->assertFalse( $about['untitled'] );
-		$this->assertSame( [ false, false ], array_column( $about['children'], 'untitled' ) );
-		$this->assertTrue( $data['untitled'], 'Its subpages are “Child of” no name, as core prints them.' );
-		$this->assertTrue( $data['children'][0]['untitled'] );
-		$this->assertSame( '(no title)', $data['children'][0]['title'] );
-
-		// What core's own row prints for the untitled child, on the versions that print it.
 		set_current_screen( 'edit-page' );
 		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
 		ob_start();
-		$table->display_rows( [ get_post( $child ) ] );
+		$table->display_rows( [ get_post( $post_id ) ] );
 		$html = (string) ob_get_clean();
 		remove_filter( 'the_title', 'esc_html' );
 		set_current_screen( 'front' );
-		if ( 1 === preg_match( '/<th [^>]*column-title/', $html ) ) {
-			// WordPress 7.1 names an untitled row "no title", and its subpage "Child of" no one.
-			$this->assertStringContainsString( 'aria-label="no title"', $html );
-			$this->assertStringContainsString( 'class="hidden">Child of </span>', $html );
+		preg_match( '/<a class="row-title"[^>]*>(.*?)<\/a>/s', $html, $title );
+		$child_of = 1 === preg_match( '/<span id="post-hierarchy-\d+" class="hidden">Child of (.*?)<\/span>/s', $html, $match ) ? $match[1] : null;
+		$decode   = static fn( string $text ): string => html_entity_decode( $text, ENT_QUOTES, 'UTF-8' );
+		return [ $decode( wp_strip_all_tags( preg_replace( '/<span class="trimmed-post-excerpt">.*?<\/span>/s', '', $title[1] ) ) ), null !== $child_of ? $decode( $child_of ) : null ];
+	}
+
+	public function test_an_untitled_page_and_a_page_titled_0_read_as_core_s_rows_read_them(): void {
+		global $wpdb;
+		$cases = [
+			'empty' => [ '', '' ],
+			'zero'  => [ '0', '0' ],
+			'em'    => [ '<em>Em</em> &amp; “Q”', '<em>Em</em> & “Q”' ],
+		];
+		foreach ( $cases as $slug => [ $stored, $name ] ) {
+			$parent = $this->page( "parent-{$slug}" );
+			$child  = $this->page( "child-{$slug}", $parent );
+			$wpdb->update( $wpdb->posts, [ 'post_title' => $stored ], [ 'ID' => $parent ] );
+			$wpdb->update( $wpdb->posts, [ 'post_title' => 'em' === $slug ? 'Kid' : $stored ], [ 'ID' => $child ] );
+			clean_post_cache( $parent );
+			clean_post_cache( $child );
+
+			$data                           = $this->get( '/posts/' . $parent . '/hierarchy', [ 'tree' => '1' ] )->get_data();
+			$loaded                         = $data['children'][0];
+			[ $core_title, $core_child_of ] = self::core_row_text( $child );
+
+			$this->assertSame( $name, $data['child_of'], "The name core's subpages are “Child of” under a {$slug} title." );
+			if ( null !== $core_child_of ) {
+				$this->assertSame( $core_child_of, $data['child_of'], "WordPress 7.1's own “Child of” under a {$slug} title." );
+			}
+			$this->assertSame( $core_title, $loaded['title'], "Core's title text for a {$slug} subpage." );
+			$this->assertSame( 'em' !== $slug, $loaded['untitled'], 'Named “no title” as core names it.' );
+			if ( 'em' !== $slug ) {
+				$this->assertSame( '(no title)', $loaded['title'] );
+			}
 		}
 	}
 

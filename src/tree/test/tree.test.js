@@ -513,18 +513,23 @@ describe( 'the tree grid', () => {
 		expect( document.activeElement ).toBe( row( 9 ) );
 	} );
 
-	it( 'says a subpage of an untitled page is “Child of” no one, as core does', async () => {
-		const tree = bindTree( document, () =>
+	it( 'names the parent in “Child of” as the route sends it: no one for an untitled page, “0” for a page titled 0', async () => {
+		const load = vi.fn( ( id ) =>
 			Promise.resolve( {
-				...page( [ child( 5, 'About' ) ], 1 ),
-				untitled: true,
+				...page( [ child( 4 === id ? 5 : 1000, 'About' ) ], 1 ),
+				child_of: 4 === id ? '' : '0',
 			} )
 		);
+		const tree = bindTree( document, load );
 
 		await tree.toggle( row( 4 ) );
+		await tree.toggle( row( 9 ) );
 
 		expect( row( 5 ).querySelector( '.hidden' ).textContent ).toBe(
 			'Child of '
+		);
+		expect( row( 1000 ).querySelector( '.hidden' ).textContent ).toBe(
+			'Child of 0'
 		);
 	} );
 
