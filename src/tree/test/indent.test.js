@@ -23,16 +23,21 @@ const indent = ( level, status = false ) => {
 };
 
 /**
- * A CSS length of pixels, vw, calc() and min(), in pixels at a screen width,
- * worked out as the browser would: happy-dom keeps the expression, but lays
- * nothing out.
+ * A CSS length of pixels, vw, percentages, calc() and min(), in pixels at a
+ * screen width, worked out as the browser would: happy-dom keeps the
+ * expression, but lays nothing out.
  *
  * @param {string} value CSS length.
  * @param {number} width Screen width in pixels.
+ * @param {number} base  What a percentage is of: on a phone core makes the cell a block, so its width.
  * @return {number} Pixels.
  */
-const pixels = ( value, width ) => {
+const pixels = ( value, width, base = 0 ) => {
 	const expression = value
+		.replace(
+			/([\d.]+)%/g,
+			( match, number ) => `(${ number } * ${ base } / 100)`
+		)
 		.replace(
 			/([\d.]+)vw/g,
 			( match, number ) => `(${ number } * ${ width } / 100)`
@@ -53,13 +58,14 @@ const pixels = ( value, width ) => {
  * The indents of levels 0 to 21 at a screen width, in pixels.
  *
  * @param {number} width Screen width in pixels.
+ * @param {number} cell  The title cell's width, for a percentage.
  * @return {number[]} Pixels.
  */
-const indents = ( width ) => {
+const indents = ( width, cell = 0 ) => {
 	window.happyDOM.setViewport( { width, height: 768 } );
 	try {
 		return Array.from( { length: 22 }, ( unused, level ) =>
-			pixels( indent( level ), width )
+			pixels( indent( level ), width, cell )
 		);
 	} finally {
 		window.happyDOM.setViewport( { width: 1024, height: 768 } );
@@ -105,14 +111,27 @@ describe( 'the indent per level', () => {
 		).toEqual( [ 1, 20, 20, 20 ].map( ( level ) => indent( level ) ) );
 	} );
 
-	it( 'halves the step on a phone, and a row deeper than 20 stops as level 20 does', () => {
-		window.happyDOM.setViewport( { width: 600, height: 800 } );
-		try {
-			expect( [ 1, 20, 21 ].map( ( level ) => indent( level ) ) ).toEqual(
-				[ 'min(46px, 50%)', 'min(274px, 50%)', 'min(274px, 50%)' ]
-			);
-		} finally {
-			window.happyDOM.setViewport( { width: 1024, height: 768 } );
+	it.each( [
+		[ 390, 366 ],
+		[ 320, 296 ],
+	] )(
+		'halves the step on a %i-pixel phone and keeps stepping to 20 within half of a %i-pixel cell',
+		( width, cell ) => {
+			const steps = indents( width, cell );
+			steps
+				.slice( 1, 21 )
+				.forEach( ( offset, index ) =>
+					expect( offset ).toBeGreaterThan( steps[ index ] )
+				);
+			expect( steps[ 1 ] - steps[ 0 ] ).toBeCloseTo( 12 );
+			expect( steps[ 20 ] ).toBeLessThanOrEqual( cell / 2 + 0.001 );
+			expect( steps[ 21 ] ).toBe( steps[ 20 ] );
 		}
+	);
+
+	it( 'keeps the phone’s 12-pixel steps all the way where the cell is wide enough', () => {
+		const steps = indents( 782, 758 );
+		expect( steps[ 20 ] ).toBe( 274 );
+		expect( steps[ 19 ] ).toBe( 262 );
 	} );
 } );

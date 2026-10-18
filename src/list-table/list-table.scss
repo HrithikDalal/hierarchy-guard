@@ -61,6 +61,16 @@ $small: min(8px, (20vw - 58px) / 19);
 	@return min(#{34px + 24px * $level}, calc(20vw - #{20 - $level} * #{$small}));
 }
 
+// On a phone the step halves, and a smaller step, 6 pixels or less where 19
+// of them don't fit, brings level 20 to half the cell, which core makes a
+// block there, so its percentage is the cell's.
+$phone-small: min(6px, (50% - 46px) / 19);
+
+@function phone-indent($level) {
+
+	@return min(#{34px + 12px * $level}, calc(50% - #{20 - $level} * #{$phone-small}));
+}
+
 $deep: '[class*="level-"]';
 
 @for $level from 0 through 20 {
@@ -94,8 +104,8 @@ $deep: '[class*="level-"]';
 	}
 }
 
-// On a phone, at core's own breakpoint, the step halves and the indent
-// stops at half the row, so a deep title keeps its room.
+// On a phone, at core's own breakpoint, the step halves, and every level
+// still steps up to half the row at level 20, so a deep title keeps its room.
 @media screen and (max-width: 782px) {
 
 	.hierarchy-guard-tree-view #the-list {
@@ -103,13 +113,13 @@ $deep: '[class*="level-"]';
 		@for $level from 1 through 20 {
 			.level-#{$level} .column-title,
 			.level-#{$level}.hierarchy-guard-status > .colspanchange {
-				padding-inline-start: min(#{34px + 12px * $level}, 50%);
+				padding-inline-start: phone-indent($level);
 			}
 		}
 
 		#{$deep} .column-title,
 		#{$deep}.hierarchy-guard-status > .colspanchange {
-			padding-inline-start: min(#{34px + 12px * 20}, 50%);
+			padding-inline-start: phone-indent(20);
 		}
 	}
 }
