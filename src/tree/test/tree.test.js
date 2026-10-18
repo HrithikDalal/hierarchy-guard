@@ -872,6 +872,59 @@ describe( 'the tree grid', () => {
 		).toHaveLength( 1 );
 	} );
 
+	it( 'says once that the user can’t view a row’s subpages, however many pages bring none', async () => {
+		const load = vi.fn( ( id, number ) =>
+			Promise.resolve( page( [], 151, number < 4 ) )
+		);
+		const tree = bindTree( document, load );
+
+		await tree.toggle( row( 9 ) );
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+
+		expect( load ).toHaveBeenLastCalledWith( 9, 2 );
+		expect(
+			document.querySelectorAll( '.hierarchy-guard-hidden' )
+		).toHaveLength( 1 );
+	} );
+
+	it( 'gives an opened row its own notice, beside a subpage’s, and the keyboard goes to it', async () => {
+		const load = vi.fn( ( id, number ) => {
+			if ( 1000 === id ) {
+				return Promise.resolve( page( [], 2 ) );
+			}
+			return Promise.resolve(
+				1 === number
+					? page(
+							[ child( 1000, 'City 1', { children_count: 2 } ) ],
+							51,
+							true
+						)
+					: page( [], 51, false, false, 50 )
+			);
+		} );
+		const tree = bindTree( document, load );
+		await tree.toggle( row( 9 ) );
+		await tree.toggle( row( 1000 ) );
+		expect(
+			document.querySelector( '.hierarchy-guard-hidden' ).dataset.parent
+		).toBe( '1000' );
+
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		await settle();
+
+		const notices = Array.from(
+			document.querySelectorAll( '.hierarchy-guard-hidden' )
+		);
+		expect( notices.map( ( item ) => item.dataset.parent ) ).toEqual( [
+			'1000',
+			'9',
+		] );
+		expect( document.activeElement ).toBe( notices[ 1 ] );
+	} );
+
 	it( 'keeps the row the server opened onto subpages the user can’t view, and says so in a row', () => {
 		mountScreen(
 			coreRow( {

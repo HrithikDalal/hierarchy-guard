@@ -235,6 +235,20 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	};
 
 	/**
+	 * An opened row's own notice that the user can't view its subpages, not
+	 * one an opened subpage of it has.
+	 *
+	 * @param {HTMLTableRowElement} row The opened row.
+	 * @return {HTMLTableRowElement|undefined} The notice, if any.
+	 */
+	const noticeOf = ( row ) =>
+		descendantsOf( row ).find(
+			( other ) =>
+				other.classList.contains( 'hierarchy-guard-hidden' ) &&
+				other.dataset.parent === String( idOf( row ) )
+		);
+
+	/**
 	 * Says under an opened row that the user can't view its subpages: those
 	 * on the page loaded, when none of them is readable. One such row is
 	 * enough, however many pages bring none.
@@ -243,9 +257,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 * @return {HTMLTableRowElement} The row that says so.
 	 */
 	const addHidden = ( row ) => {
-		const said = descendantsOf( row ).find( ( other ) =>
-			other.classList.contains( 'hierarchy-guard-hidden' )
-		);
+		const said = noticeOf( row );
 		if ( said ) {
 			return said;
 		}
