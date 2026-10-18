@@ -917,7 +917,55 @@ describe( 'the tree grid', () => {
 		expect( row( 60 ).getAttribute( 'aria-posinset' ) ).toBe( '51' );
 		expect(
 			document.querySelectorAll( '.hierarchy-guard-hidden' )
-		).toHaveLength( 1 );
+		).toHaveLength( 0 );
+	} );
+
+	it( 'counts a row’s subpages again, and says nothing of reading them, when a later page finds them gone', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		// Since the first page loaded, all but 45 were deleted.
+		fetchChildren.mockImplementationOnce( () =>
+			Promise.resolve( page( [], 45 ) )
+		);
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+
+		expect( document.querySelector( '.hierarchy-guard-hidden' ) ).toBe(
+			null
+		);
+		expect( document.querySelector( '.hierarchy-guard-more' ) ).toBe(
+			null
+		);
+		const cell = row( 9 ).querySelector( '.hierarchy-guard-cell' );
+		expect( cell.dataset.children ).toBe( '45' );
+		expect( cell.textContent ).toBe( '45 subpages' );
+		expect( cell.querySelector( 'a' ).getAttribute( 'aria-label' ) ).toBe(
+			'View the 45 subpages of “Locations”'
+		);
+		expect( row( 9 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+	} );
+
+	it( 'shows a row as having none when a later page finds every subpage gone', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		fetchChildren.mockImplementationOnce( () =>
+			Promise.resolve( page( [], 0 ) )
+		);
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+
+		expect( rows().map( ( item ) => item.id ) ).toEqual( [
+			'post-4',
+			'post-8',
+			'post-9',
+		] );
+		expect( row( 9 ).hasAttribute( 'aria-expanded' ) ).toBe( false );
+		expect(
+			row( 9 ).querySelector( '.hierarchy-guard-cell' ).dataset.children
+		).toBe( '0' );
+		expect( document.activeElement ).toBe( row( 9 ) );
 	} );
 
 	it( 'says once that the user can’t view a row’s subpages, however many pages bring none', async () => {

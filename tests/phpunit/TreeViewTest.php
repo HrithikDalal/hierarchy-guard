@@ -697,6 +697,22 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertFalse( $this->tree->row( $this->ids['team'] )['hidden'] );
 	}
 
+	public function test_a_later_page_whose_subpages_have_gone_shows_the_last_page_left_without_a_notice(): void {
+		$subpages = $this->subpages( $this->ids['team'], 55 );
+		// A link to Team's second page, followed after ten of its subpages were deleted.
+		foreach ( array_slice( $subpages, 45 ) as $gone ) {
+			wp_delete_post( $gone, true );
+		}
+		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['team'];
+		$_GET[ Tree_View::CHILDREN_PAGE_VAR ] = '2';
+
+		$this->assertCount( 3 + 46, $this->open_levels( [ $this->ids['company'] ], 1 ), 'Leadership and the 45 left, on the page that is left.' );
+		$row = $this->tree->row( $this->ids['team'] );
+		$this->assertSame( 1, $row['shown'] );
+		$this->assertFalse( $row['hidden'], 'Nothing is kept from the user.' );
+		$this->assertFalse( $row['more'] );
+	}
+
 	public function test_a_later_page_the_user_may_not_read_says_so_in_place(): void {
 		// Team's subpages sort as Leadership, sub-001 … sub-099: page 2 is sub-050 to sub-099.
 		$subpages = $this->subpages( $this->ids['team'], 99 );

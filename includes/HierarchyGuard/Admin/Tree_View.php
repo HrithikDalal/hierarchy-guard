@@ -557,8 +557,8 @@ final class Tree_View {
 				'shown'  => $page,
 				'more'   => $page * self::PER_PAGE < min( $total, $cap ),
 				'capped' => $capped && $page * self::PER_PAGE >= $cap,
-				// Subpages exist, but none on this page the user may read: the row says so, and keeps its toggle and count.
-				'hidden' => 0 === $shown,
+				// Subpages exist on this page, but none the user may read: the row says so, and keeps its toggle and count. The page is clamped to the last one, so it always holds some, as the script checks after deletions.
+				'hidden' => 0 === $shown && $total > ( $page - 1 ) * self::PER_PAGE,
 			]
 		);
 	}

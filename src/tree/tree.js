@@ -6,13 +6,15 @@
 import { speak } from '@wordpress/a11y';
 import { __, isRTL } from '@wordpress/i18n';
 import {
+	subpagesLabel,
 	treeCappedSentence,
 	treeMoreLabel,
 	treeRetryLabel,
 	treeShownLine,
 	treeToggleLabel,
+	viewSubpagesLabel,
 } from '../common/copy';
-import { childRow, statusRow } from './rows';
+import { PER_PAGE, childRow, statusRow } from './rows';
 
 const OPEN = 'dashicons-arrow-down-alt2';
 const RIGHT = 'dashicons-arrow-right-alt2';
@@ -404,6 +406,30 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	};
 
 	/**
+	 * Puts a row's live count of subpages, from a load, in its Hierarchy cell:
+	 * its data, the count's text and the count link's name.
+	 *
+	 * @param {HTMLTableRowElement} row    The row.
+	 * @param {number}              total  Its subpages, at most the cap.
+	 * @param {boolean}             capped Whether more than the cap exist.
+	 */
+	const recount = ( row, total, capped ) => {
+		const cell = row.querySelector( '.hierarchy-guard-cell' );
+		if ( ! cell ) {
+			return;
+		}
+		cell.dataset.children = String( capped ? total + 1 : total );
+		const count = cell.querySelector( 'a[href*="hierarchy_guard_under"]' );
+		if ( count ) {
+			count.textContent = subpagesLabel( total, capped );
+			count.setAttribute(
+				'aria-label',
+				viewSubpagesLabel( total, capped, titleOf( row ) )
+			);
+		}
+	};
+
+	/**
 	 * Shows a row whose subpages have all gone since the screen loaded as a
 	 * page without any: no toggle, no "View subpages", and the cell's "No
 	 * subpages" as the server prints it.
@@ -470,9 +496,23 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		const hadStop = '0' === status.row.getAttribute( 'tabindex' );
 		status.row.remove();
 		const children = result.children || [];
-		if ( 1 === page && ! children.length && ! result.children_total ) {
-			showEmpty( row, hadFocus, hadStop );
+		const total = result.children_total || 0;
+		// A page that starts past every subpage left: they have gone since the screen loaded, not been kept from the user.
+		const gone = ! children.length && total <= ( page - 1 ) * PER_PAGE;
+		if ( gone && ! total ) {
+			const under = descendantsOf( row );
+			const lost = under.some( ( other ) =>
+				other.contains( doc.activeElement )
+			);
+			const held = under.some(
+				( other ) => '0' === other.getAttribute( 'tabindex' )
+			);
+			under.forEach( ( other ) => other.remove() );
+			showEmpty( row, hadFocus || lost || moveFocus, hadStop || held );
 			return;
+		}
+		if ( gone ) {
+			recount( row, total, result.children_capped );
 		}
 
 		const id = idOf( row );
@@ -499,8 +539,11 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			anchor = node;
 			first = first || node;
 		} );
-		// Subpages exist, but none on this page the user may read: a row says so, once.
-		const notice = first ? null : addHidden( row );
+		// Subpages exist, but none on this page the user may read: a row says so, once, until a page brings some.
+		const notice = first || gone ? null : addHidden( row );
+		if ( first && noticeOf( row ) ) {
+			noticeOf( row ).remove();
+		}
 		addMore(
 			row,
 			page + 1,
