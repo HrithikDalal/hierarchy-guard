@@ -448,6 +448,54 @@ describe( 'the tree grid', () => {
 		expect( row( 9 ).tabIndex ).toBe( -1 );
 	} );
 
+	it( 'leaves the keyboard alone when the user clicked away from Show more before it failed', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		let fail;
+		fetchChildren.mockImplementationOnce(
+			() =>
+				new Promise( ( resolve, reject ) => {
+					fail = reject;
+				} )
+		);
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		// A click on the page's heading, which takes focus nowhere.
+		more.blur();
+		expect( document.activeElement ).toBe( document.body );
+
+		fail( new Error() );
+		await settle();
+
+		expect( document.activeElement ).toBe( document.body );
+		expect(
+			document.querySelector( '.hierarchy-guard-failed' ).tabIndex
+		).toBe( 0 );
+	} );
+
+	it( 'moves the keyboard to Try again when nothing had it as Show more was pressed', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		let fail;
+		fetchChildren.mockImplementationOnce(
+			() =>
+				new Promise( ( resolve, reject ) => {
+					fail = reject;
+				} )
+		);
+		// A browser that doesn't focus a button it clicks, as Safari does.
+		document.activeElement.blur();
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+
+		fail( new Error() );
+		await settle();
+
+		expect( document.activeElement ).toBe(
+			document.querySelector( '.hierarchy-guard-failed button' )
+		);
+	} );
+
 	it( 'counts a status row’s level from 0, as its class and the cells do', async () => {
 		const tree = bindTree( document, fetchChildren );
 

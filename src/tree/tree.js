@@ -316,17 +316,19 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 * without closing the row. A failed first page gives the keyboard back
 	 * to the toggle, just above. A failed "Show more" makes "Try again" the
 	 * row Tab reaches, and moves the keyboard there only if it was still on
-	 * the "Show more" row.
+	 * the "Show more" row, or had been nowhere since the load started, as
+	 * after a click in a browser that doesn't focus buttons.
 	 *
-	 * @param {HTMLTableRowElement}                                    row    The opened row.
-	 * @param {number}                                                 page   The page that failed.
-	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} status Its status row.
+	 * @param {HTMLTableRowElement}                                    row     The opened row.
+	 * @param {number}                                                 page    The page that failed.
+	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} status  Its status row.
+	 * @param {Element|null}                                           started The element that had the keyboard when the load started.
 	 */
-	const failed = ( row, page, status ) => {
-		// Still where the load started: on its status row, or with the keyboard nowhere.
+	const failed = ( row, page, status, started = null ) => {
+		// Still where the load started: on its status row, or with the keyboard nowhere then and now.
 		const atStatus =
-			doc.activeElement === doc.body ||
-			status.row.contains( doc.activeElement );
+			status.row.contains( doc.activeElement ) ||
+			( doc.activeElement === doc.body && started === doc.body );
 		const here = atStatus || row.contains( doc.activeElement );
 		status.row.removeAttribute( 'aria-busy' );
 		status.row.classList.remove( 'hierarchy-guard-more' );
@@ -544,7 +546,13 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 		} else {
 			status = addLoading( row );
 		}
-		const entry = { status, page, open: opens.get( row ) || 0 };
+		const entry = {
+			status,
+			page,
+			open: opens.get( row ) || 0,
+			// Where the keyboard was, so a failure can tell whether the user has moved on.
+			started: doc.activeElement,
+		};
 		let request;
 		try {
 			request = Promise.resolve( fetchChildren( idOf( row ), page ) );
@@ -563,7 +571,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 * Shows what a load brought, if the row still wants it.
 	 *
 	 * @param {HTMLTableRowElement} row       The opened row.
-	 * @param {Object}              entry     The load: its status row, page and open.
+	 * @param {Object}              entry     The load: its status row, page, open and where the keyboard was.
 	 * @param {Object|null}         result    The route's answer, or null when it failed.
 	 * @param {boolean}             moveFocus Whether the first new row takes the keyboard.
 	 * @return {Promise<void>|undefined} A fresh load, when one was needed.
@@ -589,7 +597,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			);
 		}
 		if ( ! result ) {
-			failed( row, page, status );
+			failed( row, page, status, entry.started );
 			return;
 		}
 		show( row, page, result, status, moveFocus );
