@@ -14,7 +14,7 @@ import {
 	treeToggleLabel,
 	viewSubpagesLabel,
 } from '../common/copy';
-import { childRow, statusRow } from './rows';
+import { PER_PAGE, childRow, statusRow } from './rows';
 
 const OPEN = 'dashicons-arrow-down-alt2';
 const RIGHT = 'dashicons-arrow-right-alt2';
@@ -128,8 +128,6 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	const pending = new Map();
 	// How many times each row has closed, so a load knows the open it was for.
 	const opens = new WeakMap();
-	// The count of each row's subpages its last load reported.
-	const totals = new WeakMap();
 	let template = null;
 
 	// Children rather than rows and cells, which not every DOM keeps live.
@@ -408,9 +406,8 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	};
 
 	/**
-	 * Puts a row's live count of subpages, from its first page loaded again,
-	 * in its Hierarchy cell: its data, the count's text and the count link's
-	 * name.
+	 * Puts a row's live count of subpages, from a load, in its Hierarchy
+	 * cell: its data, the count's text and the count link's name.
 	 *
 	 * @param {HTMLTableRowElement} row    The row.
 	 * @param {number}              total  Its subpages, at most the cap.
@@ -430,21 +427,6 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 				viewSubpagesLabel( total, capped, titleOf( row ) )
 			);
 		}
-	};
-
-	/**
-	 * The count of a row's subpages its last load reported, or before any
-	 * load the one the server printed in its cell, at most the cap.
-	 *
-	 * @param {HTMLTableRowElement} row The row.
-	 * @return {number} Count.
-	 */
-	const totalOf = ( row ) => {
-		if ( totals.has( row ) ) {
-			return totals.get( row );
-		}
-		const cell = row.querySelector( '.hierarchy-guard-cell' );
-		return Math.min( Number( cell ? cell.dataset.children : 0 ) || 0, cap );
 	};
 
 	/**
@@ -501,71 +483,43 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 
 	/**
 	 * Puts one loaded page of a row's subpages under it, in place of its
-	 * status row, which hands them the keyboard or the tab stop it held.
-	 * A later page whose count of subpages isn't the one the row's last load
-	 * reported means subpages were added or deleted since, so the rows shown
-	 * no longer match the route's paging: the rows under it go and the row
-	 * loads again from its first page, or shows as having none when none is
-	 * left. That takes the keyboard only as a failure does, if it was still on
-	 * the status row, or nowhere then and when the load started, or on a row
-	 * it removes; the first page loaded again gives it back to the page it was
-	 * on, when it is still listed.
+	 * status row, which hands them the keyboard or the tab stop it held. The
+	 * pages are the route's, by offset, as core's list pages: a subpage
+	 * already listed under the row is not listed again, and the cell takes
+	 * the route's count, so a page past every subpage left just ends the
+	 * list. Collapsing and reopening the row shows its subpages as they are.
 	 *
-	 * @param {HTMLTableRowElement} row       The opened row.
-	 * @param {Object}              entry     The load: its status row, page, where the keyboard was, and the page to give it back to.
-	 * @param {Object}              result    The route's answer.
-	 * @param {boolean}             moveFocus Whether the first new row takes the keyboard.
-	 * @return {Promise<void>|undefined} The load from the first page, when the row loads again.
+	 * @param {HTMLTableRowElement}                                    row       The opened row.
+	 * @param {number}                                                 page      Page of its subpages, from 1.
+	 * @param {Object}                                                 result    The route's answer.
+	 * @param {{row: HTMLTableRowElement, cell: HTMLTableCellElement}} status    Its status row.
+	 * @param {boolean}                                                moveFocus Whether the first new row takes the keyboard.
 	 */
-	const show = ( row, entry, result, moveFocus ) => {
-		const { status, page, started } = entry;
+	const show = ( row, page, result, status, moveFocus ) => {
 		const hadFocus = status.row.contains( doc.activeElement );
 		const hadStop = '0' === status.row.getAttribute( 'tabindex' );
 		status.row.remove();
 		const children = result.children || [];
 		const total = result.children_total || 0;
-		// One rule: a later page counted differently from the row's last load no longer fits the rows shown, and none left is a leaf.
-		if ( ( page > 1 && total !== totalOf( row ) ) || ! total ) {
-			const under = descendantsOf( row );
-			const focused = under.find( ( other ) =>
-				other.contains( doc.activeElement )
-			);
-			const stopped = under.find(
-				( other ) => '0' === other.getAttribute( 'tabindex' )
-			);
-			const lost =
-				hadFocus ||
-				( doc.activeElement === doc.body && started === doc.body ) ||
-				!! focused;
-			const held = hadStop || !! stopped;
-			under.forEach( ( other ) => other.remove() );
-			if ( ! total ) {
-				showEmpty( row, lost, held );
-				return;
-			}
-			const promise = load( row, 1 );
-			const again = pending.get( row );
-			// The page to give the keyboard or the tab stop back to, if page 1 still lists it.
-			again.back = ( focused || stopped || { id: '' } ).id;
-			again.recount = true;
-			if ( lost ) {
-				focus( again.status.row );
-			} else if ( held ) {
-				setTabStop( again.status.row );
-			}
-			// Where the keyboard is now, so a click away while it loads is respected.
-			again.started = doc.activeElement;
-			return promise;
+		if ( 1 === page && ! total ) {
+			showEmpty( row, hadFocus, hadStop );
+			return;
 		}
-		totals.set( row, total );
-		if ( entry.recount ) {
-			recount( row, total, result.children_capped );
-		}
+		recount( row, total, result.children_capped );
+		// None left past the rows shown: subpages were deleted since, and the list just ends.
+		const noneLeft = ! children.length && total <= ( page - 1 ) * PER_PAGE;
+		const listed = new Set(
+			descendantsOf( row ).map( ( other ) => other.id )
+		);
 
 		const id = idOf( row );
 		let anchor = lastOf( row );
 		let first = null;
 		children.forEach( ( child ) => {
+			if ( listed.has( `post-${ child.id }` ) ) {
+				// Already shown: a page added since moved it onto this page too.
+				return;
+			}
 			const node = childRow( template, child, {
 				level: levelOf( row ),
 				parent: id,
@@ -590,7 +544,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			first = first || node;
 		} );
 		// Subpages exist, but none on this page the user may read: a row says so, once, until a page brings some.
-		const notice = first ? null : addHidden( row );
+		const notice = first || noneLeft ? null : addHidden( row );
 		if ( first && noticeOf( row ) ) {
 			noticeOf( row ).remove();
 		}
@@ -612,17 +566,10 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 				'polite'
 			);
 		}
-		// Back to the page the keyboard or the tab stop was on, if it is still listed under the row.
-		const back = entry.back ? doc.getElementById( entry.back ) : null;
-		const target =
-			( back && descendantsOf( row ).includes( back ) ? back : null ) ||
-			first ||
-			notice ||
-			row;
 		if ( moveFocus || hadFocus ) {
-			focus( target );
+			focus( first || notice || row );
 		} else if ( hadStop ) {
-			setTabStop( target );
+			setTabStop( first || notice || row );
 		}
 	};
 
@@ -671,10 +618,10 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 	 * Shows what a load brought, if the row still wants it.
 	 *
 	 * @param {HTMLTableRowElement} row       The opened row.
-	 * @param {Object}              entry     The load: its status row, page, open, where the keyboard was and, loading again, the page to give it back to.
+	 * @param {Object}              entry     The load: its status row, page, open and where the keyboard was.
 	 * @param {Object|null}         result    The route's answer, or null when it failed.
 	 * @param {boolean}             moveFocus Whether the first new row takes the keyboard.
-	 * @return {Promise<void>|undefined} A fresh load, when one was needed: after a reopen, or when the row loads again from its first page.
+	 * @return {Promise<void>|undefined} A fresh load, when one was needed.
 	 */
 	const settle = ( row, entry, result, moveFocus ) => {
 		pending.delete( row );
@@ -700,7 +647,7 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			failed( row, page, status, entry.started );
 			return;
 		}
-		return show( row, entry, result, moveFocus );
+		show( row, page, result, status, moveFocus );
 	};
 
 	const expand = ( row ) => {
