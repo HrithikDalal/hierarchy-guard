@@ -655,12 +655,35 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_the_child_of_name_is_core_s_after_every_title_filter(): void {
+		global $wpdb;
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		$parent = $this->page( 'badge-parent' );
+		$child  = $this->page( 'badge-kid', $parent );
+		$wpdb->update( $wpdb->posts, [ 'post_title' => 'Badge parent' ], [ 'ID' => $parent ] );
+		clean_post_cache( $parent );
+		// A filter after core's esc_html adds real markup, which core's "Child of" strips.
+		$badge = static fn( $title ) => $title . ' <span class="badge">New</span>';
+		add_filter( 'the_title', $badge, 20 );
+
+		$data       = $this->get( '/posts/' . $parent . '/hierarchy', [ 'tree' => '1' ] )->get_data();
+		[ , $core ] = self::core_row_text( $child );
+		remove_filter( 'the_title', $badge, 20 );
+
+		$this->assertSame( 'Badge parent New', $data['child_of'] );
+		if ( null !== $core ) {
+			$this->assertSame( $core, $data['child_of'], "WordPress 7.1's own “Child of”." );
+		}
+	}
+
 	public function test_an_untitled_page_and_a_page_titled_0_read_as_core_s_rows_read_them(): void {
 		global $wpdb;
 		$cases = [
 			'empty' => [ '', '' ],
 			'zero'  => [ '0', '0' ],
 			'em'    => [ '<em>Em</em> &amp; “Q”', '<em>Em</em> & “Q”' ],
+			'priv'  => [ 'Secret', 'Secret', [ 'post_status' => 'private' ] ],
+			'pass'  => [ 'Locked', 'Locked', [ 'post_password' => 'secret' ] ],
 		];
 		foreach ( $cases as $slug => $case ) {
 			[ $stored, $name ] = $case;

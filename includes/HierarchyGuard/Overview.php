@@ -163,17 +163,23 @@ final class Overview {
 	}
 
 	/**
-	 * The name core's list gives a post in its subpages' "Child of": the
-	 * title through the_title, as the browser reads it, with no "(no title)"
-	 * for an untitled post, so "0" stays "0" and "" names no one.
+	 * The name core's list gives a post in its subpages' "Child of", made as
+	 * core makes it: the title through the_title with the list's esc_html,
+	 * stripped of the markup a later filter adds, as the browser reads it.
+	 * There is no "(no title)": "0" stays "0" and "" names no one.
 	 *
 	 * @param WP_Post $post Post.
 	 * @return string
 	 */
 	public static function child_of( WP_Post $post ): string {
+		// Core's list escapes every title it prints, as here.
+		$added = false === has_filter( 'the_title', 'esc_html' ) && add_filter( 'the_title', 'esc_html' );
 		/** This filter is documented in wp-includes/post-template.php */
 		$title = (string) apply_filters( 'the_title', (string) $post->post_title, (int) $post->ID ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own filter, as core's list applies it.
-		return html_entity_decode( $title, ENT_QUOTES, 'UTF-8' );
+		if ( $added ) {
+			remove_filter( 'the_title', 'esc_html' );
+		}
+		return html_entity_decode( wp_strip_all_tags( $title ), ENT_QUOTES, 'UTF-8' );
 	}
 
 	/**
