@@ -685,6 +685,32 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( '<i>x</i>', get_the_title( $this->ids['history'] ) );
 	}
 
+	public function test_the_child_of_name_keeps_an_escape_its_caller_already_had(): void {
+		$about = get_post( $this->ids['about'] );
+		// As inside core's own display_rows(), which escapes every title it prints.
+		add_filter( 'the_title', 'esc_html' );
+		try {
+			$this->assertSame( 'About', Overview::child_of( $about ) );
+			$this->assertSame( 10, has_filter( 'the_title', 'esc_html' ), 'The caller’s escape is the caller’s to remove.' );
+
+			$boom = static function (): void {
+				throw new \RuntimeException( 'boom' );
+			};
+			add_filter( 'the_title', $boom, 15 );
+			try {
+				Overview::child_of( $about );
+				$this->fail( 'The filter throws.' );
+			} catch ( \RuntimeException $error ) {
+				$this->assertSame( 'boom', $error->getMessage() );
+			} finally {
+				remove_filter( 'the_title', $boom, 15 );
+			}
+			$this->assertSame( 10, has_filter( 'the_title', 'esc_html' ), 'Kept when a later filter throws, too.' );
+		} finally {
+			remove_filter( 'the_title', 'esc_html' );
+		}
+	}
+
 	public function test_the_child_of_name_is_core_s_after_every_title_filter(): void {
 		global $wpdb;
 		require_once ABSPATH . 'wp-admin/includes/template.php';
