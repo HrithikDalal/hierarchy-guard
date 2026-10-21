@@ -16,6 +16,21 @@ const press = ( target, key ) =>
 		new window.KeyboardEvent( 'keydown', { key, bubbles: true } )
 	);
 const settle = () => new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
+const descendantIds = ( id ) => {
+	const out = [];
+	for (
+		let next = row( id ).nextElementSibling;
+		next &&
+		Number(
+			next.getAttribute( 'aria-level' ) ||
+				( next.dataset.level ? Number( next.dataset.level ) + 1 : 1 )
+		) > 1;
+		next = next.nextElementSibling
+	) {
+		out.push( next.id );
+	}
+	return out;
+};
 const tabStops = () =>
 	rows()
 		.filter( ( item ) => 0 === item.tabIndex )
@@ -925,21 +940,52 @@ describe( 'the tree grid', () => {
 		).toHaveLength( 0 );
 	} );
 
-	it( 'counts a row’s subpages again, and says nothing of reading them, when a later page finds them gone', async () => {
+	/**
+	 * Locations' subpages, renumbered after deletions: a page of them as the route now pages them.
+	 *
+	 * @param {number} number Page.
+	 * @param {number} total  Subpages left.
+	 * @return {Object} Hierarchy.
+	 */
+	const renumbered = ( number, total ) =>
+		page(
+			Array.from(
+				{ length: Math.min( 50, total - ( number - 1 ) * 50 ) },
+				( unused, index ) =>
+					child(
+						2000 + ( number - 1 ) * 50 + index,
+						`Left ${ ( number - 1 ) * 50 + index + 1 }`
+					)
+			),
+			total,
+			number * 50 < total,
+			false,
+			( number - 1 ) * 50
+		);
+
+	it( 'loads a row again from its first page, in place, when a later page finds its subpages moved up by deletions', async () => {
 		const tree = bindTree( document, fetchChildren );
 		await tree.toggle( row( 9 ) );
-		// Since the first page loaded, all but 45 were deleted.
-		fetchChildren.mockImplementationOnce( () =>
-			Promise.resolve( page( [], 45 ) )
-		);
+		// Since the first page loaded, ten of its subpages were deleted: 45 are left, and page 2 starts past them.
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 45 ) ) )
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 45 ) )
+			);
 
 		document.querySelector( '.hierarchy-guard-more button' ).click();
 		await settle();
+		await settle();
 
-		expect( document.querySelector( '.hierarchy-guard-hidden' ) ).toBe(
-			null
+		expect( fetchChildren ).toHaveBeenLastCalledWith( 9, 1 );
+		expect( descendantIds( 9 ) ).toEqual(
+			Array.from(
+				{ length: 45 },
+				( unused, index ) => `post-${ 2000 + index }`
+			)
 		);
-		expect( document.querySelector( '.hierarchy-guard-more' ) ).toBe(
+		expect( row( 9 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+		expect( document.querySelector( '.hierarchy-guard-hidden' ) ).toBe(
 			null
 		);
 		const cell = row( 9 ).querySelector( '.hierarchy-guard-cell' );
@@ -948,7 +994,88 @@ describe( 'the tree grid', () => {
 		expect( cell.querySelector( 'a' ).getAttribute( 'aria-label' ) ).toBe(
 			'View the 45 subpages of “Locations”'
 		);
-		expect( row( 9 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+	} );
+
+	it( 'offers Show more again after loading a row afresh, when more than a page is left', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+		// 100 shown; 95 left, so page 3 starts past them.
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 95 ) ) )
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 95 ) )
+			);
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+		await settle();
+
+		expect( descendantIds( 9 ) ).toHaveLength( 51 );
+		expect(
+			document.querySelector( '.hierarchy-guard-more' ).textContent
+		).toBe( 'Show more · 50 of 95 subpages shown' );
+	} );
+
+	it( 'gives the keyboard to the first row loaded afresh only if it was on Show more', async () => {
+		const search = document.createElement( 'input' );
+		document.body.prepend( search );
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 45 ) ) )
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 45 ) )
+			);
+		let more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		await settle();
+		await settle();
+		expect( document.activeElement ).toBe( row( 2000 ) );
+
+		// Again, with the user in the search box while the page loads.
+		tree.collapse( row( 9 ) );
+		fetchChildren.mockImplementationOnce( () =>
+			Promise.resolve( renumbered( 1, 100 ) )
+		);
+		await tree.toggle( row( 9 ) );
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 30 ) ) )
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 30 ) )
+			);
+		more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		search.focus();
+		await settle();
+		await settle();
+		expect( descendantIds( 9 ) ).toHaveLength( 30 );
+		expect( document.activeElement ).toBe( search );
+		expect( tabStops() ).toEqual( [ 'post-2000' ] );
+		search.remove();
+	} );
+
+	it( 'leaves the keyboard where the user took it when a later page finds every subpage gone', async () => {
+		const search = document.createElement( 'input' );
+		document.body.prepend( search );
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		fetchChildren.mockImplementationOnce( () =>
+			Promise.resolve( page( [], 0 ) )
+		);
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		search.focus();
+
+		await settle();
+
+		expect( document.activeElement ).toBe( search );
+		expect( row( 9 ).hasAttribute( 'aria-expanded' ) ).toBe( false );
+		search.remove();
 	} );
 
 	it( 'shows a row as having none when a later page finds every subpage gone', async () => {
@@ -957,8 +1084,10 @@ describe( 'the tree grid', () => {
 		fetchChildren.mockImplementationOnce( () =>
 			Promise.resolve( page( [], 0 ) )
 		);
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
 
-		document.querySelector( '.hierarchy-guard-more button' ).click();
+		more.click();
 		await settle();
 
 		expect( rows().map( ( item ) => item.id ) ).toEqual( [
