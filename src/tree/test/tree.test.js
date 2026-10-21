@@ -715,6 +715,29 @@ describe( 'the tree grid', () => {
 		expect( tabStops() ).toEqual( [ 'post-5' ] );
 	} );
 
+	it( 'hands the tab stop from the loading row to the first subpage when the keyboard has moved outside the table', async () => {
+		let answer;
+		const tree = bindTree(
+			document,
+			() =>
+				new Promise( ( resolve ) => {
+					answer = resolve;
+				} )
+		);
+		const search = document.createElement( 'input' );
+		document.body.prepend( search );
+		const opened = tree.toggle( row( 4 ) );
+		rows()[ 1 ].focus();
+		search.focus();
+
+		answer( page( [ child( 5, 'About' ), child( 6, 'History' ) ], 2 ) );
+		await opened;
+
+		expect( tabStops() ).toEqual( [ 'post-5' ] );
+		expect( document.activeElement ).toBe( search );
+		search.remove();
+	} );
+
 	it( 'shows each loaded row at the place the server gives it, as without JavaScript', async () => {
 		// Team's sibling History is one the user may not read: it keeps its place, unseen.
 		const tree = bindTree( document, () =>
@@ -1033,6 +1056,28 @@ describe( 'the tree grid', () => {
 			'View the 45 subpages of “Locations”'
 		);
 		expect( document.activeElement ).toBe( row( 9 ) );
+	} );
+
+	it( 'ends the list without a notice when a later page starts exactly at the count left', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		// Exactly 50 left: page 2 starts at the count, so none is left past the rows shown.
+		fetchChildren.mockImplementationOnce( () =>
+			Promise.resolve( page( [], 50 ) )
+		);
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+
+		expect( document.querySelector( '.hierarchy-guard-hidden' ) ).toBe(
+			null
+		);
+		expect( document.querySelector( '.hierarchy-guard-more' ) ).toBe(
+			null
+		);
+		expect(
+			row( 9 ).querySelector( '.hierarchy-guard-cell' ).textContent
+		).toBe( '50 subpages' );
 	} );
 
 	it( 'counts a row as its first page does when the count printed has changed', async () => {
