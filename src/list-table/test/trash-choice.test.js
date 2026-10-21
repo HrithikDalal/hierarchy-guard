@@ -230,6 +230,18 @@ describe( 'a row title', () => {
 		};
 		const title = rowTitle( doc, 7 );
 		expect( title ).toBe( '(no title)' );
+		// A title stored as &#48; is not empty to core: its row and the preview both read "0".
+		expect(
+			rowTitle(
+				{
+					querySelector: ( selector ) =>
+						'#inline_7 .post_title' === selector
+							? raw( [ '&#48;' ] )
+							: null,
+				},
+				7
+			)
+		).toBe( '0' );
 
 		const before = dialogSentence( {
 			preview: null,
