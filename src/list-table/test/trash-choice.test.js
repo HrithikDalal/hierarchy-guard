@@ -223,6 +223,60 @@ describe( 'a row title', () => {
 		expect( rowTitle( doc( {} ), 7 ) ).toBe( '' );
 	} );
 
+	it( 'names a page titled 0 “(no title)” before and after the preview arrives, as core’s list does', () => {
+		const doc = {
+			querySelector: ( selector ) =>
+				'#inline_7 .post_title' === selector ? raw( [ '0' ] ) : null,
+		};
+		const title = rowTitle( doc, 7 );
+		expect( title ).toBe( '(no title)' );
+		// A title stored as &#48; is not empty to core: its row and the preview both read "0".
+		expect(
+			rowTitle(
+				{
+					querySelector: ( selector ) =>
+						'#inline_7 .post_title' === selector
+							? raw( [ '&#48;' ] )
+							: null,
+				},
+				7
+			)
+		).toBe( '0' );
+
+		const before = dialogSentence( {
+			preview: null,
+			policy: 'reparent',
+			selected: 1,
+			withChildren: 1,
+			previewed: 1,
+			title,
+			children: 2,
+		} );
+		const after = dialogSentence( {
+			preview: {
+				more: 0,
+				total: { count: 2, capped: false },
+				pages: [
+					{
+						id: 7,
+						title: '(no title)',
+						children: 2,
+						descendants: { count: 2, capped: false },
+						policy: 'reparent',
+					},
+				],
+			},
+			policy: 'reparent',
+			selected: 1,
+			withChildren: 1,
+			previewed: 1,
+			title,
+			children: 2,
+		} );
+		expect( before ).toMatch( /^“\(no title\)” has 2 subpages/ );
+		expect( after ).toMatch( /^“\(no title\)” has 2 subpages/ );
+	} );
+
 	it( 'says an untitled page has no title, whatever the link adds', () => {
 		const doc = {
 			querySelector: ( selector ) =>

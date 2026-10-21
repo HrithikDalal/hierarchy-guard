@@ -25,9 +25,14 @@ import {
 	subpagesLabel,
 	trashNote,
 	trashSentence,
+	treeCappedSentence,
+	treeRowLabels,
+	treeShownLine,
+	treeToggleLabel,
 	unresolvedSentence,
 	viewAllLabel,
 	viewRedirectsLabel,
+	viewSubpagesLabel,
 } from '../copy';
 
 const team = {
@@ -382,5 +387,56 @@ describe( 'what redirects the pairs', () => {
 			serving: true,
 			provider: null,
 		} );
+	} );
+} );
+
+describe( 'the Tree view', () => {
+	it( 'labels a toggle by what it does next', () => {
+		expect( treeToggleLabel( false, 'About' ) ).toBe(
+			'Show the subpages of “About”'
+		);
+		expect( treeToggleLabel( true, 'About' ) ).toBe(
+			'Hide the subpages of “About”'
+		);
+	} );
+
+	it( 'says how many subpages Show more has shown', () => {
+		expect( treeShownLine( 50, 128 ) ).toBe( '50 of 128 subpages shown' );
+		expect( treeShownLine( 1, 1 ) ).toBe( '1 of 1 subpage shown' );
+		expect( treeShownLine( 950, 1000, true ) ).toBe(
+			'950 of 1,000+ subpages shown'
+		);
+	} );
+
+	it( 'says past the cap that only the first are shown', () => {
+		expect( treeCappedSentence( 1000 ) ).toBe(
+			'Only the first 1,000 subpages are shown.'
+		);
+	} );
+
+	it( 'words a loaded row’s actions as core does', () => {
+		const labels = treeRowLabels( 'About' );
+		expect( [
+			labels.edit,
+			labels.editLabel,
+			labels.trash,
+			labels.trashLabel,
+			labels.view,
+			labels.viewLabel,
+			labels.subpages,
+			labels.subpagesLabel,
+		] ).toEqual( [
+			'Edit',
+			'Edit “About”',
+			'Trash',
+			'Move “About” to the Trash',
+			'View',
+			'View “About”',
+			'View subpages',
+			'View subpages of “About”',
+		] );
+		expect( viewSubpagesLabel( 1, false, 'About' ) ).toBe(
+			'View the 1 subpage of “About”'
+		);
 	} );
 } );

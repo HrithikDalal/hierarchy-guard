@@ -56,6 +56,22 @@ final class List_Table {
 	private ?array $walk = null;
 
 	/**
+	 * The Tree view, which changes what the column shows.
+	 *
+	 * @var Tree_View|null
+	 */
+	private ?Tree_View $tree;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param Tree_View|null $tree The Tree view, if the plugin has one.
+	 */
+	public function __construct( ?Tree_View $tree = null ) {
+		$this->tree = $tree;
+	}
+
+	/**
 	 * Hooks into core.
 	 */
 	public function register(): void {
@@ -100,7 +116,7 @@ final class List_Table {
 	 */
 	public static function under(): int {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- A read-only list filter, like core's own list filters.
-		return isset( $_GET[ self::QUERY_VAR ] ) ? absint( wp_unslash( $_GET[ self::QUERY_VAR ] ) ) : 0;
+		return isset( $_GET[ self::QUERY_VAR ] ) && is_string( $_GET[ self::QUERY_VAR ] ) ? absint( wp_unslash( $_GET[ self::QUERY_VAR ] ) ) : 0;
 	}
 
 	/**
@@ -127,7 +143,10 @@ final class List_Table {
 	}
 
 	/**
-	 * Prints the parent, then the subpage count as a link to the subtree.
+	 * Prints the parent, then the subpage count as a link to the subtree. In
+	 * the Tree view the indent shows the parent, so the cell holds the count
+	 * and the toggle; in a search there it holds the whole parent path, each
+	 * ancestor a link to its own subtree.
 	 *
 	 * @param mixed $column  Column name.
 	 * @param mixed $post_id Post ID.
@@ -147,8 +166,12 @@ final class List_Table {
 		$parts  = [];
 		$parent = (int) $post->post_parent;
 		$above  = $parent > 0 ? get_post( $parent ) : null;
+		$mode   = null !== $this->tree ? $this->tree->mode( $type ) : '';
 
-		if ( $above instanceof WP_Post ) {
+		if ( 'search' === $mode && $above instanceof WP_Post ) {
+			$ancestors = get_post_ancestors( $post );
+			$parts[]   = '<span class="screen-reader-text">' . esc_html( _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) ) . ' </span>' . $this->trail( $type, $ancestors );
+		} elseif ( '' === $mode && $above instanceof WP_Post ) {
 			$title = _draft_or_post_title( $parent );
 			// Core refuses to edit a page in the Trash.
 			$link = 'trash' !== $above->post_status ? get_edit_post_link( $parent ) : null;
@@ -169,6 +192,11 @@ final class List_Table {
 			$parts[] = sprintf( '<a href="%1$s" aria-label="%2$s">%3$s</a>', esc_url( self::filter_url( $type, (int) $post->ID ) ), esc_attr( $aria ), esc_html( $label ) );
 		}
 
+		if ( 'tree' === $mode ) {
+			$this->render_tree_cell( $post, $count, $parts );
+			return;
+		}
+
 		printf(
 			'<span class="hierarchy-guard-cell" data-id="%1$d" data-children="%2$d" data-status="%3$s">%4$s</span>',
 			(int) $post->ID,
@@ -176,6 +204,122 @@ final class List_Table {
 			esc_attr( (string) $post->post_status ),
 			[] !== $parts ? implode( '<span aria-hidden="true"> · </span>', $parts ) : '<span aria-hidden="true">—</span><span class="screen-reader-text">' . esc_html__( 'Top level, no subpages', 'hierarchy-guard' ) . '</span>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every part was escaped as it was built.
 		);
+	}
+
+	/**
+	 * The Tree view's cell: the toggle for a page the user may edit, the
+	 * count, for an opened page whose page of subpages holds none the user
+	 * may read a sentence saying so, and under an opened page with more
+	 * subpages a link to the next 50, with the row's place in the tree for
+	 * the script.
+	 *
+	 * @param WP_Post  $post  Row's post.
+	 * @param int      $count Live children, up to the cap plus one.
+	 * @param string[] $parts The count's link, if any.
+	 */
+	private function render_tree_cell( WP_Post $post, int $count, array $parts ): void {
+		$id    = (int) $post->ID;
+		$type  = (string) $post->post_type;
+		$cap   = Subtree::count_cap();
+		$row   = null !== $this->tree ? $this->tree->row( $id ) : null;
+		$open  = null !== $row && $row['open'];
+		$title = _draft_or_post_title( $post );
+
+		if ( $count > 0 && current_user_can( 'edit_post', $id ) ) {
+			$this->signal();
+			// An opened row closes to its parent, at the page of subpages it is on.
+			$href = $open ? Tree_View::place_url( $type, $row['parent'], $row['page'] ) : Tree_View::place_url( $type, $id );
+			array_unshift(
+				$parts,
+				sprintf(
+					'<a class="hierarchy-guard-toggle" href="%1$s"><span class="dashicons dashicons-arrow-%2$s-alt2" aria-hidden="true"></span><span class="screen-reader-text">%3$s</span></a>',
+					esc_url( $href ),
+					// A closed toggle points along the line toward the title.
+					$open ? 'down' : ( is_rtl() ? 'left' : 'right' ),
+					$open
+						/* translators: %s: page title. */
+						? sprintf( esc_html__( 'Hide the subpages of “%s”', 'hierarchy-guard' ), $title )
+						/* translators: %s: page title. */
+						: sprintf( esc_html__( 'Show the subpages of “%s”', 'hierarchy-guard' ), $title )
+				)
+			);
+		}
+		if ( null !== $row && $row['hidden'] ) {
+			$parts[] = '<span class="hierarchy-guard-hidden">' . esc_html__( 'You can’t view these subpages.', 'hierarchy-guard' ) . '</span>';
+		}
+		if ( null !== $row && $row['more'] ) {
+			$parts[] = sprintf(
+				'<a class="hierarchy-guard-more" href="%1$s" data-page="%2$d" aria-label="%3$s">%4$s</a>',
+				esc_url( Tree_View::place_url( $type, $id, $row['shown'] + 1 ) ),
+				$row['shown'] + 1,
+				/* translators: %s: page title. */
+				esc_attr( sprintf( __( 'Show more subpages of “%s”', 'hierarchy-guard' ), $title ) ),
+				esc_html__( 'Show more', 'hierarchy-guard' )
+			);
+		} elseif ( null !== $row && $row['capped'] ) {
+			$parts[] = '<span class="hierarchy-guard-capped">' . esc_html(
+				sprintf(
+					/* translators: %s: the most subpages the tree shows, such as 1,000. */
+					_n( 'Only the first %s subpage is shown.', 'Only the first %s subpages are shown.', $cap, 'hierarchy-guard' ),
+					Subtree::format_count( $cap )
+				)
+			) . '</span>';
+		}
+
+		$data = [
+			'id'       => $id,
+			'children' => min( $count, $cap + 1 ),
+			'status'   => (string) $post->post_status,
+			'level'    => null !== $row ? $row['level'] : 0,
+			'parent'   => null !== $row ? $row['parent'] : (int) $post->post_parent,
+			'page'     => null !== $row ? $row['page'] : 1,
+		];
+		if ( null !== $row && null !== $row['position'] ) {
+			$data['position'] = $row['position'];
+		}
+		if ( null !== $row && null !== $row['setsize'] ) {
+			$data['setsize'] = $row['setsize'];
+		}
+		if ( $open ) {
+			$data['open'] = $row['shown'];
+		}
+		$attributes = '';
+		foreach ( $data as $key => $value ) {
+			$attributes .= sprintf( ' data-%1$s="%2$s"', esc_attr( $key ), esc_attr( (string) $value ) );
+		}
+
+		printf(
+			'<span class="hierarchy-guard-cell"%1$s>%2$s</span>',
+			$attributes, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every attribute was escaped as it was built.
+			[] !== $parts ? implode( '<span aria-hidden="true"> · </span>', $parts ) : '<span aria-hidden="true">—</span><span class="screen-reader-text">' . esc_html__( 'No subpages', 'hierarchy-guard' ) . '</span>' // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every part was escaped as it was built.
+		);
+	}
+
+	/**
+	 * A search row's parent path, top level first, each ancestor a link to its
+	 * own subtree. The screen's ancestors were loaded together with its counts.
+	 *
+	 * @param string $type      Post type name.
+	 * @param int[]  $ancestors The row's ancestor IDs, nearest first, as get_post_ancestors() returns them.
+	 * @return string
+	 */
+	private function trail( string $type, array $ancestors ): string {
+		$crumbs = [];
+		foreach ( array_reverse( $ancestors ) as $ancestor_id ) {
+			$ancestor_id = (int) $ancestor_id;
+			if ( ! current_user_can( 'read_post', $ancestor_id ) ) {
+				$crumbs[] = esc_html__( '(private page)', 'hierarchy-guard' );
+				continue;
+			}
+			$title = _draft_or_post_title( $ancestor_id );
+			if ( 'trash' === get_post_status( $ancestor_id ) ) {
+				/* translators: %s: title of a parent page that is in the trash. */
+				$crumbs[] = sprintf( esc_html__( '%s (in the Trash)', 'hierarchy-guard' ), $title );
+				continue;
+			}
+			$crumbs[] = sprintf( '<a href="%1$s">%2$s</a>', esc_url( self::filter_url( $type, $ancestor_id ) ), $title );
+		}
+		return implode( '<span aria-hidden="true"> › </span>', $crumbs );
 	}
 
 	/**
@@ -216,7 +360,7 @@ final class List_Table {
 			return $vars;
 		}
 		$root = self::under();
-		$type = (string) ( $vars['post_type'] ?? '' );
+		$type = isset( $vars['post_type'] ) && is_string( $vars['post_type'] ) ? $vars['post_type'] : '';
 		if ( ! self::is_root( $root, $type ) ) {
 			return $vars;
 		}
@@ -333,9 +477,9 @@ final class List_Table {
 		if ( $tree_query && empty( $wp_query->query['s'] ) ) {
 			$ids = self::tree_slice( $rows, $pagenum, $per_page );
 		} else {
-			$start = $tree_query ? ( $pagenum - 1 ) * $per_page : 0;
-			$ids   = [];
-			foreach ( array_slice( $rows, $start, $per_page ) as $row ) {
+			// A flat screen is one page already; the Tree view's opened levels add theirs to it.
+			$ids = [];
+			foreach ( $tree_query ? array_slice( $rows, ( $pagenum - 1 ) * $per_page, $per_page ) : $rows as $row ) {
 				if ( is_object( $row ) && isset( $row->ID ) ) {
 					$ids[] = (int) $row->ID;
 				}
@@ -348,7 +492,19 @@ final class List_Table {
 				$parents[] = $parent_of[ $id ];
 			}
 		}
-		_prime_post_caches( array_values( array_unique( $parents ) ), false, false );
+		$parents = array_values( array_unique( $parents ) );
+		_prime_post_caches( $parents, false, false );
+		if ( null !== $this->tree && 'search' === $this->tree->mode( $post_type ) ) {
+			// A search shows each row's whole parent path: one query per level, whatever the rows.
+			for ( $depth = 0; [] !== $parents && $depth < 50; ++$depth ) {
+				$above = [];
+				foreach ( $parents as $parent_id ) {
+					$above[] = (int) get_post_field( 'post_parent', $parent_id );
+				}
+				$parents = array_values( array_unique( array_filter( $above ) ) );
+				_prime_post_caches( $parents, false, false );
+			}
+		}
 
 		return Subtree::child_counts( $ids, $post_type, Subtree::count_cap() + 1 );
 	}
@@ -475,7 +631,7 @@ final class List_Table {
 	 * @param string $post_type Post type name.
 	 * @return int
 	 */
-	private static function per_page( string $post_type ): int {
+	public static function per_page( string $post_type ): int {
 		$per_page = (int) get_user_option( "edit_{$post_type}_per_page" );
 		if ( $per_page < 1 ) {
 			$per_page = 20;

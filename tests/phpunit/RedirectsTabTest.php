@@ -145,6 +145,15 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'options.php', $html, 'The Settings tab’s form is not on this tab.' );
 	}
 
+	public function test_a_redirect_s_page_titled_0_is_named_as_core_s_list_names_it(): void {
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '0' ], [ 'ID' => $this->ids['about'] ] );
+		clean_post_cache( $this->ids['about'] );
+		$this->recorded( $this->ids['about'], 'old-about' );
+
+		$this->assertStringContainsString( '">(no title)</a>', $this->rendered() );
+	}
+
 	public function test_each_column_reads_as_the_spec_has_it(): void {
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$draft = $this->page( 'whats-on', 0, 'draft' );

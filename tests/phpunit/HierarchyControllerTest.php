@@ -159,6 +159,700 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		$this->assertSame( 13, $second['children_total'] );
 	}
 
+	public function test_the_tree_takes_children_50_at_a_time_and_paging_stops_at_the_cap(): void {
+		for ( $i = 1; $i <= 58; $i++ ) {
+			$this->page( sprintf( 'extra-%02d', $i ), $this->ids['about'] );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+
+		$first  = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data();
+		$second = $this->get(
+			$route,
+			[
+				'children_page'     => 2,
+				'children_per_page' => 50,
+			]
+		)->get_data();
+
+		$this->assertCount( 50, $first['children'] );
+		$this->assertTrue( $first['has_more'] );
+		$this->assertCount( 10, $second['children'] );
+		$this->assertFalse( $second['has_more'] );
+		$this->assertCount( Overview::CHILDREN_PER_PAGE, $this->get( $route )->get_data()['children'], 'Without it, children still come 10 to a page.' );
+		$this->assertSame( 400, $this->get( $route, [ 'children_per_page' => 51 ] )->get_status(), 'At most 50.' );
+
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 55 );
+		$capped = $this->get(
+			$route,
+			[
+				'children_page'     => 2,
+				'children_per_page' => 50,
+			]
+		)->get_data();
+		$this->assertCount( 5, $capped['children'], 'The 51st to the 55th, then the cap.' );
+		$this->assertFalse( $capped['has_more'] );
+		$this->assertTrue( $capped['children_capped'] );
+		$this->assertSame(
+			[],
+			$this->get(
+				$route,
+				[
+					'children_page'     => 3,
+					'children_per_page' => 50,
+				]
+			)->get_data()['children']
+		);
+	}
+
+	public function test_the_tree_s_argument_sends_only_the_subpages_for_fewer_queries(): void {
+		global $wpdb;
+		$route  = '/posts/' . $this->ids['about'] . '/hierarchy';
+		$params = [ 'children_per_page' => 50 ];
+		// The first request after a flush also reads options that core loads once a request.
+		wp_cache_flush();
+		$this->get( $route, $params );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$full    = $this->get( $route, $params )->get_data();
+		$panel   = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$tree    = $this->get( $route, $params + [ 'tree' => '1' ] )->get_data();
+		$cost    = $wpdb->num_queries - $queries;
+
+		$this->assertSame( [ 'id', 'child_of', 'children', 'children_total', 'children_capped', 'has_more' ], array_keys( $tree ), 'What the tree reads: no ancestors, descendants, redirects or trash policy.' );
+		foreach ( array_keys( $tree ) as $key ) {
+			$this->assertSame( $full[ $key ], $tree[ $key ], "The panel's {$key} too." );
+		}
+		$this->assertLessThan( $panel, $cost, 'Without the descendants walk, the nearest ancestor and the change log.' );
+		$this->assertSame( array_keys( $full ), array_keys( $this->get( $route, [ 'tree' => 'false' ] )->get_data() ), 'Off by default.' );
+		foreach ( [ 'view', 'edit', 'embed' ] as $context ) {
+			$response = $this->get( $route, [ 'context' => $context ] );
+			$this->assertSame( 200, $response->get_status(), "REST's own context={$context} is left to REST." );
+			$this->assertSame( array_keys( $full ), array_keys( $response->get_data() ) );
+		}
+	}
+
+	public function test_each_child_carries_what_the_list_s_columns_show(): void {
+		$author = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_author' => $author,
+				'post_date'   => '2026-09-02 15:04:00',
+			]
+		);
+		$draft = $this->page( 'press', $this->ids['about'], 'draft' );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'children_per_page' => 50 ] )->get_data()['children'], null, 'id' );
+		$history  = $children[ $this->ids['history'] ];
+
+		$this->assertSame( 'Priya', $history['author'] );
+		$this->assertSame(
+			[
+				'label'  => 'Published',
+				'date'   => '2026/09/02 at 3:04 pm',
+				'missed' => false,
+			],
+			$history['date'],
+			'As core’s Date column words it.'
+		);
+		$this->assertSame( 'Last Modified', $children[ $draft ]['date']['label'] );
+		parse_str( (string) wp_parse_url( $history['trash_link'], PHP_URL_QUERY ), $args );
+		$this->assertSame( 'trash', $args['action'] );
+		$this->assertSame( (string) $this->ids['history'], $args['post'] );
+		$this->assertSame( 1, wp_verify_nonce( $args['_wpnonce'], 'trash-post_' . $this->ids['history'] ), 'A nonce the server made for this user.' );
+		$this->assertStringNotContainsString( '&amp;', $history['trash_link'], 'Sent raw, like every other link.' );
+	}
+
+	public function test_a_scheduled_child_is_dated_as_scheduled(): void {
+		$future = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'future',
+				'post_parent' => $this->ids['about'],
+				'post_date'   => gmdate( 'Y-m-d H:i:s', time() + DAY_IN_SECONDS ),
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Scheduled', $children[ $future ]['date']['label'] );
+	}
+
+	public function test_a_child_past_its_schedule_is_marked_missed(): void {
+		$late = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'future',
+				'post_parent' => $this->ids['about'],
+				'post_date'   => gmdate( 'Y-m-d H:i:s', time() + DAY_IN_SECONDS ),
+			]
+		);
+		// A schedule that cron never ran: still future, dated in the past.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_date' => '2020-01-01 00:00:00' ], [ 'ID' => $late ] );
+		clean_post_cache( $late );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Missed schedule', $children[ $late ]['date']['label'] );
+		$this->assertTrue( $children[ $late ]['date']['missed'], 'Core prints it in its error style.' );
+		$this->assertFalse( $children[ $this->ids['team'] ]['date']['missed'] );
+	}
+
+	public function test_a_private_child_has_the_view_link_core_prints(): void {
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_status' => 'private',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( get_permalink( $this->ids['history'] ), $children[ $this->ids['history'] ]['view_link'] );
+		$this->assertContains( 'Private', $children[ $this->ids['history'] ]['states'] );
+	}
+
+	public function test_each_child_carries_core_s_post_states(): void {
+		update_option( 'show_on_front', 'page' );
+		update_option( 'page_on_front', $this->ids['history'] );
+		wp_update_post(
+			[
+				'ID'            => $this->ids['team'],
+				'post_password' => 'secret',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( [ 'Front Page' ], $children[ $this->ids['history'] ]['states'] );
+		$this->assertSame( [ 'Password protected' ], $children[ $this->ids['team'] ]['states'] );
+	}
+
+	public function test_states_authors_and_lock_holders_are_sent_as_the_text_core_s_row_shows(): void {
+		// WordPress stores a display name with its & encoded; core's row prints it, so it reads as the name.
+		$tom = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Tom & Jerry’s',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_author' => $tom,
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $tom );
+		// A plugin's state, built with esc_html() as plugins build them, and one with markup.
+		add_filter(
+			'display_post_states',
+			static function ( array $states ): array {
+				$states['shop']  = esc_html( 'Shop’s & “Main” <page>' );
+				$states['built'] = '<span class="dashicons dashicons-admin-site"></span>Built with X';
+				return $states;
+			}
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Tom & Jerry’s', $children[ $this->ids['history'] ]['author'] );
+		$this->assertSame( 'Tom & Jerry’s', $children[ $this->ids['team'] ]['locked_by'] );
+		$this->assertSame( [ 'Shop’s & “Main” <page>', 'Built with X' ], $children[ $this->ids['history'] ]['states'], 'The script shows each as text, as the browser reads core’s.' );
+	}
+
+	public function test_each_child_s_title_is_read_once(): void {
+		$reads = 0;
+		$team  = $this->ids['team'];
+		add_filter(
+			'the_title',
+			static function ( $title, $post_id = 0 ) use ( &$reads, $team ) {
+				$reads += $team === (int) $post_id ? 1 : 0;
+				return $title;
+			},
+			10,
+			2
+		);
+
+		$this->get( '/posts/' . $this->ids['about'] . '/hierarchy' );
+
+		$this->assertSame( 1, $reads );
+	}
+
+	public function test_a_post_state_callback_that_asks_for_the_screen_does_not_break_the_route(): void {
+		// A plugin's display_post_states callback, hooked everywhere, that reads the admin screen as core's list does.
+		add_filter(
+			'display_post_states',
+			static function ( array $states ): array {
+				$screen = get_current_screen();
+				return null === $screen ? $states + [ 'featured' => 'Featured' ] : $states;
+			}
+		);
+
+		$response = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( [ 'Featured' ], $response->get_data()['children'][0]['states'] );
+	}
+
+	public function test_a_child_another_user_is_editing_says_who(): void {
+		$other = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $other );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 'Priya', $children[ $this->ids['team'] ]['locked_by'] );
+		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'] );
+	}
+
+	public function test_a_lock_on_a_child_the_user_may_read_but_not_edit_names_no_one(): void {
+		$other = self::factory()->user->create(
+			[
+				'role'         => 'editor',
+				'display_name' => 'Priya',
+			]
+		);
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $other );
+		$team = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $team ): array {
+				return 'edit_post' === $cap && isset( $args[0] ) && $team === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertNull( $children[ $team ]['locked_by'], 'Core’s row prints no lock notice on a page the user may not edit.' );
+		$this->assertNull( $children[ $team ]['edit_link'] );
+	}
+
+	public function test_a_lock_the_user_holds_or_that_expired_names_no_one(): void {
+		$other = self::factory()->user->create( [ 'role' => 'editor' ] );
+		update_post_meta( $this->ids['team'], '_edit_lock', time() . ':' . $this->admin );
+		// An hour ago: well past core's lock window of 150 seconds.
+		update_post_meta( $this->ids['history'], '_edit_lock', ( time() - HOUR_IN_SECONDS ) . ':' . $other );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertNull( $children[ $this->ids['team'] ]['locked_by'], 'The user’s own lock is not another user editing.' );
+		$this->assertNull( $children[ $this->ids['history'] ]['locked_by'], 'A lock past its window has lapsed.' );
+	}
+
+	public function test_a_child_whose_author_is_gone_has_no_author(): void {
+		global $wpdb, $authordata;
+		$wpdb->update( $wpdb->posts, [ 'post_author' => 999999 ], [ 'ID' => $this->ids['team'] ] );
+		$wpdb->update( $wpdb->posts, [ 'post_author' => 0 ], [ 'ID' => $this->ids['history'] ] );
+		clean_post_cache( $this->ids['team'] );
+		clean_post_cache( $this->ids['history'] );
+		// A loop earlier in the request, a theme's or a plugin's, leaves its author behind.
+		$authordata = get_userdata( $this->admin ); // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Sets the state the route must not read.
+
+		try {
+			$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+		} finally {
+			$authordata = null; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Restores it.
+		}
+
+		$this->assertSame( '', $children[ $this->ids['team'] ]['author'], 'A deleted user.' );
+		$this->assertSame( '', $children[ $this->ids['history'] ]['author'], 'No author, not the last loop’s.' );
+	}
+
+	public function test_a_page_of_50_children_reads_their_locks_in_one_query(): void {
+		global $wpdb;
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$child = $this->page( sprintf( 'bulk-%02d', $i ), $this->ids['about'] );
+			// Each by an author of its own, so a user read per row would show.
+			$wpdb->update( $wpdb->posts, [ 'post_author' => self::factory()->user->create( [ 'role' => 'author' ] ) ], [ 'ID' => $child ] );
+			clean_post_cache( $child );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		// The first request after a flush also reads options that core loads once a request.
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertCount( 1, $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertCount( 50, $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'] );
+		$fifty = $wpdb->num_queries - $queries;
+
+		$this->assertSame( $one, $fifty, 'Fifty editable rows cost the queries of one: their meta, edit locks included, loads in one query.' );
+	}
+
+	public function test_fifty_children_locked_by_fifty_users_cost_the_queries_of_one_locked_child(): void {
+		global $wpdb;
+		$children = [ $this->ids['history'], $this->ids['team'] ];
+		for ( $i = 1; $i <= 48; $i++ ) {
+			$children[] = $this->page( sprintf( 'locked-%02d', $i ), $this->ids['about'] );
+		}
+		foreach ( $children as $child ) {
+			// Each held by a user of its own, so a user read per row would show.
+			update_post_meta( $child, '_edit_lock', time() . ':' . self::factory()->user->create( [ 'role' => 'editor' ] ) );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertNotNull( $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'][0]['locked_by'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries  = $wpdb->num_queries;
+		$children = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'];
+		$fifty    = $wpdb->num_queries - $queries;
+
+		$this->assertCount( 50, array_filter( array_column( $children, 'locked_by' ) ) );
+		$this->assertSame( $one, $fifty, 'The lock holders are read in one go, however many.' );
+	}
+
+	public function test_children_locked_by_a_deleted_user_cost_the_queries_of_one_and_name_no_one(): void {
+		global $wpdb;
+		$children = [ $this->ids['history'], $this->ids['team'] ];
+		for ( $i = 1; $i <= 48; $i++ ) {
+			$children[] = $this->page( sprintf( 'gone-%02d', $i ), $this->ids['about'] );
+		}
+		foreach ( $children as $child ) {
+			// WordPress leaves a page's lock behind when its user is deleted.
+			update_post_meta( $child, '_edit_lock', time() . ':999999' );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertNull( $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'][0]['locked_by'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$found   = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'];
+		$fifty   = $wpdb->num_queries - $queries;
+
+		$this->assertSame( [ null ], array_values( array_unique( array_column( $found, 'locked_by' ) ) ), 'No such user: no one is editing, as core says.' );
+		$this->assertSame( $one, $fifty, 'A missing user is looked up once a page, with the authors.' );
+	}
+
+	public function test_children_whose_authors_are_gone_cost_the_queries_of_one(): void {
+		global $wpdb;
+		for ( $i = 1; $i <= 50; $i++ ) {
+			$child = $this->page( sprintf( 'orphan-%02d', $i ), $this->ids['about'] );
+			// Users deleted without reassigning their pages: no such user, one for each row.
+			$wpdb->update( $wpdb->posts, [ 'post_author' => 900000 + $i ], [ 'ID' => $child ] );
+			clean_post_cache( $child );
+		}
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+		// The first request after a flush also reads options that core loads once a request.
+		wp_cache_flush();
+		$this->get( $route, [ 'children_per_page' => 1 ] );
+
+		wp_cache_flush();
+		$queries = $wpdb->num_queries;
+		$this->assertCount( 1, $this->get( $route, [ 'children_per_page' => 1 ] )->get_data()['children'] );
+		$one = $wpdb->num_queries - $queries;
+
+		wp_cache_flush();
+		$queries  = $wpdb->num_queries;
+		$children = $this->get( $route, [ 'children_per_page' => 50 ] )->get_data()['children'];
+		$fifty    = $wpdb->num_queries - $queries;
+
+		$this->assertSame( $one, $fifty, 'The authors are read once a page, found or not.' );
+		$this->assertSame( [ '' ], array_values( array_unique( array_column( array_slice( $children, 2 ), 'author' ) ) ), 'No author for a deleted user.' );
+	}
+
+	public function test_each_child_carries_its_place_among_its_siblings(): void {
+		$route = '/posts/' . $this->ids['about'] . '/hierarchy';
+
+		$second = $this->get(
+			$route,
+			[
+				'children_page'     => 2,
+				'children_per_page' => 1,
+			]
+		)->get_data()['children'][0];
+		$this->assertSame( $this->ids['team'], $second['id'] );
+		$this->assertSame( 2, $second['position'], 'History, then Team.' );
+		$this->assertSame( 2, $second['setsize'] );
+
+		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
+		$capped = $this->get( $route )->get_data()['children'][0];
+		$this->assertNull( $capped['position'], 'Past the cap no place is known, as the server prints none.' );
+		$this->assertNull( $capped['setsize'] );
+	}
+
+	public function test_a_child_s_title_reads_as_core_s_list_prints_it(): void {
+		global $wpdb;
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '<b>Bold</b> &amp; Co' ], [ 'ID' => $this->ids['team'] ] );
+		clean_post_cache( $this->ids['team'] );
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( '<b>Bold</b> & Co', $children[ $this->ids['team'] ]['title'], 'Core’s list escapes the markup, so it reads as text, and decodes the entity.' );
+		$this->assertSame( html_entity_decode( _draft_or_post_title( $this->ids['team'] ), ENT_QUOTES, 'UTF-8' ), $children[ $this->ids['team'] ]['title'] );
+	}
+
+	/**
+	 * The title and "Child of" name core's row prints for a post, decoded as
+	 * the browser reads them: [ row-title text, "Child of" name or null ].
+	 * WordPress 6.6 prints no "Child of".
+	 *
+	 * @param int $post_id Post.
+	 * @return array{0:string,1:string|null}
+	 */
+	private static function core_row_text( int $post_id ): array {
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		set_current_screen( 'edit-page' );
+		$table = _get_list_table( 'WP_Posts_List_Table', [ 'screen' => 'edit-page' ] );
+		ob_start();
+		$table->display_rows( [ get_post( $post_id ) ] );
+		$html = (string) ob_get_clean();
+		remove_filter( 'the_title', 'esc_html' );
+		set_current_screen( 'front' );
+		preg_match( '/<a class="row-title"[^>]*>(.*?)<\/a>/s', $html, $title );
+		$child_of = 1 === preg_match( '/<span id="post-hierarchy-\d+" class="hidden">Child of (.*?)<\/span>/s', $html, $match ) ? $match[1] : null;
+		$decode   = static fn( string $text ): string => html_entity_decode( $text, ENT_QUOTES, 'UTF-8' );
+		return [ $decode( wp_strip_all_tags( preg_replace( '/<span class="trimmed-post-excerpt">.*?<\/span>/s', '', $title[1] ) ) ), null !== $child_of ? $decode( $child_of ) : null ];
+	}
+
+	public function test_a_title_is_empty_as_core_tests_it_before_any_markup_is_stripped(): void {
+		global $wpdb;
+		$cases = [
+			'0'        => [ '(no title)', '(no title)' ],
+			''         => [ '(no title)', '(no title)' ],
+			'<b>0</b>' => [ '0', '<b>0</b>' ],
+			'<b></b>'  => [ '(no title)', '<b></b>' ],
+		];
+		foreach ( $cases as $stored => [ $stripped, $kept ] ) {
+			$wpdb->update( $wpdb->posts, [ 'post_title' => (string) $stored ], [ 'ID' => $this->ids['team'] ] );
+			clean_post_cache( $this->ids['team'] );
+
+			$this->assertSame( $stripped, Overview::title( $this->ids['team'] ), "A title of “{$stored}”, as text." );
+			$this->assertSame( $kept, Overview::title( $this->ids['team'], false ), "A title of “{$stored}”, as core's list prints it." );
+		}
+	}
+
+	public function test_the_child_of_name_leaves_no_escaping_behind_even_when_a_title_filter_throws(): void {
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '<i>x</i>' ], [ 'ID' => $this->ids['history'] ] );
+		clean_post_cache( $this->ids['history'] );
+
+		$this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'tree' => '1' ] );
+		$this->assertFalse( has_filter( 'the_title', 'esc_html' ), 'Core’s list escape is the route’s own for one call.' );
+		$this->assertSame( '<i>x</i>', get_the_title( $this->ids['history'] ) );
+
+		$about = $this->ids['about'];
+		$boom  = static function ( $title, $post_id = 0 ) use ( $about ) {
+			if ( $about === (int) $post_id ) {
+				throw new \RuntimeException( 'boom' );
+			}
+			return $title;
+		};
+		add_filter( 'the_title', $boom, 15, 2 );
+		try {
+			Overview::child_of( get_post( $about ) );
+			$this->fail( 'The filter throws.' );
+		} catch ( \RuntimeException $error ) {
+			$this->assertSame( 'boom', $error->getMessage() );
+		} finally {
+			remove_filter( 'the_title', $boom, 15 );
+		}
+
+		$this->assertFalse( has_filter( 'the_title', 'esc_html' ), 'A filter that throws leaves no escaping on every later title.' );
+		$this->assertSame( '<i>x</i>', get_the_title( $this->ids['history'] ) );
+	}
+
+	public function test_the_child_of_name_keeps_an_escape_its_caller_already_had(): void {
+		$about = get_post( $this->ids['about'] );
+		// As inside core's own display_rows(), which escapes every title it prints.
+		add_filter( 'the_title', 'esc_html' );
+		try {
+			$this->assertSame( 'About', Overview::child_of( $about ) );
+			$this->assertSame( 10, has_filter( 'the_title', 'esc_html' ), 'The caller’s escape is the caller’s to remove.' );
+
+			$boom = static function (): void {
+				throw new \RuntimeException( 'boom' );
+			};
+			add_filter( 'the_title', $boom, 15 );
+			try {
+				Overview::child_of( $about );
+				$this->fail( 'The filter throws.' );
+			} catch ( \RuntimeException $error ) {
+				$this->assertSame( 'boom', $error->getMessage() );
+			} finally {
+				remove_filter( 'the_title', $boom, 15 );
+			}
+			$this->assertSame( 10, has_filter( 'the_title', 'esc_html' ), 'Kept when a later filter throws, too.' );
+		} finally {
+			remove_filter( 'the_title', 'esc_html' );
+		}
+	}
+
+	public function test_the_child_of_name_is_core_s_after_every_title_filter(): void {
+		global $wpdb;
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		$parent = $this->page( 'badge-parent' );
+		$child  = $this->page( 'badge-kid', $parent );
+		$wpdb->update( $wpdb->posts, [ 'post_title' => 'Badge parent' ], [ 'ID' => $parent ] );
+		clean_post_cache( $parent );
+		// A filter after core's esc_html adds real markup, which core's "Child of" strips.
+		$badge = static fn( $title ) => $title . ' <span class="badge">New</span>';
+		add_filter( 'the_title', $badge, 20 );
+
+		$data       = $this->get( '/posts/' . $parent . '/hierarchy', [ 'tree' => '1' ] )->get_data();
+		[ , $core ] = self::core_row_text( $child );
+		remove_filter( 'the_title', $badge, 20 );
+
+		$this->assertSame( 'Badge parent New', $data['child_of'] );
+		if ( null !== $core ) {
+			$this->assertSame( $core, $data['child_of'], "WordPress 7.1's own “Child of”." );
+		}
+	}
+
+	public function test_an_untitled_page_and_a_page_titled_0_read_as_core_s_rows_read_them(): void {
+		global $wpdb;
+		$cases = [
+			'empty' => [ '', '' ],
+			'zero'  => [ '0', '0' ],
+			'em'    => [ '<em>Em</em> &amp; “Q”', '<em>Em</em> & “Q”' ],
+			'priv'  => [ 'Secret', 'Secret', [ 'post_status' => 'private' ] ],
+			'pass'  => [ 'Locked', 'Locked', [ 'post_password' => 'secret' ] ],
+		];
+		foreach ( $cases as $slug => $case ) {
+			[ $stored, $name ] = $case;
+			$parent            = $this->page( "parent-{$slug}" );
+			$child             = $this->page( "child-{$slug}", $parent );
+			$wpdb->update( $wpdb->posts, [ 'post_title' => $stored ] + ( $case[2] ?? [] ), [ 'ID' => $parent ] );
+			$wpdb->update( $wpdb->posts, [ 'post_title' => in_array( $slug, [ 'empty', 'zero' ], true ) ? $stored : 'Kid' ], [ 'ID' => $child ] );
+			clean_post_cache( $parent );
+			clean_post_cache( $child );
+
+			$data                           = $this->get( '/posts/' . $parent . '/hierarchy', [ 'tree' => '1' ] )->get_data();
+			$loaded                         = $data['children'][0];
+			[ $core_title, $core_child_of ] = self::core_row_text( $child );
+
+			$this->assertSame( $name, $data['child_of'], "The name core's subpages are “Child of” under a {$slug} title." );
+			if ( null !== $core_child_of ) {
+				$this->assertSame( $core_child_of, $data['child_of'], "WordPress 7.1's own “Child of” under a {$slug} title." );
+			}
+			$this->assertSame( $core_title, $loaded['title'], "Core's title text for a {$slug} subpage." );
+			$this->assertSame( in_array( $slug, [ 'empty', 'zero' ], true ), $loaded['untitled'], 'Named “no title” as core names it.' );
+			if ( in_array( $slug, [ 'empty', 'zero' ], true ) ) {
+				$this->assertSame( '(no title)', $loaded['title'] );
+			}
+		}
+	}
+
+	public function test_each_child_carries_core_s_row_classes(): void {
+		$other = self::factory()->user->create( [ 'role' => 'editor' ] );
+		wp_update_post(
+			[
+				'ID'          => $this->ids['history'],
+				'post_author' => $other,
+				'post_status' => 'private',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'          => $this->ids['team'],
+				'post_author' => $this->admin,
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( [ 'iedit', 'author-other', 'post-' . $this->ids['history'], 'type-page', 'status-private', 'hentry' ], $children[ $this->ids['history'] ]['classes'] );
+		$this->assertSame( [ 'iedit', 'author-self', 'post-' . $this->ids['team'], 'type-page', 'status-publish', 'hentry' ], $children[ $this->ids['team'] ]['classes'], 'Not the bare type name core adds outside wp-admin.' );
+	}
+
+	public function test_a_term_whose_slug_is_0_gives_no_class_as_core_gives_none(): void {
+		global $wpdb;
+		register_taxonomy_for_object_type( 'category', 'page' );
+		$zero = self::factory()->category->create( [ 'slug' => 'zero' ] );
+		$wpdb->update( $wpdb->terms, [ 'slug' => '0' ], [ 'term_id' => $zero ] );
+		clean_term_cache( $zero, 'category' );
+		wp_set_post_categories( $this->ids['team'], [ $zero ] );
+
+		$classes = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], 'classes', 'id' )[ $this->ids['team'] ];
+		$core    = get_post_class( '', $this->ids['team'] );
+		unregister_taxonomy_for_object_type( 'category', 'page' );
+
+		$this->assertNotContains( 'category-' . $zero, $core, 'Core skips an empty() slug.' );
+		$this->assertNotContains( 'category-' . $zero, $classes );
+	}
+
+	public function test_the_route_builds_the_row_classes_without_the_post_class_filter(): void {
+		$called = 0;
+		add_filter(
+			'post_class',
+			static function ( $classes ) use ( &$called ) {
+				// A theme's callback that assumes the front-end loop could warn or fail in a REST request.
+				++$called;
+				return $classes;
+			}
+		);
+		update_post_meta( $this->ids['team'], '_thumbnail_id', self::factory()->attachment->create() );
+		add_theme_support( 'post-thumbnails' );
+		wp_update_post(
+			[
+				'ID'            => $this->ids['history'],
+				'post_password' => 'secret',
+			]
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertSame( 0, $called, 'The route never runs post_class.' );
+		$this->assertContains( 'has-post-thumbnail', $children[ $this->ids['team'] ]['classes'] );
+		$this->assertContains( 'post-password-required', $children[ $this->ids['history'] ]['classes'], 'As get_post_class() marks it without the password cookie.' );
+	}
+
+	public function test_a_child_the_user_may_not_trash_has_no_trash_link(): void {
+		$kept = $this->ids['team'];
+		add_filter(
+			'map_meta_cap',
+			static function ( array $caps, string $cap, int $user_id, array $args ) use ( $kept ): array {
+				return 'delete_post' === $cap && isset( $args[0] ) && $kept === (int) $args[0] ? [ 'do_not_allow' ] : $caps;
+			},
+			10,
+			4
+		);
+
+		$children = array_column( $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data()['children'], null, 'id' );
+
+		$this->assertNull( $children[ $kept ]['trash_link'] );
+		$this->assertNotNull( $children[ $this->ids['history'] ]['trash_link'] );
+	}
+
+	public function test_the_tree_s_children_need_edit_rights_on_the_page_they_open(): void {
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
+
+		$this->assertSame( 403, $this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'children_per_page' => 50 ] )->get_status() );
+	}
+
 	public function test_a_child_the_user_may_not_read_is_left_out(): void {
 		$hidden = $this->ids['history'];
 		add_filter(

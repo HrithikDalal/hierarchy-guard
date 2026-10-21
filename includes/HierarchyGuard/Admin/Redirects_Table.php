@@ -334,7 +334,8 @@ final class Redirects_Table extends WP_List_Table {
 			return '';
 		}
 		$title = get_the_title( $post );
-		$title = '' !== $title ? $title : __( '(no title)', 'hierarchy-guard' );
+		// As _draft_or_post_title(): a title of "0" is no title either.
+		$title = ! empty( $title ) ? $title : __( '(no title)', 'hierarchy-guard' );
 		$link  = get_edit_post_link( $post );
 		$name  = null !== $link ? sprintf( '<a href="%1$s">%2$s</a>', esc_url( $link ), esc_html( $title ) ) : esc_html( $title );
 		$now   = get_permalink( $post );
