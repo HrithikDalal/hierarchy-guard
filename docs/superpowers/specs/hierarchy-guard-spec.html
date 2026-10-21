@@ -186,7 +186,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
   <h1>Hierarchy Guard</h1>
   <p class="lede">Shows the parent and child structure of pages inside wp-admin, warns before a slug change, re-parenting, or trash breaks a subtree, and makes sure every old URL has somewhere to go.</p>
   <div class="meta">
-    <span>Status <b>Plans 1–5 built; plan 6 (DataViews and release) next</b></span>
+    <span>Status <b>Plans 1–5 built; plan 6 (the WordPress.org release, 1.0.0) next</b></span>
     <span>Date <b>16 October 2026</b></span>
     <span>Slug <b>hierarchy-guard</b></span>
     <span>Requires <b>WordPress 6.6 · PHP 8.0</b></span>
@@ -245,7 +245,7 @@ figcaption{font-size:14px;color:var(--muted);margin-top:10px;max-width:72ch}
       <tr><td>Scale rule</td><td>No operation inside a web request may grow with subtree size. Counts cap at 1,000. Anything larger runs in background batches with visible progress.</td><td>The plugin must be safe to install on a site with a million posts without anyone noticing it in the dashboard.</td></tr>
       <tr><td>Trash policy</td><td>Ask when the plugin can intercept. Elsewhere apply the default policy, move subpages up to the grandparent, and offer Undo.</td><td>Never leave <code>__trashed</code> URLs live by default. Keep the editor in control where a dialog is possible.</td></tr>
       <tr><td>Visibility surfaces</td><td>Editor sidebar panel, a Hierarchy column with a subtree filter, and a Tree view of the Pages list</td><td>Covers editing, bulk management, and overview without adding a top-level menu.</td></tr>
-      <tr><td>Tree view</td><td>A "Tree" entry in the views row, <code>edit.php?post_type=page&amp;hierarchy_guard_view=tree</code>, rendered by core's list table on the same screen for every supported type. Top-level pages come from core's own query; subpages load on demand, 50 at a time, from the hierarchy route. Not DataViews.</td><td>DataViews 20.0.0 has no expand and collapse, no lazy children and no tree grid semantics, and core ships no shared <code>wp-dataviews</code> script, so the plugin would bundle about 381 KB gzipped. Revisited in plan 6 if DataViews gains expandable rows or core shares it.</td></tr>
+      <tr><td>Tree view</td><td>A "Tree" entry in the views row, <code>edit.php?post_type=page&amp;hierarchy_guard_view=tree</code>, rendered by core's list table on the same screen for every supported type. Top-level pages come from core's own query; subpages load on demand, 50 at a time, from the hierarchy route. Not DataViews.</td><td>DataViews 20.0.0 has no expand and collapse, no lazy children and no tree grid semantics, and core ships no shared <code>wp-dataviews</code> script, so the plugin would bundle about 381 KB gzipped. Revisited in a later release if DataViews gains expandable rows or core shares it.</td></tr>
       <tr><td>Settings and recorded redirects</td><td>A Settings › Hierarchy Guard page with core nav tabs, Settings | Redirects. The Redirects tab lists, edits and deletes the redirects the plugin recorded, and nothing else. Nothing registers on Settings › Writing.</td><td>Hierarchy Guard is not a redirect plugin. It is a minimal add-on for sites with no redirect plugin, or whose owners don't want to mix manual redirects with the ones it generates. A recorded redirect still needs a place to be corrected or removed, and a list of them doesn't belong on Settings › Writing.</td></tr>
       <tr><td>UI rule</td><td>Core components and core admin classes only. No colours, radii or type sizes of our own. Status as text, not pills. "Subpages" is the word.</td><td>Inherits the user's admin colour scheme today and the design tokens and any dark mode core ships later.</td></tr>
       <tr><td>Storage</td><td>Post meta and options, no custom tables or post types</td><td>Data travels with the post, works on VIP and multisite, cleaned up by core on delete. An edit to a recorded redirect lives next to the record it changes.</td></tr>
@@ -943,7 +943,7 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
 <section id="build">
   <span class="eyebrow sec-eyebrow">Sequence</span>
   <h2>Build order</h2>
-  <div class="prose"><p>Each step leaves the plugin activatable and tested. The riskiest logic comes first so the UI is built on something already proven. Plans 1 to 3 cover steps 1 to 7. Plan 4 is step 8, plan 5 is step 9, and plan 6 is steps 10 and 11.</p>
+  <div class="prose"><p>Each step leaves the plugin activatable and tested. The riskiest logic comes first so the UI is built on something already proven. Plans 1 to 3 cover steps 1 to 7. Plan 4 is step 8, plan 5 is step 9, and plan 6 is step 11, the first WordPress.org release. Step 10 comes in a later release.</p>
     <ol>
       <li>Scaffold the repo, wp-env, PHPCS, PHPUnit, and CI. Symlink into a Local site.</li>
       <li>Paths, Ledger, Resolver, and Change_Listener with their tests, including the query-count assertions. This alone makes every URL change observable and resolvable.</li>
@@ -954,11 +954,11 @@ GET /wp-json/hierarchy-guard/v1/changes/{change_id}/csv?format=redirection → s
       <li>List table: Hierarchy column, subtree filter with its breadcrumb, row action, trash Modal, Quick Edit inline warning, outcome notices and redirects Modal.</li>
       <li>Settings › Hierarchy Guard: the Settings tab, the Plugins row link and every settings link pointed at the page, the Redirects tab, the Edit view, overrides in the ledger, and the resolver and batch resolver honouring them.</li>
       <li>Tree view: the "Tree" entry in the views row on core's list table, core's top-level query, subpages 50 at a time with "Show more" and Collapse all, the route's <code>children_per_page</code> and row fields, tree grid semantics and arrow keys, the flat search with parent paths, the links without JavaScript, and Trash through the list's dialog with the reload in place.</li>
-      <li>DataViews track: the hierarchy field and the replacement trash action, registered wherever the API is available. A DataViews tree is revisited when DataViews gains expandable rows or core ships a shared <code>wp-dataviews</code> script.</li>
-      <li>Notices, readme.txt, uninstall, translation pass, release zip.</li>
+      <li>Later release: the DataViews track: the hierarchy field and the replacement trash action, registered wherever the API is available. A DataViews tree is revisited when DataViews gains expandable rows or core ships a shared <code>wp-dataviews</code> script.</li>
+      <li>The WordPress.org release, 1.0.0: notices, readme.txt, uninstall, the translation pass, a clean Plugin Check, and the release zip. The header names one author, Hrithik Dalal, linked to his GitHub profile, and its Plugin URI is the public GitHub repository; the readme's Contributors line is <code>hrithikd</code>.</li>
     </ol>
   </div>
-  <div class="callout">Next step is plan 6's written implementation plan from this spec: the DataViews track, then notices, readme.txt, uninstall, the translation pass and the release zip. Open item: whether the DataViews field and action registration APIs are public in the WordPress version current when plan 6 begins.</div>
+  <div class="callout">Next step is plan 6's written implementation plan from this spec: the WordPress.org release, 1.0.0, with notices, readme.txt, uninstall, the translation pass, a clean Plugin Check and the release zip. The DataViews track waits for a later release.</div>
 </section>
 
 
