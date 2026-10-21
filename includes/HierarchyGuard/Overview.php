@@ -153,12 +153,13 @@ final class Overview {
 		$plain = static fn(): string => '%s';
 		add_filter( 'private_title_format', $plain );
 		add_filter( 'protected_title_format', $plain );
-		$title = html_entity_decode( get_the_title( $post_id ), ENT_QUOTES, 'UTF-8' );
-		$title = $strip ? wp_strip_all_tags( $title ) : $title;
+		$raw = get_the_title( $post_id );
 		remove_filter( 'private_title_format', $plain );
 		remove_filter( 'protected_title_format', $plain );
-		// As _draft_or_post_title(): a title of "0" is no title either.
-		return ! empty( $title ) ? $title : __( '(no title)', 'hierarchy-guard' );
+		$title = html_entity_decode( $raw, ENT_QUOTES, 'UTF-8' );
+		$title = $strip ? wp_strip_all_tags( $title ) : $title;
+		// As _draft_or_post_title() tests the title before any markup is stripped: "0" is no title, "<b>0</b>" is one; and a name is never empty.
+		return empty( $raw ) || '' === $title ? __( '(no title)', 'hierarchy-guard' ) : $title;
 	}
 
 	/**

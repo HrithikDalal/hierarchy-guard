@@ -638,6 +638,23 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		return [ $decode( wp_strip_all_tags( preg_replace( '/<span class="trimmed-post-excerpt">.*?<\/span>/s', '', $title[1] ) ) ), null !== $child_of ? $decode( $child_of ) : null ];
 	}
 
+	public function test_a_title_is_empty_as_core_tests_it_before_any_markup_is_stripped(): void {
+		global $wpdb;
+		$cases = [
+			'0'        => [ '(no title)', '(no title)' ],
+			''         => [ '(no title)', '(no title)' ],
+			'<b>0</b>' => [ '0', '<b>0</b>' ],
+			'<b></b>'  => [ '(no title)', '<b></b>' ],
+		];
+		foreach ( $cases as $stored => [ $stripped, $kept ] ) {
+			$wpdb->update( $wpdb->posts, [ 'post_title' => (string) $stored ], [ 'ID' => $this->ids['team'] ] );
+			clean_post_cache( $this->ids['team'] );
+
+			$this->assertSame( $stripped, Overview::title( $this->ids['team'] ), "A title of “{$stored}”, as text." );
+			$this->assertSame( $kept, Overview::title( $this->ids['team'], false ), "A title of “{$stored}”, as core's list prints it." );
+		}
+	}
+
 	public function test_an_untitled_page_and_a_page_titled_0_read_as_core_s_rows_read_them(): void {
 		global $wpdb;
 		$cases = [
@@ -645,11 +662,12 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 			'zero'  => [ '0', '0' ],
 			'em'    => [ '<em>Em</em> &amp; “Q”', '<em>Em</em> & “Q”' ],
 		];
-		foreach ( $cases as $slug => [ $stored, $name ] ) {
-			$parent = $this->page( "parent-{$slug}" );
-			$child  = $this->page( "child-{$slug}", $parent );
-			$wpdb->update( $wpdb->posts, [ 'post_title' => $stored ], [ 'ID' => $parent ] );
-			$wpdb->update( $wpdb->posts, [ 'post_title' => 'em' === $slug ? 'Kid' : $stored ], [ 'ID' => $child ] );
+		foreach ( $cases as $slug => $case ) {
+			[ $stored, $name ] = $case;
+			$parent            = $this->page( "parent-{$slug}" );
+			$child             = $this->page( "child-{$slug}", $parent );
+			$wpdb->update( $wpdb->posts, [ 'post_title' => $stored ] + ( $case[2] ?? [] ), [ 'ID' => $parent ] );
+			$wpdb->update( $wpdb->posts, [ 'post_title' => in_array( $slug, [ 'empty', 'zero' ], true ) ? $stored : 'Kid' ], [ 'ID' => $child ] );
 			clean_post_cache( $parent );
 			clean_post_cache( $child );
 
@@ -662,8 +680,8 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 				$this->assertSame( $core_child_of, $data['child_of'], "WordPress 7.1's own “Child of” under a {$slug} title." );
 			}
 			$this->assertSame( $core_title, $loaded['title'], "Core's title text for a {$slug} subpage." );
-			$this->assertSame( 'em' !== $slug, $loaded['untitled'], 'Named “no title” as core names it.' );
-			if ( 'em' !== $slug ) {
+			$this->assertSame( in_array( $slug, [ 'empty', 'zero' ], true ), $loaded['untitled'], 'Named “no title” as core names it.' );
+			if ( in_array( $slug, [ 'empty', 'zero' ], true ) ) {
 				$this->assertSame( '(no title)', $loaded['title'] );
 			}
 		}

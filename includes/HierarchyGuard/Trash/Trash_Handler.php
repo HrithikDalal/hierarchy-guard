@@ -561,6 +561,7 @@ final class Trash_Handler {
 	 */
 	private static function title( WP_Post $post ): string {
 		$title = get_the_title( $post );
-		return '' !== $title ? $title : __( '(no title)', 'hierarchy-guard' );
+		// As _draft_or_post_title(): a title of "0" is no title either.
+		return ! empty( $title ) ? $title : __( '(no title)', 'hierarchy-guard' );
 	}
 }

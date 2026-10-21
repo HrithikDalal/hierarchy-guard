@@ -167,7 +167,10 @@ export function rowTitle( doc, id ) {
 		// As the preview's titles are, by PHP's html_entity_decode(): a browser
 		// would also decode a legacy name with no semicolon, and HTML5's names.
 		const title = decodeReferences( node.textContent.trim() );
-		return '' !== title ? title : __( '(no title)', 'hierarchy-guard' );
+		// As _draft_or_post_title()'s empty(): a title of "0" is no title either.
+		return '' !== title && '0' !== title
+			? title
+			: __( '(no title)', 'hierarchy-guard' );
 	}
 	const link = doc.querySelector( `#post-${ id } .row-title` );
 	return link ? plainTitle( link.textContent ) : '';

@@ -375,6 +375,16 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( '“About” could not be restored from the trash.', $result->get_error_message() );
 	}
 
+	public function test_undo_names_a_page_titled_0_as_core_s_list_does(): void {
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '0' ], [ 'ID' => $this->ids['about'] ] );
+		clean_post_cache( $this->ids['about'] );
+
+		$result = $this->handler()->undo( $this->ids['about'] );
+
+		$this->assertSame( '“(no title)” is no longer in the trash.', $result->get_error_message(), 'As _draft_or_post_title() names it.' );
+	}
+
 	public function test_large_subtrees_move_in_background_batches(): void {
 		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
 		$this->more_subpages( [ 'a', 'b', 'c' ] );
