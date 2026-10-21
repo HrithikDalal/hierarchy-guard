@@ -655,6 +655,36 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		}
 	}
 
+	public function test_the_child_of_name_leaves_no_escaping_behind_even_when_a_title_filter_throws(): void {
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, [ 'post_title' => '<i>x</i>' ], [ 'ID' => $this->ids['history'] ] );
+		clean_post_cache( $this->ids['history'] );
+
+		$this->get( '/posts/' . $this->ids['about'] . '/hierarchy', [ 'tree' => '1' ] );
+		$this->assertFalse( has_filter( 'the_title', 'esc_html' ), 'Core’s list escape is the route’s own for one call.' );
+		$this->assertSame( '<i>x</i>', get_the_title( $this->ids['history'] ) );
+
+		$about = $this->ids['about'];
+		$boom  = static function ( $title, $post_id = 0 ) use ( $about ) {
+			if ( $about === (int) $post_id ) {
+				throw new \RuntimeException( 'boom' );
+			}
+			return $title;
+		};
+		add_filter( 'the_title', $boom, 15, 2 );
+		try {
+			Overview::child_of( get_post( $about ) );
+			$this->fail( 'The filter throws.' );
+		} catch ( \RuntimeException $error ) {
+			$this->assertSame( 'boom', $error->getMessage() );
+		} finally {
+			remove_filter( 'the_title', $boom, 15 );
+		}
+
+		$this->assertFalse( has_filter( 'the_title', 'esc_html' ), 'A filter that throws leaves no escaping on every later title.' );
+		$this->assertSame( '<i>x</i>', get_the_title( $this->ids['history'] ) );
+	}
+
 	public function test_the_child_of_name_is_core_s_after_every_title_filter(): void {
 		global $wpdb;
 		require_once ABSPATH . 'wp-admin/includes/template.php';

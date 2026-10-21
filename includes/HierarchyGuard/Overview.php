@@ -174,10 +174,14 @@ final class Overview {
 	public static function child_of( WP_Post $post ): string {
 		// Core's list escapes every title it prints, as here.
 		$added = false === has_filter( 'the_title', 'esc_html' ) && add_filter( 'the_title', 'esc_html' );
-		/** This filter is documented in wp-includes/post-template.php */
-		$title = (string) apply_filters( 'the_title', (string) $post->post_title, (int) $post->ID ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own filter, as core's list applies it.
-		if ( $added ) {
-			remove_filter( 'the_title', 'esc_html' );
+		try {
+			/** This filter is documented in wp-includes/post-template.php */
+			$title = (string) apply_filters( 'the_title', (string) $post->post_title, (int) $post->ID ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's own filter, as core's list applies it.
+		} finally {
+			// Even when another filter throws, no later title is escaped.
+			if ( $added ) {
+				remove_filter( 'the_title', 'esc_html' );
+			}
 		}
 		return html_entity_decode( wp_strip_all_tags( $title ), ENT_QUOTES, 'UTF-8' );
 	}
