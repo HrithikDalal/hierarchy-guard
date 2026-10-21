@@ -18,12 +18,12 @@ use WP_Query;
  * Adds "Tree" to the views row of every supported list screen. The Tree view
  * is core's own list table: the top level comes from core's query with
  * post_parent 0 in menu order then title, by the screen's Number of items,
- * and a search lists the matches at any level, flat. The list-table script loads subpages 50 at
- * a time from the hierarchy route. Without JavaScript a toggle reloads the
- * view opened at one page: the path down to it and its page of 50 subpages
- * are put after their parents in core's results, so core prints them.
- * Nothing here reads every top-level post: Subtree::ordered_children() is
- * never asked for parent 0.
+ * and a search lists the matches at any level, flat. The list-table script
+ * loads subpages 50 at a time from the hierarchy route. Without JavaScript a
+ * toggle reloads the view opened at one page: the path down to it and its
+ * page of 50 subpages are put after their parents in core's results, so core
+ * prints them. Nothing here reads every top-level post:
+ * Subtree::ordered_children() is never asked for parent 0.
  */
 final class Tree_View {
 
