@@ -1102,6 +1102,257 @@ describe( 'the tree grid', () => {
 		expect( document.activeElement ).toBe( row( 9 ) );
 	} );
 
+	/**
+	 * A promise the test settles, for a load that is still on its way.
+	 *
+	 * @return {{promise: Promise<Object>, resolve: (value: Object) => void, reject: (error: Error) => void}} The promise and its ends.
+	 */
+	const deferred = () => {
+		const out = {};
+		out.promise = new Promise( ( resolve, reject ) => {
+			out.resolve = resolve;
+			out.reject = reject;
+		} );
+		return out;
+	};
+
+	it( 'loads a row again from page 1 when a later page counts its subpages differently, as after deletions among the rows shown', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		// Of the 128, ten on page 1 were deleted: page 2 now starts ten further on, under a total of 118.
+		fetchChildren
+			.mockImplementationOnce( () =>
+				Promise.resolve(
+					page(
+						Array.from( { length: 50 }, ( unused, index ) =>
+							child( 1060 + index, `City ${ 61 + index }` )
+						),
+						118,
+						true,
+						false,
+						50
+					)
+				)
+			)
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 118 ) )
+			);
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+		await settle();
+
+		expect( fetchChildren ).toHaveBeenLastCalledWith( 9, 1 );
+		expect( descendantIds( 9 ) ).toEqual( [
+			...Array.from(
+				{ length: 50 },
+				( unused, index ) => `post-${ 2000 + index }`
+			),
+			'',
+		] );
+		expect(
+			document.querySelector( '.hierarchy-guard-more' ).textContent
+		).toBe( 'Show more · 50 of 118 subpages shown' );
+		expect(
+			row( 9 ).querySelector( '.hierarchy-guard-cell' ).textContent
+		).toBe( '118 subpages' );
+	} );
+
+	it( 'loads a row again from page 1 when a page was added, so no row is listed twice', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		// One page added before them: page 2 starts with the last row page 1 showed.
+		fetchChildren
+			.mockImplementationOnce( () =>
+				Promise.resolve(
+					page(
+						Array.from( { length: 50 }, ( unused, index ) =>
+							child( 1049 + index, `City ${ 50 + index }` )
+						),
+						129,
+						true,
+						false,
+						50
+					)
+				)
+			)
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 129 ) )
+			);
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+		await settle();
+
+		const ids = rows()
+			.map( ( item ) => item.id )
+			.filter( Boolean );
+		expect( new Set( ids ).size ).toBe( ids.length );
+		expect( row( 1049 ) ).toBe( null );
+		expect(
+			row( 9 ).querySelector( '.hierarchy-guard-cell' ).dataset.children
+		).toBe( '129' );
+	} );
+
+	it( 'counts the row as its first page does when it loads again, and settles once that page is shown', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const first = deferred();
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 45 ) ) )
+			.mockImplementationOnce( () => first.promise );
+		let done = false;
+
+		tree.load( row( 9 ), 2 ).then( () => {
+			done = true;
+		} );
+		await settle();
+		expect( done ).toBe( false );
+		first.resolve( renumbered( 1, 44 ) );
+		await settle();
+
+		expect( done ).toBe( true );
+		expect( descendantIds( 9 ) ).toHaveLength( 44 );
+		expect(
+			row( 9 ).querySelector( '.hierarchy-guard-cell' ).textContent
+		).toBe( '44 subpages' );
+	} );
+
+	it( 'leaves the keyboard alone when the user clicked away while a row loaded again and its first page failed', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const first = deferred();
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 45 ) ) )
+			.mockImplementationOnce( () => first.promise );
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		await settle();
+		// The loading row took the keyboard from Show more; the user then clicks the heading.
+		expect( document.activeElement.className ).toContain(
+			'hierarchy-guard-status'
+		);
+		document.activeElement.blur();
+
+		first.reject( new Error() );
+		await settle();
+
+		expect( document.activeElement ).toBe( document.body );
+	} );
+
+	it( 'leaves the keyboard alone when the user clicked away while a row loaded again and none was left', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const first = deferred();
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 45 ) ) )
+			.mockImplementationOnce( () => first.promise );
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		await settle();
+		document.activeElement.blur();
+
+		first.resolve( page( [], 0 ) );
+		await settle();
+
+		expect( row( 9 ).hasAttribute( 'aria-expanded' ) ).toBe( false );
+		expect( document.activeElement ).toBe( document.body );
+	} );
+
+	it( 'leaves the keyboard alone when the user clicked away before a later page found the rows changed', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		const second = deferred();
+		fetchChildren
+			.mockImplementationOnce( () => second.promise )
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 45 ) )
+			);
+		const more = document.querySelector( '.hierarchy-guard-more button' );
+		more.focus();
+		more.click();
+		more.blur();
+
+		second.resolve( page( [], 45 ) );
+		await settle();
+		await settle();
+
+		expect( descendantIds( 9 ) ).toHaveLength( 45 );
+		expect( document.activeElement ).toBe( document.body );
+	} );
+
+	it( 'hands the keyboard on when it was nowhere both as Show more was pressed and when the rows were found changed', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		fetchChildren
+			.mockImplementationOnce( () => Promise.resolve( page( [], 45 ) ) )
+			.mockImplementationOnce( () =>
+				Promise.resolve( renumbered( 1, 45 ) )
+			);
+		document.activeElement.blur();
+
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		await settle();
+		await settle();
+
+		expect( document.activeElement ).toBe( row( 2000 ) );
+	} );
+
+	it( 'returns the keyboard, or the tab stop, to the page it was on when the row loads again and still lists it', async () => {
+		const tree = bindTree( document, fetchChildren );
+		await tree.toggle( row( 9 ) );
+		// Ten deleted before City 31: page 1 now ends with City 60, so City 31 is still on it.
+		const again = () =>
+			Promise.resolve(
+				page(
+					Array.from( { length: 50 }, ( unused, index ) =>
+						child( 1010 + index, `City ${ 11 + index }` )
+					),
+					118,
+					true
+				)
+			);
+		let second = deferred();
+		fetchChildren
+			.mockImplementationOnce( () => second.promise )
+			.mockImplementationOnce( again );
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		row( 1030 ).focus();
+		second.resolve( page( [], 118, true, false, 50 ) );
+		await settle();
+		await settle();
+		expect( document.activeElement ).toBe( row( 1030 ) );
+
+		// The same with the tab stop on City 31 and the keyboard in the search box.
+		const search = document.createElement( 'input' );
+		document.body.prepend( search );
+		second = deferred();
+		fetchChildren
+			.mockImplementationOnce( () => second.promise )
+			.mockImplementationOnce( () =>
+				Promise.resolve(
+					page(
+						Array.from( { length: 50 }, ( unused, index ) =>
+							child( 1020 + index, `City ${ 21 + index }` )
+						),
+						108,
+						true
+					)
+				)
+			);
+		document.querySelector( '.hierarchy-guard-more button' ).click();
+		row( 1030 ).focus();
+		search.focus();
+		second.resolve( page( [], 108, true, false, 50 ) );
+		await settle();
+		await settle();
+		expect( document.activeElement ).toBe( search );
+		expect( tabStops() ).toEqual( [ 'post-1030' ] );
+		search.remove();
+	} );
+
 	it( 'says once that the user can’t view a row’s subpages, however many pages bring none', async () => {
 		const load = vi.fn( ( id, number ) =>
 			Promise.resolve( page( [], 151, number < 4 ) )
