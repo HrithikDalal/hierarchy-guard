@@ -502,7 +502,7 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<a class="hierarchy-guard-more" href="' . esc_url( Tree_View::place_url( 'page', $this->ids['about'], 2 ) ) . '" data-page="2" aria-label="Show more subpages of “About”">Show more</a>', $this->cell( $this->ids['about'] ), 'Named for its page, as the script’s button is.' );
 	}
 
-	public function test_past_the_cap_an_opened_tree_row_says_only_the_first_are_shown(): void {
+	public function test_past_the_cap_an_opened_tree_row_says_only_the_oldest_are_shown(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
 		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
 

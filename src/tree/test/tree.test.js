@@ -219,7 +219,7 @@ describe( 'the tree grid', () => {
 		expect( rows().pop().id ).toBe( '' );
 	} );
 
-	it( 'says past the cap that only the first are shown', async () => {
+	it( 'says past the cap that only the oldest are shown', async () => {
 		fetchChildren = vi.fn( () =>
 			Promise.resolve(
 				page( [ child( 30, 'Last' ) ], 1000, false, true )
