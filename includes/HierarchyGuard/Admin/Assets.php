@@ -118,11 +118,16 @@ final class Assets {
 	}
 
 	/**
-	 * The editor panel, for supported types.
+	 * The editor panel, for supported types, and in the Site Editor, whose
+	 * Pages screen edits pages too: there the screen names no post type, and
+	 * the panel acts only while the page it edits is of a supported type.
 	 */
 	public function enqueue_editor(): void {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
+		if ( ! $screen instanceof WP_Screen ) {
+			return;
+		}
+		if ( 'site-editor' !== $screen->base && ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
 		}
 		$this->enqueue( 'editor' );

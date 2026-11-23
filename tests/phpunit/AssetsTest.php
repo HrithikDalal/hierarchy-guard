@@ -38,7 +38,7 @@ final class AssetsTest extends WP_UnitTestCase {
 		}
 		rmdir( $this->dir . '/build' );
 		rmdir( $this->dir );
-		foreach ( [ 'list-table', 'tree', 'redirects' ] as $bundle ) {
+		foreach ( [ 'list-table', 'tree', 'redirects', 'editor' ] as $bundle ) {
 			wp_dequeue_script( 'hierarchy-guard-' . $bundle );
 			wp_deregister_script( 'hierarchy-guard-' . $bundle );
 		}
@@ -82,6 +82,24 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'window.hierarchyGuard = {', implode( '', (array) $script->extra['before'] ) );
 		$this->assertSame( 'hierarchy-guard', $script->textdomain );
 		$this->assertTrue( wp_style_is( 'wp-components', 'enqueued' ), 'Components need their styles.' );
+	}
+
+	public function test_the_editor_bundle_loads_in_the_block_editor_of_a_supported_type_and_in_the_site_editor(): void {
+		$this->build( 'editor', [] );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		set_current_screen( 'post' );
+		$assets->enqueue_editor();
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-editor', 'enqueued' ), 'Posts are not hierarchical.' );
+
+		set_current_screen( 'site-editor' );
+		$assets->enqueue_editor();
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-editor', 'enqueued' ), 'The Site Editor’s Pages screen edits pages: the panel checks the type it edits.' );
+		wp_dequeue_script( 'hierarchy-guard-editor' );
+
+		set_current_screen( 'page' );
+		$assets->enqueue_editor();
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-editor', 'enqueued' ) );
 	}
 
 	public function test_a_bundle_s_right_to_left_stylesheet_replaces_it_right_to_left(): void {
