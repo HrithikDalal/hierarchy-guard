@@ -72,6 +72,7 @@ final class Plugin {
 		add_action( 'init', [ Settings::class, 'register_option' ] );
 		( new Admin\Settings_Page( $providers, new Redirects\Records( $ledger ) ) )->register();
 		( new Trash\Markers() )->register();
+		( new Meta_Guard() )->register();
 
 		$queue      = new Batch\Queue();
 		$operations = new Trash\Operations( $ledger, new Trash\Mover() );

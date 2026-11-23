@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Compat;
 
 use HierarchyGuard\Batch\Processor;
+use HierarchyGuard\Meta_Guard;
 use Throwable;
 use Yoast\WP\SEO\Integrations\Watchers\Indexable_Post_Watcher;
 
@@ -61,7 +62,7 @@ final class Yoast {
 		$parents = self::with_children( $ids );
 		foreach ( $ids as $id ) {
 			if ( in_array( $id, $parents, true ) ) {
-				update_post_meta( $id, self::PENDING, '1' );
+				Meta_Guard::writing( static fn() => update_post_meta( $id, self::PENDING, '1' ) );
 				continue;
 			}
 			self::build( $watcher, $id );

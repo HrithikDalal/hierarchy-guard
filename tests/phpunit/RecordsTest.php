@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Meta_Guard;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Records;
 use HierarchyGuard\Redirects\Resolver;
@@ -122,8 +123,8 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->ledger->record_root( 'page', 'archive' );
 		$this->ledger->set_target( 'page', 'crew', $this->ids['team'], 'https://example.org/crew/', 302 );
 		// What else the plugin stores on posts.
-		add_post_meta( $this->ids['team'], Markers::moved_key( $this->ids['about'] ), 'x' );
-		add_post_meta( $this->ids['team'], Markers::ALIASES, 'x' );
+		Markers::add( $this->ids['team'], Markers::moved_key( $this->ids['about'] ), 'x' );
+		Meta_Guard::writing( fn() => add_post_meta( $this->ids['team'], Markers::ALIASES, 'x' ) );
 
 		$page = $this->records->page( '', '', 1 );
 
@@ -153,7 +154,7 @@ final class RecordsTest extends WP_UnitTestCase {
 	public function test_an_entry_of_a_type_no_longer_supported_or_with_another_type_s_hash_is_not_a_row(): void {
 		$this->ledger->record( $this->ids['about'], 'old-about' );
 		// A key whose hash names another type than its post's.
-		add_post_meta( $this->ids['team'], Ledger::key( 'hg_docs', 'crew' ), 'crew' );
+		Meta_Guard::writing( fn() => add_post_meta( $this->ids['team'], Ledger::key( 'hg_docs', 'crew' ), 'crew' ) );
 
 		$this->assertSame( [ Records::id( $this->ids['about'], 'page', 'old-about' ) ], array_keys( self::olds( $this->records->page( '', '', 1 ) ) ) );
 
@@ -1164,7 +1165,7 @@ final class RecordsTest extends WP_UnitTestCase {
 
 	public function test_a_full_url_search_finds_any_record_at_that_exact_url_whatever_the_newest_list_holds(): void {
 		// Written straight into post meta: not on the newest list, and the list does not say there are older ones.
-		add_post_meta( $this->ids['about'], Ledger::key( 'page', 'not-listed' ), 'not-listed', true );
+		Meta_Guard::writing( fn() => add_post_meta( $this->ids['about'], Ledger::key( 'page', 'not-listed' ), 'not-listed', true ) );
 		$this->ledger->record_root( 'page', 'archive' );
 		$this->assertSame( [ '/archive/' ], array_values( self::olds( $this->records->page( '', '', 1 ) ) ), 'Precondition: only the root list is listed.' );
 		$this->assertFalse( $this->records->page( '', '', 1 )['capped'] );

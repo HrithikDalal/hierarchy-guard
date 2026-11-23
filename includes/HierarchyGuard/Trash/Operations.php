@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Trash;
 
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Meta_Guard;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Subtree;
 use WP_Post;
@@ -614,7 +615,7 @@ final class Operations {
 
 		if ( [] !== $written ) {
 			$stored = get_post_meta( $root, Markers::ALIASES, true );
-			update_post_meta( $root, Markers::ALIASES, array_merge( is_array( $stored ) ? $stored : [], $written ) );
+			Meta_Guard::writing( static fn() => update_post_meta( $root, Markers::ALIASES, array_merge( is_array( $stored ) ? $stored : [], $written ) ) );
 		}
 		return $job;
 	}

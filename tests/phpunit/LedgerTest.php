@@ -10,6 +10,7 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Meta_Guard;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
 use WP_UnitTestCase;
@@ -617,7 +618,7 @@ final class LedgerTest extends WP_UnitTestCase {
 	 * @return int Meta ID.
 	 */
 	private function old_entry( int $post_id, string $path ): int {
-		return (int) add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true );
+		return (int) Meta_Guard::writing( static fn() => add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true ) );
 	}
 
 	/**
@@ -781,7 +782,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		Ledger::schedule_rebuild();
 		// Another request read the list before the rebuild wrote it, and writes after:
 		// it records an entry, and its view knew nothing of a or b, whose row it deleted.
-		$new   = (int) add_post_meta( $this->about, Ledger::key( 'page', 'new' ), 'new', true );
+		$new   = (int) Meta_Guard::writing( fn() => add_post_meta( $this->about, Ledger::key( 'page', 'new' ), 'new', true ) );
 		$after = static function () use ( $wpdb, $new, $meanwhile, $b ): void {
 			static $done = false;
 			if ( $done ) {
@@ -910,7 +911,7 @@ final class LedgerTest extends WP_UnitTestCase {
 				'post_name' => 'guide',
 			]
 		);
-		$entry = (int) add_post_meta( $doc, Ledger::key( 'hg_docs', 'manual' ), 'manual', true );
+		$entry = (int) Meta_Guard::writing( static fn() => add_post_meta( $doc, Ledger::key( 'hg_docs', 'manual' ), 'manual', true ) );
 		$only  = static fn(): array => [ 'page' ];
 		add_filter( 'hierarchy_guard_post_types', $only );
 		Post_Types::reset();
@@ -1075,7 +1076,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$one = $this->meta_id( $this->about, 'one' );
 		get_option( Ledger::RECENT );
 		// Another request records an entry: the row is in the database, this request's cache is stale.
-		$other = (int) add_post_meta( $this->about, Ledger::key( 'page', 'other' ), 'other', true );
+		$other = (int) Meta_Guard::writing( fn() => add_post_meta( $this->about, Ledger::key( 'page', 'other' ), 'other', true ) );
 		$wpdb->update(
 			$wpdb->options,
 			[

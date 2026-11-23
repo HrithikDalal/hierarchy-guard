@@ -127,7 +127,7 @@ final class Ledger {
 			return false;
 		}
 
-		$meta_id = add_post_meta( $post_id, $key, $old_path, true );
+		$meta_id = Meta_Guard::writing( static fn() => add_post_meta( $post_id, $key, $old_path, true ) );
 		if ( is_int( $meta_id ) ) {
 			self::remember( (string) $post->post_type, [ $meta_id ] );
 		}
@@ -573,7 +573,7 @@ final class Ledger {
 			if ( null === $target ) {
 				delete_post_meta( $holder, $key );
 			} else {
-				update_post_meta( $holder, $key, $target );
+				Meta_Guard::writing( static fn() => update_post_meta( $holder, $key, $target ) );
 			}
 		} else {
 			$all = $this->root_targets();
