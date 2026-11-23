@@ -50,9 +50,9 @@ final class ProvidersTest extends WP_UnitTestCase {
 	public function test_a_provider_whose_import_needs_more_says_so(): void {
 		$all = ( new Providers() )->all();
 
-		$this->assertStringContainsString( 'wp safe-redirect-manager import', $all['safe-redirect-manager']['note'] );
-		$this->assertStringContainsString( 'PRO', $all['rank-math']['note'] );
-		$this->assertStringContainsString( '301', $all['simple-301']['note'] );
+		$this->assertSame( 'Safe Redirect Manager imports a CSV only from WP-CLI: wp safe-redirect-manager import <file>', $all['safe-redirect-manager']['note'] );
+		$this->assertSame( 'Rank Math imports a CSV only in its PRO version.', $all['rank-math']['note'] );
+		$this->assertSame( 'Simple 301 Redirects imports every row as a 301.', $all['simple-301']['note'] );
 		$this->assertArrayNotHasKey( 'note', $all['redirection'] );
 	}
 

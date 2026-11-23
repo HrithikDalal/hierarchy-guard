@@ -356,7 +356,6 @@ export default function RedirectsModal( {
 							) }
 					</div>
 					{ data.total > 0 &&
-						! serving &&
 						importNotes( provider ).map( ( note ) => (
 							<p key={ note } className="description">
 								{ note }

@@ -255,6 +255,7 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 			'array'            => [ [ 'yoast' ] ],
 			'two layouts'      => [ 'yoast,redirection' ],
 			'path to a layout' => [ '../yoast' ],
+			'slashed'          => [ "yoast\\'" ],
 		];
 	}
 
