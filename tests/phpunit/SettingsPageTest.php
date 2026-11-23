@@ -162,6 +162,23 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '/value="page"[^>]*checked/', $html );
 		$this->assertStringNotContainsString( 'value="post"', $html );
 		$this->assertStringContainsString( 'Public hierarchical post types appear here automatically.', $html );
+		$this->assertStringNotContainsString( 'messages say', $html, 'Pages is the only type listed: nothing to explain.' );
+	}
+
+	public function test_with_another_type_listed_the_field_says_messages_speak_of_pages(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		ob_start();
+		$this->page->render_post_types();
+		$html = (string) ob_get_clean();
+		unregister_post_type( 'hg_docs' );
+
+		$this->assertStringContainsString( '<p class="description">Public hierarchical post types appear here automatically. Hierarchy Guard’s messages say “page” and “subpage” for every post type.</p>', $html );
 	}
 
 	public function test_post_types_field_always_submits_the_key(): void {

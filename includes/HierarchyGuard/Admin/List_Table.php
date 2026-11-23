@@ -183,7 +183,9 @@ final class List_Table {
 
 		if ( 'search' === $mode && $above instanceof WP_Post ) {
 			$ancestors = get_post_ancestors( $post );
-			$parts[]   = '<span class="screen-reader-text">' . esc_html( _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) ) . ' </span>' . $this->trail( $type, $ancestors );
+			// The type's own label names one parent; a trail of several takes the plural.
+			$label   = count( $ancestors ) > 1 ? _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) : Post_Types::label( $type, 'parent_item_colon', __( 'Parent page:', 'hierarchy-guard' ) );
+			$parts[] = '<span class="screen-reader-text">' . esc_html( $label ) . ' </span>' . $this->trail( $type, $ancestors );
 		} elseif ( '' === $mode && $above instanceof WP_Post ) {
 			$title = _draft_or_post_title( $parent );
 			// Core refuses to edit a page in the Trash.
@@ -193,7 +195,7 @@ final class List_Table {
 				/* translators: %s: title of a parent page that is in the trash. */
 				$name = sprintf( esc_html__( '%s (in the Trash)', 'hierarchy-guard' ), $name );
 			}
-			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent page:', 'hierarchy-guard' ) . ' </span>' . $name;
+			$parts[] = '<span class="screen-reader-text">' . esc_html( Post_Types::label( $type, 'parent_item_colon', __( 'Parent page:', 'hierarchy-guard' ) ) ) . ' </span>' . $name;
 		}
 		if ( $count > 0 ) {
 			$this->request_list_script();
@@ -326,7 +328,7 @@ final class List_Table {
 		foreach ( array_reverse( $ancestors ) as $ancestor_id ) {
 			$ancestor_id = (int) $ancestor_id;
 			if ( ! current_user_can( 'read_post', $ancestor_id ) ) {
-				$crumbs[] = esc_html__( '(private page)', 'hierarchy-guard' );
+				$crumbs[] = esc_html_x( '(private)', 'title of a page the user can’t read', 'hierarchy-guard' );
 				continue;
 			}
 			$title = _draft_or_post_title( $ancestor_id );
@@ -416,7 +418,7 @@ final class List_Table {
 		foreach ( array_reverse( get_post_ancestors( $root ) ) as $ancestor_id ) {
 			$crumbs[] = current_user_can( 'read_post', (int) $ancestor_id )
 				? sprintf( '<a href="%s">%s</a>', esc_url( self::filter_url( $type, (int) $ancestor_id ) ), _draft_or_post_title( (int) $ancestor_id ) )
-				: esc_html__( '(private page)', 'hierarchy-guard' );
+				: esc_html_x( '(private)', 'title of a page the user can’t read', 'hierarchy-guard' );
 		}
 		$crumbs[] = '<strong>' . _draft_or_post_title( $root ) . '</strong>';
 
@@ -437,7 +439,7 @@ final class List_Table {
 			/* translators: %s: the filtered page, after its ancestors, such as "Company › About". */
 			printf( esc_html__( 'Subpages of %s', 'hierarchy-guard' ), $trail ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
 		}
-		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Show all pages', 'hierarchy-guard' ) );
+		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html( Post_Types::label( $type, 'all_items', __( 'Show all pages', 'hierarchy-guard' ) ) ) );
 		echo '</span>';
 	}
 

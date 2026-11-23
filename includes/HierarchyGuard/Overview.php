@@ -196,7 +196,7 @@ final class Overview {
 	public static function ref( int $post_id ): array {
 		return [
 			'id'        => $post_id,
-			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : __( '(private page)', 'hierarchy-guard' ),
+			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : _x( '(private)', 'title of a page the user can’t read', 'hierarchy-guard' ),
 			'edit_link' => 'trash' !== get_post_status( $post_id ) ? self::edit_link( $post_id ) : null,
 		];
 	}

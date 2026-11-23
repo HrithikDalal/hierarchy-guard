@@ -373,7 +373,12 @@ final class Settings_Page {
 				esc_html( $type->labels->name )
 			);
 		}
-		echo '<p class="description">' . esc_html__( 'Public hierarchical post types appear here automatically.', 'hierarchy-guard' ) . '</p>';
+		$help = __( 'Public hierarchical post types appear here automatically.', 'hierarchy-guard' );
+		if ( [] !== array_diff( array_keys( $types ), [ 'page' ] ) ) {
+			// Sentences can't take a type's own words; the type's labels appear where core has them.
+			$help .= ' ' . __( 'Hierarchy Guard’s messages say “page” and “subpage” for every post type.', 'hierarchy-guard' );
+		}
+		echo '<p class="description">' . esc_html( $help ) . '</p>';
 		echo '</fieldset>';
 	}
 

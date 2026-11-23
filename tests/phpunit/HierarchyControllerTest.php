@@ -939,9 +939,9 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 
 		$data = $this->get( '/posts/' . $this->ids['about'] . '/hierarchy' )->get_data();
 
-		$this->assertSame( [ '(private page)' ], array_column( $data['ancestors'], 'title' ) );
+		$this->assertSame( [ '(private)' ], array_column( $data['ancestors'], 'title' ) );
 		$this->assertArrayNotHasKey( 'status', $data['ancestors'][0], 'Nothing reads it, and the user may not read the ancestor.' );
-		$this->assertSame( '(private page)', $data['trash_to']['title'] );
+		$this->assertSame( '(private)', $data['trash_to']['title'] );
 	}
 
 	public function test_an_ancestor_in_the_trash_has_no_edit_link(): void {
