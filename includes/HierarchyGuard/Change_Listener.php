@@ -316,25 +316,22 @@ final class Change_Listener {
 	 * @param string $post_type Its post type.
 	 */
 	private function record_on_children( int $post_id, string $post_type ): void {
-		$children = get_posts(
-			[
-				'post_parent'            => $post_id,
-				'post_type'              => $post_type,
-				'post_status'            => array_values( array_diff( array_keys( get_post_stati() ), [ 'auto-draft', 'inherit' ] ) ),
-				'posts_per_page'         => Subtree::count_cap(),
-				'orderby'                => 'ID',
-				'order'                  => 'ASC',
-				'no_found_rows'          => true,
-				'update_post_term_cache' => false,
-			]
-		);
+		$ids = Subtree::children_in_any_status( $post_id, $post_type, Subtree::count_cap() );
 
 		Ledger::deferred(
-			function () use ( $children ): void {
-				foreach ( $children as $child ) {
-					$was = 'trash' === $child->post_status ? (string) get_post_meta( $child->ID, '_wp_trash_meta_status', true ) : (string) $child->post_status;
-					if ( 'publish' === $was ) {
-						$this->ledger->record( (int) $child->ID, Paths::untrashed_uri( $child ) );
+			function () use ( $ids ): void {
+				// A hundred posts and their meta at a time, never the whole cap at once.
+				foreach ( array_chunk( $ids, 100 ) as $chunk ) {
+					_prime_post_caches( $chunk, false, true );
+					foreach ( $chunk as $id ) {
+						$child = get_post( $id );
+						if ( ! $child instanceof WP_Post ) {
+							continue;
+						}
+						$was = 'trash' === $child->post_status ? (string) get_post_meta( $id, '_wp_trash_meta_status', true ) : (string) $child->post_status;
+						if ( 'publish' === $was ) {
+							$this->ledger->record( $id, Paths::untrashed_uri( $child ) );
+						}
 					}
 				}
 			}
@@ -413,25 +410,12 @@ final class Change_Listener {
 
 	/**
 	 * Whether a post has at least one child of the same type, in any status:
-	 * core re-parents trashed and auto-draft children too. One indexed query.
+	 * core re-parents trashed and auto-draft children too.
 	 *
 	 * @param int    $post_id   Post ID.
 	 * @param string $post_type Post type name.
 	 */
 	private function has_children( int $post_id, string $post_type ): bool {
-		$children = get_posts(
-			[
-				'post_parent'            => $post_id,
-				'post_type'              => $post_type,
-				'post_status'            => array_keys( get_post_stati() ),
-				'posts_per_page'         => 1,
-				'fields'                 => 'ids',
-				'no_found_rows'          => true,
-				'update_post_meta_cache' => false,
-				'update_post_term_cache' => false,
-			]
-		);
-
-		return ! empty( $children );
+		return [] !== Subtree::children_in_any_status( $post_id, $post_type, 1 );
 	}
 }

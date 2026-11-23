@@ -341,13 +341,18 @@ final class Ledger {
 	}
 
 	/**
-	 * Whether a post holds any ledger entry.
+	 * Whether a post holds any ledger entry. For a post being deleted for
+	 * good, begin_delete() has read its entries already.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return bool
 	 */
 	public static function has_entries( int $post_id ): bool {
 		global $wpdb;
+
+		if ( isset( self::$deleting[ $post_id ] ) ) {
+			return [] !== self::$deleting[ $post_id ];
+		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the post_id index that stops at the first entry; once per post trashed, restored or deleted.
 		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s LIMIT 1", $post_id, $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );

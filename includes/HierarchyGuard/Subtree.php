@@ -94,6 +94,29 @@ final class Subtree {
 	}
 
 	/**
+	 * Direct children in any status, lowest ID first, as core's own
+	 * re-parent on a delete finds them: one read of the post_parent index
+	 * that stops at the limit, never sorting every child, and no query
+	 * filter of another plugin narrows it.
+	 *
+	 * @param int    $parent_id Parent post ID.
+	 * @param string $post_type Post type name.
+	 * @param int    $limit     Maximum IDs to return.
+	 * @return int[]
+	 */
+	public static function children_in_any_status( int $parent_id, string $post_type, int $limit ): array {
+		global $wpdb;
+
+		if ( $limit < 1 ) {
+			return [];
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Index range on post_parent, bounded by LIMIT; once per post deleted for good.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = %s ORDER BY ID ASC LIMIT %d", $parent_id, $post_type, $limit ) );
+
+		return array_map( 'intval', $ids );
+	}
+
+	/**
 	 * Number of live direct children, stopping at a cap.
 	 *
 	 * @param int    $parent_id Parent post ID.

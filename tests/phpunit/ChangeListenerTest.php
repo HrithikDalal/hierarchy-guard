@@ -613,6 +613,48 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$this->assertSame( $leadership, $resolved->ID );
 	}
 
+	public function test_deleting_a_page_reads_its_entries_once_and_its_children_without_a_sort(): void {
+		global $wpdb;
+		$queries = [];
+		$keep    = static function ( string $sql ) use ( &$queries ): string {
+			$queries[] = $sql;
+			return $sql;
+		};
+		add_filter( 'query', $keep );
+
+		wp_delete_post( $this->team, true );
+
+		remove_filter( 'query', $keep );
+		$entries  = array_filter( $queries, fn( string $sql ): bool => str_contains( $sql, "post_id = {$this->team} AND meta_key LIKE" ) );
+		$children = array_filter( $queries, fn( string $sql ): bool => str_contains( $sql, "post_parent = {$this->team}" ) );
+		$this->assertCount( 1, $entries, 'begin_delete() reads the entries; has_entries() reuses that read.' );
+		$this->assertNotEmpty( $children );
+		foreach ( $children as $sql ) {
+			$this->assertStringNotContainsString( 'post_date', $sql, 'No query sorts every child to find one.' );
+			$this->assertStringContainsString( "FROM {$wpdb->posts}", $sql );
+		}
+	}
+
+	public function test_a_subpage_trashed_with_its_parent_and_deleted_for_good_records_each_published_subpage_past_a_hundred(): void {
+		$kids = [];
+		for ( $i = 1; $i <= 120; $i++ ) {
+			$kids[] = self::factory()->post->create(
+				[
+					'post_type'   => 'page',
+					'post_name'   => "kid-{$i}",
+					'post_parent' => $this->team,
+				]
+			);
+		}
+		wp_trash_post( $this->team );
+		Markers::add( $this->team, Markers::trashed_key( $this->about ), '1' );
+
+		wp_delete_post( $this->team, true );
+
+		$this->assertSame( [ 'company/about/team/kid-120' ], $this->ledger->paths_for( end( $kids ) ) );
+		$this->assertSame( [ 'company/about/team/kid-1' ], $this->ledger->paths_for( $kids[0] ) );
+	}
+
 	public function test_deleting_a_subpage_trashed_with_its_parent_records_nothing(): void {
 		self::factory()->post->create(
 			[
