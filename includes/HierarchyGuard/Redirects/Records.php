@@ -37,8 +37,11 @@ final class Records {
 	public const STATUS_ACTIVE      = 'active';
 	public const STATUS_IN_USE      = 'in_use';
 	public const STATUS_UNPUBLISHED = 'unpublished';
-	public const STATUS_REFUSED     = 'refused';
+	public const STATUS_TOO_DEEP    = 'too_deep';
+	public const STATUS_LOOP        = 'loop';
+	public const STATUS_CHAINED     = 'chained';
 	public const STATUS_OFF         = 'off';
+	public const STATUS_PLAIN       = 'plain';
 
 	/**
 	 * Ledger.
@@ -200,13 +203,14 @@ final class Records {
 	 * - unpublished: the page the record points to is not published, or its
 	 *   holder is in the Trash, which the resolver passes over. A row whose
 	 *   own holder is in the Trash reads so before anything else;
-	 * - refused: the server can't send it, whether built-in redirects are on
-	 *   or off: a path deeper than its segment cap, which it refuses before
-	 *   it looks, counting for a top-level root-list entry the segment of the
-	 *   URLs under it; a URL target at the old URL itself; or a URL target
-	 *   that is another old URL this plugin redirects, which the server
-	 *   never sends (Server::redirected());
-	 * - off: built-in redirects are off, or the site has plain permalinks;
+	 * - too deep, loop, chained: the server can't send it, whether built-in
+	 *   redirects are on or off: a path deeper than its segment cap, which it
+	 *   refuses before it looks, counting for a top-level root-list entry the
+	 *   segment of the URLs under it; a URL target at the old URL itself; or
+	 *   a URL target that is another old URL this plugin redirects, which the
+	 *   server never sends (Server::redirected());
+	 * - off: built-in redirects are off;
+	 * - plain: the site has plain permalinks, under which nothing is served;
 	 * - active: otherwise.
 	 *
 	 * The checks run for these rows only, one page at most: one lookup of
@@ -216,7 +220,6 @@ final class Records {
 	 * @return array<string,string> One of the STATUS_ constants by row ID.
 	 */
 	public function statuses( array $rows ): array {
-		$serving  = Settings::serve_redirects() && '' !== (string) get_option( 'permalink_structure' );
 		$resolver = new Resolver( $this->ledger );
 		Batch_Resolver::prime_with_ancestors( array_values( array_filter( array_column( $rows, 'holder' ) ) ) );
 
@@ -233,15 +236,17 @@ final class Records {
 				$status = self::STATUS_IN_USE;
 			} elseif ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
 				$status = self::STATUS_UNPUBLISHED;
-			} elseif (
+			} elseif ( self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 ) ) {
 				// A top-level root-list entry serves only the URLs one segment under it.
-				self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 )
-				|| self::loops( $type, $path, $url )
-				|| ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) )
-			) {
-				$status = self::STATUS_REFUSED;
-			} elseif ( ! $serving ) {
+				$status = self::STATUS_TOO_DEEP;
+			} elseif ( self::loops( $type, $path, $url ) ) {
+				$status = self::STATUS_LOOP;
+			} elseif ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) ) {
+				$status = self::STATUS_CHAINED;
+			} elseif ( ! Settings::serve_redirects() ) {
 				$status = self::STATUS_OFF;
+			} elseif ( '' === (string) get_option( 'permalink_structure' ) ) {
+				$status = self::STATUS_PLAIN;
 			} else {
 				$status = self::STATUS_ACTIVE;
 			}

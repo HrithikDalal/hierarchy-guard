@@ -208,7 +208,7 @@ final class Notices {
 		}
 
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
-		$message = esc_html( sprintf( _n( '%s old URL now shows “Page not found”.', '%s old URLs now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) ) . ' ' . $view;
+		$message = esc_html( sprintf( _n( '%s old URL may now show “Page not found”.', '%s old URLs may now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) ) . ' ' . $view;
 		if ( current_user_can( 'manage_options' ) ) {
 			$message .= sprintf( '<span aria-hidden="true"> ·</span> <a href="%1$s">%2$s</a>', esc_url( Settings_Page::redirects_url() ), esc_html__( 'Set up redirects', 'hierarchy-guard' ) );
 		}
@@ -256,7 +256,7 @@ final class Notices {
 		if ( null !== $this->shown ) {
 			$notice = $this->urls_notice( $this->shown );
 			if ( null !== $notice ) {
-				do_action( 'hierarchy_guard_list_script' );
+				do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 				self::print_urls( $notice );
 			}
 			// The trash notice on this load already says what is still running and what to do.
@@ -277,7 +277,7 @@ final class Notices {
 		}
 
 		if ( $this->wants_nudge() ) {
-			do_action( 'hierarchy_guard_list_script' );
+			do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 			wp_admin_notice(
 				sprintf(
 					'%1$s <a href="%2$s">%3$s</a>',
@@ -343,7 +343,7 @@ final class Notices {
 			return false;
 		}
 		// The list script turns its download link into the modal's button.
-		do_action( 'hierarchy_guard_list_script' );
+		do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 		self::print_urls( $notice );
 		return true;
 	}
@@ -421,7 +421,7 @@ final class Notices {
 		$rest = count( $running ) - count( $first );
 		if ( $rest > 0 && [] !== $out ) {
 			/* translators: %s: number of pages. */
-			$out[] = sprintf( _n( 'The subpages of %s more page are still being worked on in the background.', 'The subpages of %s more pages are still being worked on in the background.', $rest, 'hierarchy-guard' ), number_format_i18n( $rest ) );
+			$out[] = sprintf( _n( 'The subpages of %s more page are still being processed in the background.', 'The subpages of %s more pages are still being processed in the background.', $rest, 'hierarchy-guard' ), number_format_i18n( $rest ) );
 		}
 		return $out;
 	}
@@ -499,7 +499,9 @@ final class Notices {
 		foreach ( $roots as $root ) {
 			if ( ! empty( $root['job'] ) ) {
 				$out[] = Settings::POLICY_TRASH_CHILDREN === $root['policy']
+					/* translators: "The rest" are the subpages not yet moved to the Trash. */
 					? __( 'The rest are still going to the Trash in the background.', 'hierarchy-guard' )
+					/* translators: "The rest" are the subpages not yet moved. */
 					: __( 'The rest are still moving in the background.', 'hierarchy-guard' );
 				break;
 			}
@@ -595,7 +597,7 @@ final class Notices {
 
 		if ( $counts['left'] > 0 ) {
 			/* translators: %s: number of subpages. */
-			$out[] = sprintf( _n( '%s subpage couldn’t be brought back and stayed where it is.', '%s subpages couldn’t be brought back and stayed where they are.', $counts['left'], 'hierarchy-guard' ), number_format_i18n( $counts['left'] ) );
+			$out[] = sprintf( _n( '%s subpage couldn’t be restored and stayed where it is.', '%s subpages couldn’t be restored and stayed where they are.', $counts['left'], 'hierarchy-guard' ), number_format_i18n( $counts['left'] ) );
 		}
 
 		if ( $counts['renamed'] > 0 ) {

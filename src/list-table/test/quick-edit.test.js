@@ -7,7 +7,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock( '@wordpress/a11y', () => ( { speak: vi.fn() } ) );
 
 const { speak } = await import( '@wordpress/a11y' );
-const { speakAfterSave } = await import( '../quick-edit-words' );
+const { default: config } = await import( '../../common/config' );
+const { speakAfterSave, warningText } = await import( '../quick-edit-words' );
+
+describe( 'the Quick Edit warning', () => {
+	afterEach( () => {
+		config.serving = false;
+	} );
+
+	it( 'says what happens to the old URLs, as the editors do', () => {
+		config.serving = false;
+		expect( warningText( { count: 3, capped: false } ) ).toBe(
+			'Saving will change the URLs of this page and of its 3 subpages. After you save, you’ll see the redirects to add.'
+		);
+
+		config.serving = true;
+		expect( warningText( { count: 1, capped: false } ) ).toBe(
+			'Saving will change the URL of this page and of its 1 subpage. The old URLs will redirect to the new ones.'
+		);
+	} );
+} );
 
 describe( 'the announcement after a Quick Edit save', () => {
 	let finish;

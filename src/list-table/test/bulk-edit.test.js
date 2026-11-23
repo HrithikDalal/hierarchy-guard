@@ -67,7 +67,7 @@ describe( 'the Bulk Edit warning', () => {
 
 		expect( box().hidden ).toBe( false );
 		expect( box().textContent ).toBe(
-			'Saving will change the URLs of the selected pages and of the subpages under 2 of them. You’ll get the redirects to add after saving.'
+			'Saving will change the URLs of the selected pages and of the subpages under 2 of them. After you save, you’ll see the redirects to add.'
 		);
 		expect(
 			window.document

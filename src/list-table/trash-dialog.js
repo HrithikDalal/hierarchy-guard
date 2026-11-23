@@ -196,7 +196,10 @@ export default function TrashDialog( {
 						aria-controls="hierarchy-guard-options"
 						onClick={ () => setExpanded( ! expanded ) }
 					>
-						{ __( 'Other options', 'hierarchy-guard' ) }
+						{ __(
+							'Change what happens to the subpages',
+							'hierarchy-guard'
+						) }
 					</Button>
 					<fieldset
 						id="hierarchy-guard-options"

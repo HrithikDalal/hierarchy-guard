@@ -129,7 +129,7 @@ describe( 'the trash dialog', () => {
 				1000
 			)
 		).toBe(
-			'“Team” has 1 subpage. It will move up under “Studio” and get a new URL.'
+			'“Team” has 1 subpage. It’ll move up under “Studio” and get a new URL.'
 		);
 	} );
 
@@ -141,12 +141,12 @@ describe( 'the trash dialog', () => {
 
 	it( 'describes trashing the subpages too, and the fallback past the cap', () => {
 		expect( trashSentence( team, 'trash_children', 1000 ) ).toBe(
-			'“Team” has 2 subpages directly under it, 3 in all. They go to the Trash too, and come back with their statuses if you restore “Team”.'
+			'“Team” has 2 subpages directly under it, 3 in all. They go to the Trash too. Restoring “Team” restores them with their original status.'
 		);
 		expect(
 			trashSentence( { ...team, fallback: true }, 'trash_children', 1000 )
 		).toBe(
-			'“Team” has 2 subpages directly under it, 3 in all. That is more than 1,000, so they’ll move up one level instead of going to the Trash.'
+			'“Team” has 2 subpages directly under it, 3 in all. That’s more than 1,000, so they’ll move up one level instead of going to the Trash.'
 		);
 	} );
 
@@ -213,7 +213,7 @@ describe( 'the trash dialog', () => {
 				1000
 			)
 		).toBe(
-			'2 of the selected pages have subpages, 1,000+ in all. The subpages go to the Trash too, and come back with their statuses if you restore their parent. A page with more than 1,000 subpages has them moved up instead.'
+			'2 of the selected pages have subpages, 1,000+ in all. The subpages go to the Trash too. Restoring their parent restores them with their original status. A page with more than 1,000 subpages has them moved up instead.'
 		);
 	} );
 
@@ -239,12 +239,36 @@ describe( 'the trash dialog', () => {
 		).toBe( 'Not available: there are more than 1,000.' );
 	} );
 
+	it( 'says “it” or “them” for the subpages a restore brings back, as many as there are', () => {
+		expect(
+			optionDescription(
+				'trash_children',
+				{
+					...team,
+					title: 'Solo',
+					descendants: { count: 1, capped: false },
+				},
+				1000
+			)
+		).toBe( 'Restoring “Solo” restores it with its original status.' );
+		expect(
+			optionDescription(
+				'trash_children',
+				{ ...team, descendants: { count: 3, capped: false } },
+				1000
+			)
+		).toBe( 'Restoring “Team” restores them with their original status.' );
+		expect( optionDescription( 'trash_children', null, 1000 ) ).toBe(
+			'Restoring their parent restores them with their original status.'
+		);
+	} );
+
 	it( 'names the right that is missing, and what an error leads to', () => {
 		expect( deniedSentence( 'reparent' ) ).toBe(
 			'You can’t edit some of the subpages. They’ll stay where they are.'
 		);
 		expect( deniedSentence( 'trash_children' ) ).toBe(
-			'You can’t delete some of the subpages. They’ll stay where they are.'
+			'You can’t move some of the subpages to the Trash. They’ll stay where they are.'
 		);
 		expect( previewError( 'keep' ) ).toBe(
 			'The subpages couldn’t be checked. If you continue, they’ll stay where they are.'
@@ -255,19 +279,19 @@ describe( 'the trash dialog', () => {
 describe( 'warnings and outcomes', () => {
 	it( 'warns before a save changes subpage URLs', () => {
 		expect( saveWarning( 12, false, false ) ).toBe(
-			'Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving.'
+			'Saving will change the URLs of this page and of its 12 subpages. After you save, you’ll see the redirects to add.'
 		);
 		expect( saveWarning( 1, false, true ) ).toBe(
-			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones.'
+			'Saving will change the URL of this page and of its 1 subpage. The old URLs will redirect to the new ones.'
 		);
 		expect( quickEditWarning( 5, false ) ).toBe(
-			'Saving changes this page’s URL and the URLs of 5 subpages.'
+			'Saving will change the URLs of this page and of its 5 subpages.'
 		);
 	} );
 
 	it( 'warns in Bulk Edit with the same next step', () => {
 		expect( bulkEditWarning( 2, false ) ).toBe(
-			'Saving will change the URLs of the selected pages and of the subpages under 2 of them. You’ll get the redirects to add after saving.'
+			'Saving will change the URLs of the selected pages and of the subpages under 2 of them. After you save, you’ll see the redirects to add.'
 		);
 		expect( bulkEditWarning( 1, true ) ).toBe(
 			'Saving will change the URLs of the selected pages and of the subpages under 1 of them. The old URLs will redirect to the new ones.'
@@ -276,10 +300,10 @@ describe( 'warnings and outcomes', () => {
 
 	it( 'composes the classic confirmation from the save warning', () => {
 		expect( classicConfirm( 12, false, false ) ).toBe(
-			'Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving. Continue?'
+			'Saving will change the URLs of this page and of its 12 subpages. After you save, you’ll see the redirects to add. Continue?'
 		);
 		expect( classicConfirm( 1, false, true ) ).toBe(
-			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones. Continue?'
+			'Saving will change the URL of this page and of its 1 subpage. The old URLs will redirect to the new ones. Continue?'
 		);
 	} );
 
@@ -294,7 +318,7 @@ describe( 'warnings and outcomes', () => {
 			'2 URLs changed. Add their redirects in your redirect plugin.'
 		);
 		expect( changedSentence( 1, false, false, null ) ).toBe(
-			'1 old URL now shows “Page not found”.'
+			'1 old URL may now show “Page not found”.'
 		);
 		expect( changedStatus( true, null ) ).toBe( 'success' );
 		expect( changedStatus( false, { name: 'Redirection' } ) ).toBe(

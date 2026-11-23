@@ -160,7 +160,7 @@ final class Changes_Controller {
 			$message  = null !== $change ? __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ' : '';
 			$message .= sprintf(
 				/* translators: %s: number of minutes. */
-				_n( 'They are kept for %s minute.', 'They are kept for %s minutes.', $minutes, 'hierarchy-guard' ),
+				_n( 'Each change’s redirects are listed for %s minute.', 'Each change’s redirects are listed for %s minutes.', $minutes, 'hierarchy-guard' ),
 				number_format_i18n( $minutes )
 			);
 			return self::gone( $message );

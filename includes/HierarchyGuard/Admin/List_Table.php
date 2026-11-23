@@ -193,10 +193,10 @@ final class List_Table {
 				/* translators: %s: title of a parent page that is in the trash. */
 				$name = sprintf( esc_html__( '%s (in the Trash)', 'hierarchy-guard' ), $name );
 			}
-			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent:', 'hierarchy-guard' ) . ' </span>' . $name;
+			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent page:', 'hierarchy-guard' ) . ' </span>' . $name;
 		}
 		if ( $count > 0 ) {
-			$this->signal();
+			$this->request_list_script();
 			$shown = Subtree::format_count( min( $count, $cap ), $count > $cap );
 			/* translators: %s: number of subpages, such as 3 or 1,000+. */
 			$label = sprintf( _n( '%s subpage', '%s subpages', min( $count, $cap ), 'hierarchy-guard' ), $shown );
@@ -244,7 +244,7 @@ final class List_Table {
 		$title = _draft_or_post_title( $post );
 
 		if ( $count > 0 && current_user_can( 'edit_post', $id ) ) {
-			$this->signal();
+			$this->request_list_script();
 			// An opened row closes to its parent, at the page of subpages it is on.
 			$href = $open ? Tree_View::place_url( $type, $row['parent'], $row['page'] ) : Tree_View::place_url( $type, $id );
 			array_unshift(
@@ -410,7 +410,7 @@ final class List_Table {
 		if ( 'top' !== $which || ! self::is_root( $root, $type ) ) {
 			return;
 		}
-		$this->signal();
+		$this->request_list_script();
 
 		$crumbs = [];
 		foreach ( array_reverse( get_post_ancestors( $root ) ) as $ancestor_id ) {
@@ -619,7 +619,7 @@ final class List_Table {
 	/**
 	 * Asks once for the list-table script: this screen prints something it acts on.
 	 */
-	private function signal(): void {
+	private function request_list_script(): void {
 		if ( ! $this->signalled ) {
 			$this->signalled = true;
 			/**
@@ -627,7 +627,7 @@ final class List_Table {
 			 *
 			 * @internal
 			 */
-			do_action( 'hierarchy_guard_list_script' );
+			do_action( self::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 		}
 	}
 

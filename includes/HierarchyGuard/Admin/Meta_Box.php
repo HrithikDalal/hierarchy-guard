@@ -106,7 +106,7 @@ final class Meta_Box {
 			echo esc_html( self::counts_line( $data ) ) . '</p><ul class="hierarchy-guard-box__children">';
 			foreach ( $data['children'] as $child ) {
 				$note = (int) $child['children_count'] > 0
-					/* translators: %s: number of subpages. */
+					/* translators: %s: number of subpages, such as 3 or 1,000+. */
 					? sprintf( _n( '%s subpage', '%s subpages', (int) $child['children_count'], 'hierarchy-guard' ), Subtree::format_count( (int) $child['children_count'], (bool) $child['children_capped'] ) )
 					: '';
 				$state = 'publish' !== $child['status'] ? (string) $child['status_label'] : '';

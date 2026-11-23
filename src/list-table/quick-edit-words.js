@@ -4,17 +4,18 @@
  */
 import { speak } from '@wordpress/a11y';
 import { __ } from '@wordpress/i18n';
-import { quickEditWarning } from '../common/copy';
+import config from '../common/config';
+import { saveWarning } from '../common/copy';
 
 /**
  * The warning in the Quick Edit form of a page whose subpages' URLs a save
- * would change.
+ * would change, with what happens to the old URLs, as in the editors.
  *
  * @param {{count: number, capped: boolean}} descendants The page's subpages at every level.
- * @return {string} Sentence.
+ * @return {string} Two sentences.
  */
 export function warningText( descendants ) {
-	return quickEditWarning( descendants.count, descendants.capped );
+	return saveWarning( descendants.count, descendants.capped, config.serving );
 }
 
 /**

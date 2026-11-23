@@ -10,7 +10,7 @@ import {
 	Spinner,
 } from '@wordpress/components';
 import { useEffect, useRef, useState } from '@wordpress/element';
-import { __, sprintf } from '@wordpress/i18n';
+import { __, _x, sprintf } from '@wordpress/i18n';
 import { csvUrl, fetchPairs } from './api';
 import config from './config';
 import {
@@ -194,7 +194,7 @@ export default function RedirectsModal( {
 		intro = __( 'Add these in your redirect plugin.', 'hierarchy-guard' );
 	} else {
 		intro = __(
-			'Nothing on this site redirects these old URLs yet.',
+			'Nothing on this site redirects these old URLs to their new pages yet.',
 			'hierarchy-guard'
 		);
 	}
@@ -203,7 +203,7 @@ export default function RedirectsModal( {
 		<Modal
 			title={
 				serving
-					? __( 'Redirects', 'hierarchy-guard' )
+					? _x( 'Redirects', 'modal title', 'hierarchy-guard' )
 					: __( 'Redirects needed', 'hierarchy-guard' )
 			}
 			onRequestClose={ onClose }

@@ -1,7 +1,8 @@
 /**
- * Every sentence the scripts show, in one place so it can be tested.
+ * The scripts' sentences that depend on counts, policies or redirect state,
+ * kept here so they can be tested.
  */
-import { __, _n, sprintf } from '@wordpress/i18n';
+import { __, _n, _x, sprintf } from '@wordpress/i18n';
 import config from './config';
 
 export const POLICIES = [ 'reparent', 'trash_children', 'keep' ];
@@ -152,10 +153,13 @@ function genericTail( policy ) {
 			'The subpages move up one level and get new URLs.',
 			'hierarchy-guard'
 		),
-		trash_children: __(
-			'The subpages go to the Trash too, and come back with their statuses if you restore their parent.',
-			'hierarchy-guard'
-		),
+		trash_children:
+			__( 'The subpages go to the Trash too.', 'hierarchy-guard' ) +
+			' ' +
+			__(
+				'Restoring their parent restores them with their original status.',
+				'hierarchy-guard'
+			),
 		keep: __(
 			'The subpages stay where they are, and their URLs will contain “__trashed” until you move them.',
 			'hierarchy-guard'
@@ -230,54 +234,74 @@ export function trashSentence( page, policy, cap ) {
 					formatCount( children, page.descendants.capped )
 				);
 
-	let tail;
+	// Each sentence is passed as an argument, so the minifier keeps its translator comment beside it.
+	const parts = [ head ];
 	if ( 'trash_children' === policy && true === page.fallback ) {
-		tail = sprintf(
-			/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
-			__(
-				'That is more than %s, so they’ll move up one level instead of going to the Trash.',
-				'hierarchy-guard'
-			),
-			formatCount( cap )
+		parts.push(
+			sprintf(
+				/* translators: %s: the most subpages trashed together with a page, such as 1,000; "they" are the page's subpages. */
+				__(
+					'That’s more than %s, so they’ll move up one level instead of going to the Trash.',
+					'hierarchy-guard'
+				),
+				formatCount( cap )
+			)
 		);
 	} else if ( 'trash_children' === policy ) {
-		tail = sprintf(
-			/* translators: %s: page title. */
+		parts.push(
+			/* translators: "It" or "They" are the subpages of the page being trashed. */
 			_n(
-				'It goes to the Trash too, and comes back with its status if you restore “%s”.',
-				'They go to the Trash too, and come back with their statuses if you restore “%s”.',
+				'It goes to the Trash too.',
+				'They go to the Trash too.',
 				all,
 				'hierarchy-guard'
 			),
-			page.title
+			sprintf(
+				/* translators: %s: page title; "it" or "them" are its subpages. */
+				_n(
+					'Restoring “%s” restores it with its original status.',
+					'Restoring “%s” restores them with their original status.',
+					all,
+					'hierarchy-guard'
+				),
+				page.title
+			)
 		);
 	} else if ( 'keep' === policy ) {
-		tail = _n(
-			'It stays where it is, and its URL changes until you move it.',
-			'They stay where they are, and their URLs change until you move them.',
-			children,
-			'hierarchy-guard'
-		);
-	} else if ( page.to ) {
-		tail = sprintf(
-			/* translators: %s: title of the page the subpages move under. */
+		parts.push(
+			/* translators: "It" or "They" are the subpages of the page being trashed. */
 			_n(
-				'It will move up under “%s” and get a new URL.',
-				'They’ll move up under “%s” and get new URLs.',
+				'It stays where it is, and its URL changes until you move it.',
+				'They stay where they are, and their URLs change until you move them.',
 				children,
 				'hierarchy-guard'
-			),
-			page.to.title
+			)
+		);
+	} else if ( page.to ) {
+		parts.push(
+			sprintf(
+				/* translators: %s: title of the page the subpages move under; "It" or "They" are the subpages. */
+				_n(
+					'It’ll move up under “%s” and get a new URL.',
+					'They’ll move up under “%s” and get new URLs.',
+					children,
+					'hierarchy-guard'
+				),
+				page.to.title
+			)
 		);
 	} else {
-		tail = _n(
-			'It will become a top-level page and get a new URL.',
-			'They’ll become top-level pages and get new URLs.',
-			children,
-			'hierarchy-guard'
+		parts.push(
+			/* translators: "It" or "They" are the subpages of the page being trashed. */
+			_n(
+				'It’ll become a top-level page and get a new URL.',
+				'They’ll become top-level pages and get new URLs.',
+				children,
+				'hierarchy-guard'
+			)
 		);
 	}
-	return head + ' ' + tail;
+	return parts.join( ' ' );
 }
 
 /**
@@ -349,7 +373,7 @@ export function optionLabel( policy, page ) {
 						page.descendants.capped
 					)
 				)
-			: __( 'Trash the subpages too', 'hierarchy-guard' );
+			: __( 'Trash subpages too', 'hierarchy-guard' );
 	}
 	if ( 'keep' === policy ) {
 		return __( 'Leave subpages where they are', 'hierarchy-guard' );
@@ -387,38 +411,56 @@ export function optionDescription( policy, page, cap ) {
 				formatCount( cap )
 			);
 		}
-		return page
-			? sprintf(
-					/* translators: %s: page title. */
-					__(
-						'They come back with their statuses if you restore “%s”.',
-						'hierarchy-guard'
-					),
-					page.title
-				)
-			: __(
-					'They come back with their statuses if you restore their parent.',
-					'hierarchy-guard'
-				);
-	}
-	if ( 'keep' === policy ) {
-		return page && keptUrl( page )
-			? __(
-					'Their URLs change until you move them, for example <from /> becomes <to />.',
-					'hierarchy-guard'
-				)
-			: __(
-					'Their URLs will contain “__trashed” until you move them.',
-					'hierarchy-guard'
-				);
-	}
-	if ( page && page.example ) {
-		return __(
-			'Their URLs change, for example <from /> becomes <to />.',
+		if ( ! page ) {
+			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
+			const any = __(
+				'Restoring their parent restores them with their original status.',
+				'hierarchy-guard'
+			);
+			return any;
+		}
+		/* translators: %s: page title; "it" or "them" are its subpages. */
+		const restores = _n(
+			'Restoring “%s” restores it with its original status.',
+			'Restoring “%s” restores them with their original status.',
+			page.descendants.count,
 			'hierarchy-guard'
 		);
+		return sprintf( restores, page.title );
 	}
-	return __( 'Their URLs change.', 'hierarchy-guard' );
+	// Passed as an argument, as in trashSentence(), for the translator comments.
+	const sentence = [];
+	if ( 'keep' === policy && page && keptUrl( page ) ) {
+		sentence.push(
+			/* translators: "Their" and "them" are the subpages; <from /> and <to /> are replaced by URLs. */
+			__(
+				'Their URLs change until you move them, for example <from /> becomes <to />.',
+				'hierarchy-guard'
+			)
+		);
+	} else if ( 'keep' === policy ) {
+		sentence.push(
+			/* translators: "Their" and "them" are the subpages of the page being trashed. */
+			__(
+				'Their URLs will contain “__trashed” until you move them.',
+				'hierarchy-guard'
+			)
+		);
+	} else if ( page && page.example ) {
+		sentence.push(
+			/* translators: "Their" are the subpages; <from /> and <to /> are replaced by URLs. */
+			__(
+				'Their URLs change, for example <from /> becomes <to />.',
+				'hierarchy-guard'
+			)
+		);
+	} else {
+		sentence.push(
+			/* translators: "Their" are the subpages of the page being trashed. */
+			__( 'Their URLs change.', 'hierarchy-guard' )
+		);
+	}
+	return sentence[ 0 ];
 }
 
 /**
@@ -430,10 +472,16 @@ export function optionDescription( policy, page, cap ) {
 export function deniedSentence( policy ) {
 	const first =
 		'trash_children' === policy
-			? __( 'You can’t delete some of the subpages.', 'hierarchy-guard' )
+			? __(
+					'You can’t move some of the subpages to the Trash.',
+					'hierarchy-guard'
+				)
 			: __( 'You can’t edit some of the subpages.', 'hierarchy-guard' );
 	return (
-		first + ' ' + __( 'They’ll stay where they are.', 'hierarchy-guard' )
+		first +
+		' ' +
+		/* translators: "They" are the subpages the user can't change. */
+		__( 'They’ll stay where they are.', 'hierarchy-guard' )
 	);
 }
 
@@ -445,14 +493,17 @@ export function deniedSentence( policy ) {
  */
 export function previewError( policy ) {
 	const outcomes = {
+		/* translators: "they" are the subpages of the page being trashed. */
 		reparent: __(
 			'If you continue, they’ll move up one level.',
 			'hierarchy-guard'
 		),
+		/* translators: "they" are the subpages of the page being trashed. */
 		trash_children: __(
 			'If you continue, they’ll go to the Trash too.',
 			'hierarchy-guard'
 		),
+		/* translators: "they" are the subpages of the page being trashed. */
 		keep: __(
 			'If you continue, they’ll stay where they are.',
 			'hierarchy-guard'
@@ -487,7 +538,7 @@ export function afterSave( serving ) {
 	return serving
 		? __( 'The old URLs will redirect to the new ones.', 'hierarchy-guard' )
 		: __(
-				'You’ll get the redirects to add after saving.',
+				'After you save, you’ll see the redirects to add.',
 				'hierarchy-guard'
 			);
 }
@@ -519,8 +570,8 @@ export function quickEditWarning( count, capped ) {
 	return sprintf(
 		/* translators: %s: number of subpages, such as 12 or 1,000+. */
 		_n(
-			'Saving changes this page’s URL and the URL of %s subpage.',
-			'Saving changes this page’s URL and the URLs of %s subpages.',
+			'Saving will change the URL of this page and of its %s subpage.',
+			'Saving will change the URLs of this page and of its %s subpages.',
 			count,
 			'hierarchy-guard'
 		),
@@ -620,8 +671,8 @@ export function changedSentence( count, capped, serving, provider ) {
 	return sprintf(
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
 		_n(
-			'%s old URL now shows “Page not found”.',
-			'%s old URLs now show “Page not found”.',
+			'%s old URL may now show “Page not found”.',
+			'%s old URLs may now show “Page not found”.',
 			count,
 			'hierarchy-guard'
 		),
@@ -956,13 +1007,13 @@ export function treeRowLabels( title ) {
 			__( 'Edit “%s”', 'hierarchy-guard' ),
 			title
 		),
-		trash: __( 'Trash', 'hierarchy-guard' ),
+		trash: _x( 'Trash', 'verb', 'hierarchy-guard' ),
 		trashLabel: sprintf(
 			/* translators: %s: page title. */
 			__( 'Move “%s” to the Trash', 'hierarchy-guard' ),
 			title
 		),
-		view: __( 'View', 'hierarchy-guard' ),
+		view: _x( 'View', 'verb', 'hierarchy-guard' ),
 		viewLabel: sprintf(
 			/* translators: %s: page title. */
 			__( 'View “%s”', 'hierarchy-guard' ),

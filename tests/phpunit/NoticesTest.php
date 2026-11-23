@@ -287,7 +287,7 @@ final class NoticesTest extends WP_UnitTestCase {
 
 		$notice = $this->notice->urls_notice( $change );
 		$this->assertSame( 'warning', $notice['type'] );
-		$this->assertStringStartsWith( '4 old URLs now show “Page not found”. <a href="', $notice['message'] );
+		$this->assertStringStartsWith( '4 old URLs may now show “Page not found”. <a href="', $notice['message'] );
 		$this->assertStringContainsString( '/hierarchy-guard/v1/changes/' . $change['id'] . '/csv', $notice['message'] );
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
@@ -313,7 +313,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'notice-warning', $html );
 		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
 		$this->assertStringContainsString( 'is-dismissible', $html );
-		$this->assertStringContainsString( '4 old URLs now show “Page not found”.', $html );
+		$this->assertStringContainsString( '4 old URLs may now show “Page not found”.', $html );
 		$this->assertStringContainsString( 'changes/' . $change['id'] . '/csv', $html, 'Without JavaScript the link downloads the CSV.' );
 		$this->assertStringContainsString( 'download>Download redirects (CSV)</a>', $html );
 		$this->assertSame( 0, did_action( 'hierarchy_guard_list_script' ) - $before, 'The edit screen needs no list script.' );
@@ -376,7 +376,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$html = $this->rendered();
 
 		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
-		$this->assertStringContainsString( '4 old URLs now show “Page not found”.', $html );
+		$this->assertStringContainsString( '4 old URLs may now show “Page not found”.', $html );
 		$this->assertStringContainsString( 'data-change="' . $change['id'] . '"', $html );
 		$this->assertSame( 1, did_action( 'hierarchy_guard_list_script' ) - $before, 'The list script turns its link into the modal’s button.' );
 		$this->assertStringNotContainsString( 'hierarchy-guard-nudge', $html, 'Never beside the nudge.' );
@@ -537,7 +537,7 @@ final class NoticesTest extends WP_UnitTestCase {
 
 	public function test_restore_sentences(): void {
 		$this->assertSame(
-			[ '2 subpages moved back under “About”.', '3 subpages were restored with it.', '1 subpage couldn’t be brought back and stayed where it is.', '1 subpage couldn’t get its old URL back.' ],
+			[ '2 subpages moved back under “About”.', '3 subpages were restored with it.', '1 subpage couldn’t be restored and stayed where it is.', '1 subpage couldn’t get its old URL back.' ],
 			Notices::sentences(
 				$this->change(
 					'restore',
@@ -662,7 +662,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$notice = $this->urls_notice();
 
 		$this->assertSame( 'warning', $notice['type'] );
-		$this->assertStringStartsWith( '3 old URLs now show “Page not found”. <a href="', $notice['message'] );
+		$this->assertStringStartsWith( '3 old URLs may now show “Page not found”. <a href="', $notice['message'] );
 		$this->assertStringContainsString( 'class="hierarchy-guard-view-redirects"', $notice['message'] );
 		$this->assertStringEndsWith( 'download>Download redirects (CSV)</a><span aria-hidden="true"> ·</span> <a href="' . esc_url( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ) ) . '">Set up redirects</a>', $notice['message'], 'View comes first, as in the other two notices.' );
 		$this->assertStringContainsString( 'format=generic', $notice['message'] );
@@ -918,7 +918,7 @@ final class NoticesTest extends WP_UnitTestCase {
 
 		$this->assertCount( 4, $sentences );
 		$this->assertSame( 'Still moving the subpages of “One” in the background: 4 of 10 done.', $sentences[0] );
-		$this->assertSame( 'The subpages of 2 more pages are still being worked on in the background.', $sentences[3] );
+		$this->assertSame( 'The subpages of 2 more pages are still being processed in the background.', $sentences[3] );
 		foreach ( $entries as $entry ) {
 			$queue->delete( $entry['root'] );
 		}

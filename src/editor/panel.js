@@ -1,6 +1,6 @@
 /**
- * The Hierarchy plugin for the block editor: a warning under the Summary
- * before a save changes subpage URLs, a notice with that change's redirects
+ * The Hierarchy plugin for the block editor: a warning in the document
+ * sidebar's status area before a save changes subpage URLs, a notice with that change's redirects
  * after it did, and a panel with what is above and below the page.
  */
 import { BaseControl, Notice, Spinner } from '@wordpress/components';

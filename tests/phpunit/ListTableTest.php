@@ -163,7 +163,7 @@ final class ListTableTest extends WP_UnitTestCase {
 		$cell = $this->cell( $this->ids['about'] );
 
 		$this->assertStringContainsString( 'data-children="2"', $cell );
-		$this->assertStringContainsString( '<span class="screen-reader-text">Parent: </span><a href="', $cell );
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent page: </span><a href="', $cell );
 		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> · </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '" aria-label="View the 2 subpages of “About”">2 subpages</a>', $cell );
 	}
 
@@ -186,7 +186,7 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		$cell = $this->cell( $this->ids['leadership'] );
 
-		$this->assertStringContainsString( 'Parent: </span>Team (in the Trash)', $cell, 'Core refuses to edit a page in the Trash, so it is not linked.' );
+		$this->assertStringContainsString( 'Parent page: </span>Team (in the Trash)', $cell, 'Core refuses to edit a page in the Trash, so it is not linked.' );
 		$this->assertStringNotContainsString( 'post=' . $this->ids['team'] . '&amp;action=edit', $cell );
 	}
 

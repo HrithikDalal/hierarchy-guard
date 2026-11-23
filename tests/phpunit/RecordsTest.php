@@ -662,8 +662,8 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertNull( $this->served_at( '/old-a/' ) );
 		$this->assertSame(
 			[
-				'/old-a/' => Records::STATUS_REFUSED,
-				'/p/'     => Records::STATUS_REFUSED,
+				'/old-a/' => Records::STATUS_CHAINED,
+				'/p/'     => Records::STATUS_CHAINED,
 			],
 			$this->statuses_by_old()
 		);
@@ -686,9 +686,9 @@ final class RecordsTest extends WP_UnitTestCase {
 
 		$this->assertSame(
 			[
-				'/old-a/' => Records::STATUS_REFUSED,
-				'/old-b/' => Records::STATUS_REFUSED,
-				'/old-c/' => Records::STATUS_REFUSED,
+				'/old-a/' => Records::STATUS_CHAINED,
+				'/old-b/' => Records::STATUS_CHAINED,
+				'/old-c/' => Records::STATUS_CHAINED,
 				'/old-d/' => Records::STATUS_ACTIVE,
 			],
 			$this->statuses_by_old()
@@ -777,8 +777,13 @@ final class RecordsTest extends WP_UnitTestCase {
 		wp_cache_flush();
 		$rows     = $records->page( '', '', 1 )['rows'];
 		$statuses = $records->statuses( $rows );
+		$expected = [
+			'old-a' => Records::STATUS_LOOP,
+			'old-b' => Records::STATUS_CHAINED,
+			'old-c' => Records::STATUS_CHAINED,
+		];
 		foreach ( $rows as $row ) {
-			$this->assertSame( Records::STATUS_REFUSED, $statuses[ $row['id'] ], $row['old'] . ' can’t be sent.' );
+			$this->assertSame( $expected[ $row['path'] ], $statuses[ $row['id'] ], $row['old'] . ' can’t be sent.' );
 		}
 		foreach ( [ home_url( '/old-a/' ), $upper . '/old-a/', home_url( '/old-b/' ), $other . '/old-c/', $upper . '/old-b/' ] as $request ) {
 			$this->go_to( $request );
@@ -984,13 +989,13 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame(
 			[
 				'/a/b/'   => Records::STATUS_ACTIVE,
-				'/a/b/c/' => Records::STATUS_REFUSED,
+				'/a/b/c/' => Records::STATUS_TOO_DEEP,
 			],
 			$this->statuses_by_old()
 		);
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => false ] );
-		$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/a/b/c/'], 'Before built-in redirects are off: it can’t be sent even with them on.' );
+		$this->assertSame( Records::STATUS_TOO_DEEP, $this->statuses_by_old()['/a/b/c/'], 'Before built-in redirects are off: it can’t be sent even with them on.' );
 	}
 
 	public function test_a_url_target_at_its_own_old_url_never_reads_active(): void {
@@ -1000,13 +1005,13 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->ledger->set_target( 'page', 'old-crew', $this->ids['team'], home_url( '/old-crew/' ), 0 );
 
 		$this->assertNull( $this->served_at( '/old-crew/' ), 'Precondition: the server refuses the loop.' );
-		$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/old-crew/'] );
+		$this->assertSame( Records::STATUS_LOOP, $this->statuses_by_old()['/old-crew/'] );
 
 		$this->ledger->record( $this->ids['history'], 'café' );
 		foreach ( [ home_url( '/café/' ), home_url( '/caf%C3%A9/' ) ] as $url ) {
 			$this->ledger->set_target( 'page', 'caf%c3%a9', $this->ids['history'], $url, 0 );
 			$this->assertNull( $this->served_at( '/café/' ), $url . ': the server refuses the loop.' );
-			$this->assertSame( Records::STATUS_REFUSED, $this->statuses_by_old()['/café/'], $url );
+			$this->assertSame( Records::STATUS_LOOP, $this->statuses_by_old()['/café/'], $url );
 		}
 	}
 
@@ -1021,9 +1026,9 @@ final class RecordsTest extends WP_UnitTestCase {
 
 		$this->assertSame(
 			[
-				'/a/b/c/'    => Records::STATUS_REFUSED,
-				'/old-crew/' => Records::STATUS_REFUSED,
-				'/story/'    => Records::STATUS_OFF,
+				'/a/b/c/'    => Records::STATUS_TOO_DEEP,
+				'/old-crew/' => Records::STATUS_LOOP,
+				'/story/'    => Records::STATUS_PLAIN,
 			],
 			$this->statuses_by_old(),
 			'Whether built-in redirects are on or off, and whatever the permalinks.'
@@ -1051,7 +1056,19 @@ final class RecordsTest extends WP_UnitTestCase {
 
 
 	public function test_the_status_words_for_each_status(): void {
-		$this->assertSame( 'Not active: the server can’t send this redirect', \HierarchyGuard\Admin\Redirects_Table::status_label( Records::STATUS_REFUSED ) );
+		$words = [
+			Records::STATUS_ACTIVE      => 'Active',
+			Records::STATUS_IN_USE      => 'Not active: a page uses this URL',
+			Records::STATUS_UNPUBLISHED => 'Not active: the page it points to isn’t published',
+			Records::STATUS_TOO_DEEP    => 'Not active: the URL has too many levels',
+			Records::STATUS_LOOP        => 'Not active: it points back to its own old URL',
+			Records::STATUS_CHAINED     => 'Not active: it points to another redirected URL',
+			Records::STATUS_OFF         => 'Not active: built-in redirects are off',
+			Records::STATUS_PLAIN       => 'Not active: permalinks are set to Plain',
+		];
+		foreach ( $words as $status => $label ) {
+			$this->assertSame( $label, \HierarchyGuard\Admin\Redirects_Table::status_label( $status ) );
+		}
 	}
 
 
@@ -1128,7 +1145,7 @@ final class RecordsTest extends WP_UnitTestCase {
 		$this->assertSame( get_permalink( get_page_by_path( 'solo' ) ), $this->served_at( '/shallow/solo/' )['url'] ?? null );
 		$this->assertSame(
 			[
-				'/old/parent/' => Records::STATUS_REFUSED,
+				'/old/parent/' => Records::STATUS_TOO_DEEP,
 				'/shallow/'    => Records::STATUS_ACTIVE,
 			],
 			$this->statuses_by_old()
@@ -1143,7 +1160,7 @@ final class RecordsTest extends WP_UnitTestCase {
 		$rows = $this->records->page( '', '', 1 )['rows'];
 
 		$this->assertSame( [ '/old-about/' ], array_column( $rows, 'old' ) );
-		$this->assertSame( [ Records::STATUS_OFF ], array_values( $this->records->statuses( $rows ) ), 'The server serves nothing without pretty permalinks.' );
+		$this->assertSame( [ Records::STATUS_PLAIN ], array_values( $this->records->statuses( $rows ) ), 'The server serves nothing without pretty permalinks.' );
 	}
 
 	public function test_a_page_url_pasted_without_its_slash_or_with_a_query_or_fragment_still_moves_the_record(): void {

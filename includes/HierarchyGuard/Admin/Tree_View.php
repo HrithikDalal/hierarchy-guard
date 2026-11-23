@@ -172,7 +172,7 @@ final class Tree_View {
 			'<a href="%1$s"%2$s>%3$s</a>',
 			esc_url( self::url( $type ) ),
 			'' !== $this->mode( $type ) ? ' class="current" aria-current="page"' : '',
-			esc_html__( 'Tree', 'hierarchy-guard' )
+			esc_html_x( 'Tree', 'list view', 'hierarchy-guard' )
 		);
 		return $views;
 	}

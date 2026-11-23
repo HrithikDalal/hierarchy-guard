@@ -219,7 +219,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
-		$this->assertStringContainsString( 'Custom Redirects is active and can handle these.', $html );
+		$this->assertStringContainsString( 'Custom Redirects is active and can serve these redirects instead.', $html );
 	}
 
 	public function test_trash_policy_field_renders_three_radios_with_the_stored_choice(): void {
@@ -233,9 +233,9 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<fieldset id="hierarchy-guard-trash-policy">', $html, 'The target of the editor panel’s Settings link.' );
 		$this->assertMatchesRegularExpression( '/value="keep"\s+checked/', $html );
 		$this->assertStringContainsString( 'Move subpages up one level', $html );
-		$this->assertStringContainsString( 'Trash the subpages too', $html );
+		$this->assertStringContainsString( 'Trash subpages too', $html );
 		$this->assertStringContainsString( 'Leave subpages where they are', $html );
-		$this->assertStringContainsString( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.', $html );
+		$this->assertStringContainsString( 'Applies when a page is trashed from the editor, the REST API or WP-CLI. Trashing from the Pages list asks each time.', $html );
 		$this->assertStringNotContainsString( 'The Trash is turned off', $html, 'This test site keeps its Trash.' );
 	}
 
@@ -287,7 +287,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
-		$this->assertStringContainsString( 'A redirect plugin is active and can handle these.', $html );
+		$this->assertStringContainsString( 'A redirect plugin is active and can serve these redirects instead.', $html );
 	}
 
 	public function test_settings_links_open_the_page_at_their_field(): void {

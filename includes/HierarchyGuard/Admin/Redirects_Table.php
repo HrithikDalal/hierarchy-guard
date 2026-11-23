@@ -36,7 +36,7 @@ if ( ! class_exists( WP_List_Table::class ) ) {
  */
 final class Redirects_Table extends WP_List_Table {
 
-	public const TYPE_ARG = 'redirect_type';
+	public const TYPE_ARG = 'hierarchy_guard_type';
 
 	/**
 	 * Records.
@@ -81,8 +81,8 @@ final class Redirects_Table extends WP_List_Table {
 	public function __construct( Records $records ) {
 		parent::__construct(
 			[
-				'singular' => 'redirect',
-				'plural'   => 'redirects',
+				'singular' => 'hierarchy_guard_redirect',
+				'plural'   => 'hierarchy_guard_redirects',
 				'ajax'     => false,
 				'screen'   => 'settings_page_' . Settings_Page::SLUG,
 			]
@@ -154,7 +154,7 @@ final class Redirects_Table extends WP_List_Table {
 			'cb'        => '<input type="checkbox" />',
 			'old'       => __( 'Old URL', 'hierarchy-guard' ),
 			'target'    => __( 'Redirects to', 'hierarchy-guard' ),
-			'http_code' => __( 'Code', 'hierarchy-guard' ),
+			'http_code' => _x( 'Code', 'redirect code', 'hierarchy-guard' ),
 			'status'    => __( 'Status', 'hierarchy-guard' ),
 		];
 	}
@@ -315,7 +315,12 @@ final class Redirects_Table extends WP_List_Table {
 	 * @return string
 	 */
 	protected function column_old( $item ): string {
-		return self::old_label( $item, Redirect_Edit::edit_url( (string) $item['id'], $this->list ) );
+		$label = self::old_label( $item, Redirect_Edit::edit_url( (string) $item['id'], $this->list ) );
+		if ( 0 === (int) $item['holder'] ) {
+			// A root-list record stands for every page that once sat under it, and nothing records which, so only a Delete removes it.
+			$label .= '<p class="description">' . esc_html__( 'This redirect stays until you delete it, even after the pages under it are gone.', 'hierarchy-guard' ) . '</p>';
+		}
+		return $label;
 	}
 
 	/**
@@ -354,7 +359,7 @@ final class Redirects_Table extends WP_List_Table {
 	 */
 	protected function column_http_code( $item ): string {
 		$code = null !== $item['target'] ? (int) $item['target']['code'] : 0;
-		return $code > 0 ? (string) $code : esc_html__( 'Automatic', 'hierarchy-guard' );
+		return $code > 0 ? (string) $code : esc_html_x( 'Automatic', 'redirect code', 'hierarchy-guard' );
 	}
 
 	/**
@@ -407,7 +412,9 @@ final class Redirects_Table extends WP_List_Table {
 	/**
 	 * A record's old URL as HTML, in code so it reads left to right in a
 	 * right-to-left language too, with "and the URLs under it" for a page
-	 * target; linked, as a row title, when a link is given.
+	 * target, or as "The URLs under it" for a top-level root-list entry,
+	 * which never redirects the old URL itself; linked, as a row title, when
+	 * a link is given.
 	 *
 	 * @param array<string,mixed> $item Record.
 	 * @param string              $edit The record's Edit link, or '' for none.
@@ -421,6 +428,10 @@ final class Redirects_Table extends WP_List_Table {
 		}
 		if ( null !== $item['target'] && '' !== (string) $item['target']['url'] ) {
 			return $old;
+		}
+		if ( Records::is_top_level( $item ) ) {
+			/* translators: %s: an old URL, such as /about/; its subpages are top-level pages now. */
+			return sprintf( esc_html__( 'The URLs under %s', 'hierarchy-guard' ), $old );
 		}
 		/* translators: %s: an old URL, such as /about/team/. */
 		return sprintf( esc_html__( '%s and the URLs under it', 'hierarchy-guard' ), $old );
@@ -438,12 +449,20 @@ final class Redirects_Table extends WP_List_Table {
 				return __( 'Not active: a page uses this URL', 'hierarchy-guard' );
 			case Records::STATUS_UNPUBLISHED:
 				return __( 'Not active: the page it points to isn’t published', 'hierarchy-guard' );
-			case Records::STATUS_REFUSED:
-				return __( 'Not active: the server can’t send this redirect', 'hierarchy-guard' );
+			case Records::STATUS_TOO_DEEP:
+				return __( 'Not active: the URL has too many levels', 'hierarchy-guard' );
+			case Records::STATUS_LOOP:
+				/* translators: "it" is the redirect. */
+				return __( 'Not active: it points back to its own old URL', 'hierarchy-guard' );
+			case Records::STATUS_CHAINED:
+				/* translators: "it" is the redirect. */
+				return __( 'Not active: it points to another redirected URL', 'hierarchy-guard' );
 			case Records::STATUS_OFF:
 				return __( 'Not active: built-in redirects are off', 'hierarchy-guard' );
+			case Records::STATUS_PLAIN:
+				return __( 'Not active: permalinks are set to Plain', 'hierarchy-guard' );
 			case Records::STATUS_ACTIVE:
-				return __( 'Active', 'hierarchy-guard' );
+				return _x( 'Active', 'redirect status', 'hierarchy-guard' );
 		}
 		return '';
 	}

@@ -297,7 +297,7 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 	public function test_the_gone_message_says_a_later_change_replaced_them_and_how_long_they_are_kept(): void {
 		$response = $this->get( '/changes/' . wp_generate_uuid4() . '/pairs' );
 
-		$this->assertSame( 'These redirects are no longer available. A later change replaced them. They are kept for 30 minutes.', $response->get_data()['message'] );
+		$this->assertSame( 'These redirects are no longer available. A later change replaced them. Each change’s redirects are listed for 30 minutes.', $response->get_data()['message'] );
 	}
 
 	public function test_the_gone_message_of_an_expired_change_says_only_how_long_they_are_kept(): void {
@@ -308,6 +308,6 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$response = $this->get( '/changes/' . $this->change_id . '/pairs' );
 
 		$this->assertSame( 404, $response->get_status() );
-		$this->assertSame( 'These redirects are no longer available. They are kept for 30 minutes.', $response->get_data()['message'], 'Nothing replaced them.' );
+		$this->assertSame( 'These redirects are no longer available. Each change’s redirects are listed for 30 minutes.', $response->get_data()['message'], 'Nothing replaced them.' );
 	}
 }
