@@ -72,6 +72,35 @@ final class ResolverTest extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	public function test_an_unknown_path_twenty_segments_deep_costs_one_ledger_query_then_none(): void {
+		$path = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 20 ) ) );
+		get_option( Ledger::ROOT_OPTION );
+
+		$queries = get_num_queries();
+		$this->assertNull( $this->resolver->resolve( 'page', $path ) );
+		$this->assertSame( 1, get_num_queries() - $queries, 'Every prefix in one query.' );
+
+		$queries = get_num_queries();
+		$this->assertNull( ( new Resolver( $this->ledger ) )->resolve( 'page', $path ) );
+		$this->assertSame( 0, get_num_queries() - $queries, 'The miss is cached for the whole path.' );
+	}
+
+	public function test_each_prefix_of_a_path_answers_as_its_own_lookup_does(): void {
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->record_root( 'page', 'archive' );
+
+		$this->assertSame(
+			[
+				'old-about/x/y' => null,
+				'old-about/x'   => null,
+				'old-about'     => $this->about,
+			],
+			$this->ledger->find_prefixes( 'page', '/Old-About/x/y/' )
+		);
+		$this->assertSame( [ 'archive' => 0 ], $this->ledger->find_prefixes( 'page', 'archive' ) );
+		$this->assertSame( [], $this->ledger->find_prefixes( 'page', '/' ) );
+	}
+
 	public function test_resolves_a_subpage_after_its_parent_was_renamed(): void {
 		wp_update_post(
 			[

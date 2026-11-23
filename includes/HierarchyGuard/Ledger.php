@@ -34,8 +34,7 @@ final class Ledger {
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
 
-	private const CACHE_MISS = -1;
-	private const CACHE_TTL  = 12 * HOUR_IN_SECONDS;
+	private const CACHE_TTL = 12 * HOUR_IN_SECONDS;
 
 	/**
 	 * Nesting depth of deferred() calls.
@@ -404,35 +403,54 @@ final class Ledger {
 	 */
 	public function find( string $post_type, string $path ): ?int {
 		$path = Paths::normalize( $path );
+		return '' === $path ? null : $this->find_prefixes( $post_type, $path )[ $path ];
+	}
+
+	/**
+	 * What a path and each shorter prefix of it used to lead to, as find()
+	 * answers each: one query for all of them, and one cache entry for the
+	 * path, so a 404 several segments deep costs what a one-segment one does.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return array<string,int|null> By prefix, the path itself first: post ID, 0 for the root list, null when unknown.
+	 */
+	public function find_prefixes( string $post_type, string $path ): array {
+		$path = Paths::normalize( $path );
 		if ( '' === $path ) {
-			return null;
+			return [];
+		}
+		$segments = explode( '/', $path );
+		$prefixes = [];
+		for ( $length = count( $segments ); $length >= 1; $length-- ) {
+			$prefixes[] = implode( '/', array_slice( $segments, 0, $length ) );
 		}
 
 		$cache_key = 'find:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
-		$cached    = wp_cache_get( $cache_key, self::CACHE_GROUP );
-		if ( false !== $cached ) {
-			$found = self::CACHE_MISS === (int) $cached ? null : (int) $cached;
-		} else {
-			$found = $this->seek( $post_type, $path );
-			if ( null === $found ) {
-				$roots = $this->roots();
-				if ( in_array( $path, $roots[ $post_type ] ?? [], true ) ) {
-					$found = 0;
+		$found     = wp_cache_get( $cache_key, self::CACHE_GROUP );
+		if ( ! is_array( $found ) ) {
+			$found = $this->seek( $post_type, $prefixes );
+			$roots = $this->roots()[ $post_type ] ?? [];
+			foreach ( $found as $prefix => $id ) {
+				if ( null === $id && in_array( (string) $prefix, $roots, true ) ) {
+					$found[ $prefix ] = 0;
 				}
 			}
-
 			// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
-			wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
+			wp_cache_set( $cache_key, $found, self::CACHE_GROUP, self::CACHE_TTL );
 		}
 
 		// The cache keeps the holder; its status is read on every call, because
 		// trashing, restoring or deleting the holder does not touch the ledger.
-		if ( null !== $found && $found > 0 && in_array( get_post_status( $found ), [ false, 'trash' ], true ) ) {
-			$roots = $this->roots();
-			return in_array( $path, $roots[ $post_type ] ?? [], true ) ? 0 : null;
+		$out = [];
+		foreach ( $prefixes as $prefix ) {
+			$id = $found[ $prefix ] ?? null;
+			if ( null !== $id && $id > 0 && in_array( get_post_status( $id ), [ false, 'trash' ], true ) ) {
+				$id = in_array( $prefix, $this->roots()[ $post_type ] ?? [], true ) ? 0 : null;
+			}
+			$out[ $prefix ] = $id;
 		}
-
-		return $found;
+		return $out;
 	}
 
 	/**
@@ -1047,26 +1065,34 @@ final class Ledger {
 	}
 
 	/**
-	 * Single index seek on the hashed key: a live holder first, newest entry first.
-	 * A post in the trash comes back only when no live post holds the key; find()
-	 * then answers as if it held nothing.
+	 * Index seeks on the hashed keys of several paths, in one query: for
+	 * each, a live holder first, newest entry first. A post in the trash
+	 * comes back only when no live post holds the key; find() then answers
+	 * as if it held nothing. The rows are the holders of these paths.
 	 *
-	 * @param string $post_type Post type name.
-	 * @param string $path      Normalized path.
+	 * @param string   $post_type Post type name.
+	 * @param string[] $paths     Normalized paths.
+	 * @return array<string,int|null> By path.
 	 */
-	private function seek( string $post_type, string $path ): ?int {
+	private function seek( string $post_type, array $paths ): array {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; cached by the caller.
-		$id = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC LIMIT 1",
-				self::key( $post_type, $path ),
-				$post_type
-			)
-		);
+		$by_key = [];
+		foreach ( $paths as $path ) {
+			$by_key[ self::key( $post_type, $path ) ] = $path;
+		}
+		$placeholders = implode( ',', array_fill( 0, count( $by_key ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $placeholders holds only %s, one per path, and the values come as one array; seeks on the meta_key index, cached by the caller.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC", array_merge( array_keys( $by_key ), [ $post_type ] ) ), ARRAY_A );
 
-		return $id ? (int) $id : null;
+		$found = array_fill_keys( $paths, null );
+		foreach ( (array) $rows as $row ) {
+			$path = $by_key[ (string) $row['meta_key'] ] ?? null;
+			if ( null !== $path && null === $found[ $path ] ) {
+				$found[ $path ] = (int) $row['post_id'];
+			}
+		}
+		return $found;
 	}
 
 	/**

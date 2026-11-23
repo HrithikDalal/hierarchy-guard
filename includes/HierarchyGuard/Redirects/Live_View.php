@@ -30,6 +30,22 @@ final class Live_View implements Ledger_View {
 	private Ledger $ledger;
 
 	/**
+	 * What find_prefixes() answered in this request, by post type then prefix,
+	 * while the ledger is unchanged: the rules ask for each prefix of a path
+	 * in turn, longest first, and the first ask reads them all.
+	 *
+	 * @var array<string,array<string,int|null>>
+	 */
+	private array $found = [];
+
+	/**
+	 * The ledger's last-changed key $found was read under.
+	 *
+	 * @var string
+	 */
+	private string $found_under = '';
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Ledger $ledger Ledger.
@@ -45,7 +61,15 @@ final class Live_View implements Ledger_View {
 	 * @param string $prefix    Normalized path.
 	 */
 	public function find( string $post_type, string $prefix ): ?int {
-		return $this->ledger->find( $post_type, $prefix );
+		$changed = (string) wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+		if ( $changed !== $this->found_under ) {
+			$this->found       = [];
+			$this->found_under = $changed;
+		}
+		if ( ! array_key_exists( $prefix, $this->found[ $post_type ] ?? [] ) ) {
+			$this->found[ $post_type ] = $this->ledger->find_prefixes( $post_type, $prefix ) + ( $this->found[ $post_type ] ?? [] );
+		}
+		return $this->found[ $post_type ][ $prefix ] ?? null;
 	}
 
 	/**
