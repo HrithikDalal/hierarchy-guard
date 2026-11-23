@@ -34,11 +34,18 @@ describe( 'the announcement after a Quick Edit save', () => {
 	beforeEach( () => {
 		speak.mockClear();
 		finish = null;
-		// A saved row whose fade-in core is still running.
+		// Row 7 is still fading in; row 9 has finished, so core has already
+		// said its words; any other row is gone.
+		const rows = {
+			'#post-7': true,
+			'#post-9': false,
+		};
 		window.jQuery = ( selector ) =>
-			'#post-7' === selector
+			selector in rows
 				? {
 						length: 1,
+						is: ( state ) =>
+							':animated' === state && rows[ selector ],
 						promise: () => ( {
 							done: ( callback ) => {
 								finish = callback;
@@ -65,12 +72,18 @@ describe( 'the announcement after a Quick Edit save', () => {
 		);
 	} );
 
-	it( 'says it at once when the row is gone', () => {
+	it( 'says only the sentence, at once, once core’s row has faded in', () => {
+		speakAfterSave( 9, 'Sentence.' );
+
+		expect( finish ).toBeNull();
+		expect( speak ).toHaveBeenCalledTimes( 1 );
+		expect( speak ).toHaveBeenCalledWith( 'Sentence.', 'polite' );
+	} );
+
+	it( 'says only the sentence, at once, when the row is gone', () => {
 		speakAfterSave( 8, 'Sentence.' );
 
-		expect( speak ).toHaveBeenCalledWith(
-			'Changes saved. Sentence.',
-			'polite'
-		);
+		expect( speak ).toHaveBeenCalledTimes( 1 );
+		expect( speak ).toHaveBeenCalledWith( 'Sentence.', 'polite' );
 	} );
 } );

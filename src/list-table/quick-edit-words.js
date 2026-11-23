@@ -19,23 +19,25 @@ export function warningText( descendants ) {
 }
 
 /**
- * Speaks a sentence after core's own "Changes saved.", which core speaks
- * once the saved row has faded in. In the same polite region the later
- * message replaces the earlier, so both are said in one.
+ * Speaks a sentence after a Quick Edit save. Core says "Changes saved." once
+ * the saved row has faded in, and in the same polite region a later message
+ * replaces an earlier one. While the row is still fading in, the sentence
+ * waits for it and carries core's words too, so both are said in one. Once
+ * the fade is over, core has already spoken, so the sentence is said alone.
  *
  * @param {number} postId   The saved row's post.
  * @param {string} sentence What to say.
  */
 export function speakAfterSave( postId, sentence ) {
-	const say = () =>
-		speak(
-			`${ __( 'Changes saved.', 'hierarchy-guard' ) } ${ sentence }`,
-			'polite'
-		);
 	const row = window.jQuery( `#post-${ postId }` );
-	if ( row.length ) {
-		row.promise().done( say );
+	if ( row.length && row.is( ':animated' ) ) {
+		row.promise().done( () =>
+			speak(
+				`${ __( 'Changes saved.', 'hierarchy-guard' ) } ${ sentence }`,
+				'polite'
+			)
+		);
 	} else {
-		say();
+		speak( sentence, 'polite' );
 	}
 }

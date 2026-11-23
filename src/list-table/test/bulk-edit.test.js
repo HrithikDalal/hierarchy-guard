@@ -18,7 +18,7 @@ const { default: bindBulkEdit, updateBulkWarning } =
  */
 function render( rows ) {
 	window.document.body.innerHTML = `
-		<table><tbody id="the-list">
+		<table><thead><tr><td class="check-column"><input id="cb-select-all-1" type="checkbox"></td></tr></thead><tbody id="the-list">
 			<tr id="bulk-edit"><td>
 				<ul id="bulk-titles">${ rows
 					.filter( ( row ) => row.checked )
@@ -173,6 +173,23 @@ describe( 'the Bulk Edit warning', () => {
 		row.checked = true;
 
 		row.dispatchEvent( new window.Event( 'change', { bubbles: true } ) );
+
+		expect( box().textContent ).toContain( 'under 3 of them' );
+	} );
+
+	it( 'counts again when every row is ticked with the select-all box', () => {
+		bindBulkEdit( window.document );
+		choose( '7' );
+		const all = window.document.getElementById( 'cb-select-all-1' );
+		// What core's own handler on the box does before its change event.
+		all.checked = true;
+		window.document
+			.querySelectorAll( 'input[name="post[]"]' )
+			.forEach( ( input ) => {
+				input.checked = true;
+			} );
+
+		all.dispatchEvent( new window.Event( 'change', { bubbles: true } ) );
 
 		expect( box().textContent ).toContain( 'under 3 of them' );
 	} );
