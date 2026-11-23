@@ -14,6 +14,10 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Resolves an old path through the shared rules, on the live ledger.
  */

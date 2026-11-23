@@ -14,6 +14,10 @@ use HierarchyGuard\Subtree;
 use WP_Post;
 use WP_Query;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Adds "Tree" to the views row of every supported list screen. The Tree view
  * is core's own list table: the top level comes from core's query with

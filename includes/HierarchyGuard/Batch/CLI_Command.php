@@ -11,6 +11,10 @@ namespace HierarchyGuard\Batch;
 
 use HierarchyGuard\Trash\Operations;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Manages Hierarchy Guard background jobs.
  */

@@ -16,6 +16,10 @@ use WP;
 use WP_Post;
 use WP_Rewrite;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Runs on 404s at template_redirect priority 9, before redirect_canonical()
  * and its fuzzy guess, and before wp_old_slug_redirect().
@@ -478,8 +482,8 @@ final class Server {
 	 * @return string
 	 */
 	private function request_uri(): string {
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect(), for a page target, or through external(), esc_url_raw() and http(s) only, for a URL target.
-		return isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+		// esc_url_raw() keeps the percent-encoding, which sanitize_text_field() would strip.
+		return isset( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( (string) wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
 	}
 
 	/**

@@ -12,6 +12,10 @@ namespace HierarchyGuard\Trash;
 use HierarchyGuard\Paths;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Re-parents the way wp_delete_post() does: a direct update, so content is not
  * re-filtered and the modified date stays, then a cache clear. The slug is

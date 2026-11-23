@@ -15,6 +15,10 @@ use HierarchyGuard\Redirects\Records;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The plugin's one admin page, under Settings, for users with manage_options:
  * core nav tabs, the Settings tab's three fields, saved through the Settings

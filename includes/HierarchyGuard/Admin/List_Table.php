@@ -14,6 +14,10 @@ use HierarchyGuard\Subtree;
 use WP_Post;
 use WP_Query;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Adds a one-line Hierarchy column to every supported list screen, a
  * "View subpages" row action, and a filter that narrows the list to one

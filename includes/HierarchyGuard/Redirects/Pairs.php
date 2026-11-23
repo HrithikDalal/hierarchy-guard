@@ -14,6 +14,10 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Subtree;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Lists the old URLs a change left behind and where each leads now.
  *

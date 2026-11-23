@@ -15,6 +15,10 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Subtree;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Moves, trashes and restores subpages in bounded steps. A job is a plain
  * array, so the same step runs inline for small subtrees and from the batch

@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Post meta that lets a restore undo exactly what the trash flow did.
  *
@@ -130,6 +134,7 @@ final class Markers {
 			$wpdb->postmeta,
 			[
 				'post_id'    => $post_id,
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- An insert, not a query on the key.
 				'meta_key'   => $key,
 				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- An insert, not a query on the value.
 				'meta_value' => $value,
@@ -188,9 +193,10 @@ final class Markers {
 			return;
 		}
 
-		$meta_ids = implode( ',', array_map( static fn( array $row ): int => (int) $row['meta_id'], $rows ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $meta_ids holds integers only; the meta caches are cleared next.
-		$wpdb->query( "DELETE FROM {$wpdb->postmeta} WHERE meta_id IN ( {$meta_ids} )" );
+		$meta_ids     = array_map( static fn( array $row ): int => (int) $row['meta_id'], $rows );
+		$placeholders = implode( ',', array_fill( 0, count( $meta_ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per row handled; the meta caches are cleared next.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->postmeta} WHERE meta_id IN ( {$placeholders} )", $meta_ids ) );
 
 		$post_ids = array_values( array_unique( array_map( static fn( array $row ): int => (int) $row['post_id'], $rows ) ) );
 		wp_cache_delete_multiple( $post_ids, 'post_meta' );
@@ -210,6 +216,7 @@ final class Markers {
 			$wpdb->postmeta,
 			[
 				'post_id'  => $post_id,
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- One post's rows, found by post_id first.
 				'meta_key' => $key,
 			],
 			[ '%d', '%s' ]

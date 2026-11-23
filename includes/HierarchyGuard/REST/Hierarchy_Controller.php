@@ -22,6 +22,10 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Backs the editor panel, the Quick Edit warning, the trash dialog and the
  * Tree view's subpages, 50 at a time with tree=1. Every route is read-only

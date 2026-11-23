@@ -17,6 +17,10 @@ use HierarchyGuard\Subtree;
 use WP_Error;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * One record per ledger entry: a post's _hierarchy_guard_path_{md5} row, or
  * one root-list entry. A listing reads the newest Subtree::count_cap() post
@@ -568,10 +572,10 @@ final class Records {
 		if ( [] !== $holders ) {
 			_prime_post_caches( $holders, false, false );
 			$keys = array_values( array_unique( array_map( static fn( array $row ): string => Ledger::target_key( (string) $row['post_type'], (string) $row['path'] ), $rows ) ) );
-			$ids  = implode( ',', array_map( 'intval', $holders ) );
+			$ids  = implode( ',', array_fill( 0, count( $holders ), '%d' ) );
 			$in   = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $ids holds integers only and $in only %s, one per row of the page.
-			$overrides = (array) $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id IN ( {$ids} ) AND meta_key IN ( {$in} )", $keys ), ARRAY_A );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $ids holds only %d and $in only %s, one per row of the page.
+			$overrides = (array) $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id IN ( {$ids} ) AND meta_key IN ( {$in} )", ...array_merge( array_map( 'intval', $holders ), $keys ) ), ARRAY_A );
 			foreach ( $overrides as $override ) {
 				$found[ (int) $override['post_id'] ][ (string) $override['meta_key'] ] = maybe_unserialize( (string) $override['meta_value'] );
 			}

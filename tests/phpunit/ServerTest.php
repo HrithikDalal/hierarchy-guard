@@ -186,6 +186,54 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( get_permalink( $this->team ) . '?utm_source=x', $this->server->target_for_current_request()['url'] );
 	}
 
+	/**
+	 * Query strings a link never carries: what a filter on the redirect URL
+	 * sees of each, read through esc_url_raw(), and what the redirect sends,
+	 * after wp_validate_redirect().
+	 *
+	 * @return array<string,array{0:string,1:string,2:string}>
+	 */
+	public static function crafted_queries(): array {
+		return [
+			'markup'                => [ 'q=<script>alert(1)</script>', 'q=scriptalert(1)/script', 'q=scriptalert(1)/script' ],
+			'encoded line break'    => [ 'a=1%0d%0aSet-Cookie:x=1', 'a=1Set-Cookie:x=1', 'a=1Set-Cookie:x=1' ],
+			'quotes'                => [ 'a="b"&c=\'d\'', 'a=b&c=\'d\'', 'a=b&c=d' ],
+			'space and braces'      => [ 'a=b c&d={e}', 'a=b%20c&d=e', 'a=b%20c&d=e' ],
+			'percent-encoded UTF-8' => [ 'q=caf%C3%A9', 'q=caf%C3%A9', 'q=caf%C3%A9' ],
+			'raw UTF-8'             => [ 'q=café', 'q=café', 'q=caf%C3%A9' ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_queries
+	 *
+	 * @param string $query The request's query string.
+	 * @param string $seen  What a filter on the redirect URL sees of it.
+	 * @param string $sent  What the redirect carries over.
+	 */
+	public function test_a_crafted_query_string_is_carried_over_only_as_url_characters( string $query, string $seen, string $sent ): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/' );
+		$_SERVER['REQUEST_URI'] = '/company/about/team/?' . $query;
+		$filtered               = '';
+		$see                    = static function ( string $url ) use ( &$filtered ): string {
+			$filtered = $url;
+			return $url;
+		};
+		add_filter( 'hierarchy_guard_redirect_url', $see );
+
+		$target = $this->server->target_for_current_request();
+		remove_filter( 'hierarchy_guard_redirect_url', $see );
+
+		$this->assertSame( get_permalink( $this->team ) . '?' . $seen, $filtered, 'Read sanitized: a filter on the URL never sees the raw request.' );
+		$this->assertSame( get_permalink( $this->team ) . '?' . $sent, $target['url'] );
+	}
+
 	public function test_preserves_feed_and_embed_suffixes(): void {
 		wp_update_post(
 			[

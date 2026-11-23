@@ -15,6 +15,10 @@ use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Builds the hierarchy summary of one post. Children are paged, counts are
  * direct, and every total stops at the count cap. It says where the post is

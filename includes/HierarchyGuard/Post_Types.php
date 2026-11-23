@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The hierarchical post types the plugin acts on. Memoised per request.
  */

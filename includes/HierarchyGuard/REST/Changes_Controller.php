@@ -18,6 +18,10 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Backs the "View redirects" link of the outcome notice, after a trash or a
  * save that changed URLs. A change is the current user's own and lives for

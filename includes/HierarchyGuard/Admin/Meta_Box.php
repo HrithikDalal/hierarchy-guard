@@ -15,6 +15,10 @@ use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * A read-only box with the same data as the block editor panel. The
  * classic-editor script asks for confirmation when the form is submitted with

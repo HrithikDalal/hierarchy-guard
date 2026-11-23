@@ -11,6 +11,10 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Export\Csv;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Known redirect plugins: a presence check, the URL of their redirects screen,
  * which CSV layout they import, and what to know before importing it.

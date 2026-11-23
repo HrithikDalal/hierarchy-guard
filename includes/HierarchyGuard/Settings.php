@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Reads, defaults and sanitizes the single settings option.
  */

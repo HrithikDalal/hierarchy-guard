@@ -11,6 +11,10 @@ namespace HierarchyGuard\Admin;
 
 use HierarchyGuard\Redirects\Records;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The Edit view of a recorded redirect, and the Redirects tab's actions:
  * save an edit, delete one record from its row or the Edit view, or delete

@@ -12,6 +12,10 @@ namespace HierarchyGuard\Admin;
 use HierarchyGuard\Settings;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The trash dialog adds the editor's choice to core's own trash link or bulk
  * form. Core checks its nonce before it trashes anything; this checks the

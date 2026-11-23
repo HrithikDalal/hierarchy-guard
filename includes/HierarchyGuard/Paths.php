@@ -12,6 +12,10 @@ namespace HierarchyGuard;
 use WP_Post;
 use WP_Rewrite;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Builds and normalizes page paths from slug chains.
  *

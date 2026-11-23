@@ -17,6 +17,10 @@ use HierarchyGuard\Subtree;
 use WP_List_Table;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 if ( ! class_exists( WP_List_Table::class ) ) {
 	require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php';
 }

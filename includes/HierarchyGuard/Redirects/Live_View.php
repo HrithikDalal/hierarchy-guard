@@ -13,6 +13,10 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Reads each fact when the rules ask: the ledger's cached lookups and core's.
  */

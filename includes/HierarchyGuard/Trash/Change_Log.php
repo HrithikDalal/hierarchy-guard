@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Feeds the outcome notice and Undo. One change per request, so a bulk trash
  * of three parents is one change with three roots, and a later change

@@ -11,6 +11,10 @@ namespace HierarchyGuard\Redirects;
 
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The facts Rules::resolve() asks for: the ledger, posts and core's path
  * lookups. The resolver the server runs reads them live (Live_View); a list

@@ -19,6 +19,10 @@ use HierarchyGuard\Subtree;
 use WP_Error;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Snapshots in wp_trash_post, acts in trashed_post once core has succeeded,
  * and takes back its own moves after any save that brings a page out of the

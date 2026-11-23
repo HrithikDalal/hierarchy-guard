@@ -14,6 +14,10 @@ use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Operations;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Each run holds the root's lock and steps its job until the job is done or
  * the run's time or memory runs low, then schedules the next run. An hourly

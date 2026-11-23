@@ -11,6 +11,10 @@ namespace HierarchyGuard;
 
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Stores the paths a post (or its moved children) used to live at.
  *

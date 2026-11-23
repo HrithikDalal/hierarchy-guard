@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Wires every hook to its handler.
  */

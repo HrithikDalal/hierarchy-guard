@@ -23,6 +23,10 @@ use HierarchyGuard\Trash\Change_Log;
 use WP_Post;
 use WP_Screen;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Trashing from the editor or the Pages list lands on core's "moved to the
  * Trash" notice. This adds what happened to the subpages to it once per

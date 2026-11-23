@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Export;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Builds the CSV a detected redirect plugin imports. Each layout maps a header
  * to what its cells hold: the old URL, the new one, the regex flag, the code

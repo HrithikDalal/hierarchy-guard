@@ -15,6 +15,10 @@ use HierarchyGuard\Trash\Markers;
 use HierarchyGuard\Trash\Request;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Records URL changes. Every handler returns as early and as cheaply as it
  * can. A save that records an old path is also the current user's latest

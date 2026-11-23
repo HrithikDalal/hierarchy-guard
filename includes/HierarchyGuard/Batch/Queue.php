@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Batch;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * One job slot per root page, so a trash job and a restore job for the same
  * page can never both be pending. Only the holder of the root's lock writes

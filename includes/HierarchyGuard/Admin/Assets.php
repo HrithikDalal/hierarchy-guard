@@ -17,6 +17,10 @@ use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use WP_Screen;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Enqueues the compiled bundles from build/ for the editor panel, the list
  * screen, the classic editor and the Redirects tab of Settings › Hierarchy
