@@ -605,11 +605,32 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$entries  = array_filter( $queries, fn( string $sql ): bool => str_contains( $sql, "post_id = {$this->team} AND meta_key LIKE" ) );
 		$children = array_filter( $queries, fn( string $sql ): bool => str_contains( $sql, "post_parent = {$this->team}" ) );
 		$this->assertCount( 1, $entries, 'begin_delete() reads the entries; has_entries() reuses that read.' );
-		$this->assertNotEmpty( $children );
-		foreach ( $children as $sql ) {
-			$this->assertStringNotContainsString( 'post_date', $sql, 'No query sorts every child to find one.' );
-			$this->assertStringContainsString( "FROM {$wpdb->posts}", $sql );
+		$own = "SELECT ID FROM {$wpdb->posts} WHERE post_parent = {$this->team} AND post_type = 'page' ORDER BY ID ASC LIMIT 1";
+		$this->assertContains( $own, $children, 'One child, read in the post_parent index order.' );
+		foreach ( array_diff( $children, [ $own ] ) as $sql ) {
+			$this->assertStringNotContainsString( 'ORDER BY', $sql, 'No other query sorts the children: core’s own reads are unsorted.' );
 		}
+	}
+
+	public function test_a_subpage_another_plugin_hides_from_queries_still_gets_its_path_when_its_parent_is_deleted(): void {
+		$hidden = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'hidden',
+				'post_parent' => $this->team,
+			]
+		);
+		wp_trash_post( $this->team );
+		Markers::add( $this->team, Markers::trashed_key( $this->about ), '1' );
+		$hide = static function ( \WP_Query $query ) use ( $hidden ): void {
+			$query->set( 'post__not_in', [ $hidden ] );
+		};
+		add_action( 'pre_get_posts', $hide );
+
+		wp_delete_post( $this->team, true );
+
+		remove_action( 'pre_get_posts', $hide );
+		$this->assertSame( [ 'company/about/team/hidden' ], $this->ledger->paths_for( $hidden ) );
 	}
 
 	public function test_a_subpage_trashed_with_its_parent_and_deleted_for_good_records_each_published_subpage_past_a_hundred(): void {

@@ -289,7 +289,7 @@ final class Change_Listener {
 
 		Ledger::deferred(
 			function () use ( $ids ): void {
-				// A hundred posts and their meta at a time, never the whole cap at once.
+				// Primes posts and their meta a hundred at a time, so no one query reads the whole cap.
 				foreach ( array_chunk( $ids, 100 ) as $chunk ) {
 					_prime_post_caches( $chunk, false, true );
 					foreach ( $chunk as $id ) {
