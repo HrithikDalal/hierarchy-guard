@@ -232,17 +232,7 @@ final class Markers {
 	 * @return int
 	 */
 	public static function count( int $root_id, int $cap ): int {
-		global $wpdb;
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Two seeks on the meta_key index, bounded by LIMIT.
-		return (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT(*) FROM ( SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key IN ( %s, %s ) LIMIT %d ) AS markers",
-				self::moved_key( $root_id ),
-				self::trashed_key( $root_id ),
-				max( 1, $cap )
-			)
-		);
+		return self::counts( [ $root_id ], $cap )[ $root_id ] ?? 0;
 	}
 
 	/**
