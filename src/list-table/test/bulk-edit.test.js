@@ -148,6 +148,17 @@ describe( 'the Bulk Edit warning', () => {
 		expect( box().textContent ).toContain( 'under 1 of them' );
 	} );
 
+	it( 'leaves out a selected page chosen as its own parent, which core skips', () => {
+		render( [
+			{ id: 7, children: 3, status: 'publish', checked: true, parent: 0 },
+			{ id: 5, children: 1, status: 'publish', checked: true, parent: 0 },
+		] );
+
+		choose( '7' );
+
+		expect( box().textContent ).toContain( 'under 1 of them' );
+	} );
+
 	it( 'counts again when core removes a page from the selection with its × button', async () => {
 		bindBulkEdit( window.document );
 		choose( '7' );

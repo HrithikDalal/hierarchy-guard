@@ -11,7 +11,9 @@ const BOX = 'hierarchy-guard-bulk-edit';
 /**
  * How many selected rows are published pages with subpages that the chosen
  * parent moves, from their Hierarchy cells and core's inline data, which
- * holds each row's current parent.
+ * holds each row's current parent. Core skips a page chosen as its own
+ * parent, so it isn't counted. A page chosen under one of its own subpages
+ * is skipped by core too, but the screen doesn't hold the subtree to tell.
  *
  * @param {Document} doc    The list screen.
  * @param {string}   chosen The parent chosen in the form.
@@ -31,6 +33,7 @@ function parentsSelected( doc, chosen ) {
 				cell &&
 				Number( cell.dataset.children || 0 ) > 0 &&
 				'publish' === cell.dataset.status &&
+				box.value !== chosen &&
 				! ( current && current.textContent.trim() === chosen )
 			) {
 				count++;
