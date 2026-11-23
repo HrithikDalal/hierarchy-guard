@@ -89,12 +89,19 @@ final class Processor {
 	 * left. A root another process holds is passed over: that process
 	 * schedules its own next run. So is a root whose step failed, reported
 	 * under WP_DEBUG: the watchdog restarts it, and the roots behind it go on.
+	 * A root whose step killed the run, past what a catch can stop, is passed
+	 * over by the next run, once, for the same reason.
 	 */
 	public function handle(): void {
 		$limit  = self::time_limit();
 		$start  = microtime( true );
 		$passed = [];
 		$skip   = [];
+		$died   = $this->queue->stepping();
+		if ( $died > 0 ) {
+			$passed[] = $died;
+			$skip[]   = $died;
+		}
 		$this->queue->forget_queued();
 		$this->queue->schedule();
 		do {
@@ -102,9 +109,11 @@ final class Processor {
 			foreach ( $roots as $root_id ) {
 				$left = $limit - (int) floor( microtime( true ) - $start );
 				if ( $left < 1 || $this->out_of_time( $start, 0 ) ) {
+					$this->queue->mark_stepping( 0 );
 					return;
 				}
 				$passed[] = $root_id;
+				$this->queue->mark_stepping( $root_id );
 				try {
 					if ( 'busy' === $this->run( $root_id, $left )['state'] ) {
 						$skip[] = $root_id;
@@ -124,6 +133,7 @@ final class Processor {
 			}
 		} while ( [] !== $roots );
 
+		$this->queue->mark_stepping( 0 );
 		$this->queue->unschedule();
 		if ( [] !== array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $skip ) ), $skip ) ) {
 			$this->queue->schedule();

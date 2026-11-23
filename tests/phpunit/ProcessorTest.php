@@ -227,6 +227,30 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertCount( 2, $this->queue->roots(), 'Both roots still wait.' );
 	}
 
+	public function test_a_root_a_run_died_stepping_is_passed_over_once_so_the_roots_behind_it_go_on(): void {
+		$other  = $this->queue_behind( 'other', 1 );
+		$marked = [];
+		$queue  = $this->queue;
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function () use ( $queue, &$marked ): void {
+				$marked[] = $queue->stepping();
+			}
+		);
+		// What a run that died of a fatal error while stepping About leaves.
+		$this->queue->mark_stepping( $this->ids['about'] );
+
+		$this->processor->handle();
+
+		$this->assertSame( [ $other ], $marked, 'Only Other was stepped, marked while it was.' );
+		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'About was passed over.' );
+		$this->assertSame( 0, Subtree::count_live_children( $other, 'page', 10 ) );
+		$this->assertSame( [ $this->ids['about'] ], $this->queue->roots() );
+		$this->assertSame( 0, $this->queue->stepping(), 'Cleared at the end, so the run the watchdog starts steps About again.' );
+		$this->assertFalse( $this->queue->is_scheduled(), 'About waits for the watchdog.' );
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+	}
+
 	public function test_a_run_finishes_the_job_and_removes_it(): void {
 		$finished = [];
 		add_action(

@@ -34,6 +34,7 @@ final class Queue {
 	public const OFFER_SUFFIX = '_next';
 	public const LOCK_PREFIX  = 'hierarchy_guard_lock_';
 	public const LOCK_TTL     = 300;
+	public const STEPPING     = 'hierarchy_guard_stepping';
 
 	/**
 	 * Whether this request has the run queued in Action Scheduler, so a bulk
@@ -172,6 +173,30 @@ final class Queue {
 			}
 		}
 		return array_keys( $roots );
+	}
+
+	/**
+	 * Notes the root a run is about to step, so that if the run dies of an
+	 * error nothing can catch the next run knows which root it died on.
+	 *
+	 * @param int $root_id Root page, or 0 to clear the note.
+	 */
+	public function mark_stepping( int $root_id ): void {
+		if ( $root_id > 0 ) {
+			$this->write( self::STEPPING, [ 'root' => $root_id ] );
+		} else {
+			$this->erase( self::STEPPING );
+		}
+	}
+
+	/**
+	 * The root a run was stepping when it died, or 0.
+	 *
+	 * @return int
+	 */
+	public function stepping(): int {
+		$note = $this->decode( $this->read( self::STEPPING ) );
+		return (int) ( $note['root'] ?? 0 );
 	}
 
 	/**
