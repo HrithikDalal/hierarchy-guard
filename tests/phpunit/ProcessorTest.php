@@ -193,17 +193,23 @@ final class ProcessorTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Makes each step take longer than a second, so that with
-	 * max_execution_time at 2 a run's one-second budget ends after one step.
+	 * A processor whose clock each step moves 25 seconds on, past a run's 20,
+	 * so a run's time is up after one step.
+	 *
+	 * @return Processor
 	 */
-	private function slow_steps(): void {
-		set_time_limit( 2 );
+	private function slow_steps(): Processor {
+		$now   = 1000.0;
+		$clock = static function () use ( &$now ): float {
+			return $now;
+		};
 		add_action(
 			'hierarchy_guard_children_reparented',
-			static function (): void {
-				usleep( 1100000 );
+			static function () use ( &$now ): void {
+				$now += 25;
 			}
 		);
+		return new Processor( $this->queue, new Operations( new Ledger(), new Mover() ), $this->log, $clock );
 	}
 
 	/**
@@ -214,16 +220,24 @@ final class ProcessorTest extends WP_UnitTestCase {
 		require_once __DIR__ . '/stubs/action-scheduler.php';
 		Action_Scheduler_Stub::$on = true;
 		$this->queue_behind( 'other', 1 );
-		$this->slow_steps();
-		$this->assertSame( 1, Processor::time_limit(), 'Precondition: a one-second run.' );
+		$processor = $this->slow_steps();
+		$this->assertSame( Processor::TIME_LIMIT, Processor::time_limit(), 'Precondition: a 20-second run.' );
 
-		$this->processor->handle();
+		$processor->handle();
 		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'The first run stopped early and queued its successor.' );
 
 		// Action Scheduler runs that successor in the same process: it is no longer pending.
 		Action_Scheduler_Stub::$queued = [];
-		$this->processor->handle();
+		$during                        = null;
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function () use ( &$during ): void {
+				$during = Action_Scheduler_Stub::$queued;
+			}
+		);
+		$processor->handle();
 
+		$this->assertSame( [ Queue::HOOK ], $during, 'While the second run steps, its successor is queued, so it leaves one should it die.' );
 		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'The second run queued its own successor too.' );
 		$this->assertCount( 2, $this->queue->roots(), 'Both roots still wait.' );
 	}
@@ -260,8 +274,8 @@ final class ProcessorTest extends WP_UnitTestCase {
 		require_once __DIR__ . '/stubs/action-scheduler.php';
 		Action_Scheduler_Stub::$on = true;
 		$other                     = $this->queue_behind( 'other', 2 );
-		$this->slow_steps();
-		$cleared = false;
+		$processor                 = $this->slow_steps();
+		$cleared                   = false;
 		add_action(
 			'hierarchy_guard_children_reparented',
 			static function () use ( &$cleared ): void {
@@ -273,7 +287,7 @@ final class ProcessorTest extends WP_UnitTestCase {
 			}
 		);
 
-		$this->processor->handle();
+		$processor->handle();
 
 		$this->assertSame( 3, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'About took one step of two subpages.' );
 		$this->assertSame( 2, Subtree::count_live_children( $other, 'page', 10 ), 'Other waits for the next run.' );

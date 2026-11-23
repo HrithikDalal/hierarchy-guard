@@ -61,16 +61,25 @@ final class Processor {
 	private Change_Log $log;
 
 	/**
+	 * The time in seconds, or null for microtime( true ).
+	 *
+	 * @var (callable(): float)|null
+	 */
+	private $clock;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Queue      $queue      Queue.
-	 * @param Operations $operations Operations.
-	 * @param Change_Log $log        Change log.
+	 * @param Queue                 $queue      Queue.
+	 * @param Operations            $operations Operations.
+	 * @param Change_Log            $log        Change log.
+	 * @param (callable(): float)|null $clock   The time in seconds, microtime( true ) when null.
 	 */
-	public function __construct( Queue $queue, Operations $operations, Change_Log $log ) {
+	public function __construct( Queue $queue, Operations $operations, Change_Log $log, ?callable $clock = null ) {
 		$this->queue      = $queue;
 		$this->operations = $operations;
 		$this->log        = $log;
+		$this->clock      = $clock;
 	}
 
 	/**
@@ -97,7 +106,7 @@ final class Processor {
 	 */
 	public function handle(): void {
 		$limit   = self::time_limit();
-		$start   = microtime( true );
+		$start   = $this->now();
 		$passed  = [];
 		$skip    = [];
 		$stepped = false;
@@ -112,7 +121,7 @@ final class Processor {
 			$roots = array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $passed ) ), $passed );
 			foreach ( $roots as $root_id ) {
 				// Whole seconds left; the first root always gets a step, as run() always takes one.
-				$left = (int) floor( $limit - ( microtime( true ) - $start ) );
+				$left = (int) floor( $limit - ( $this->now() - $start ) );
 				if ( $this->out_of_time( $start, 0 ) || ( $stepped && $left < 1 ) ) {
 					$this->queue->mark_stepping( 0 );
 					$this->queue->forget_queued();
@@ -170,7 +179,7 @@ final class Processor {
 			];
 		}
 
-		$start = microtime( true );
+		$start = $this->now();
 		$job   = null;
 		$last  = null;
 		$steps = 0;
@@ -355,16 +364,25 @@ final class Processor {
 	/**
 	 * Whether the run should stop: its time is up, or memory use passed 80%.
 	 *
-	 * @param float $start      microtime() at the start of the run.
+	 * @param float $start      now() at the start of the run.
 	 * @param int   $time_limit Seconds, 0 for no limit.
 	 * @return bool
 	 */
 	private function out_of_time( float $start, int $time_limit ): bool {
-		if ( $time_limit > 0 && microtime( true ) - $start >= $time_limit ) {
+		if ( $time_limit > 0 && $this->now() - $start >= $time_limit ) {
 			return true;
 		}
 		$memory = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
 		return $memory > 0 && memory_get_usage() > 0.8 * $memory;
+	}
+
+	/**
+	 * The time in seconds.
+	 *
+	 * @return float
+	 */
+	private function now(): float {
+		return null === $this->clock ? microtime( true ) : (float) ( $this->clock )();
 	}
 
 	/**
