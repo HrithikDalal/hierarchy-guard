@@ -822,6 +822,25 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ) );
 	}
 
+	public function test_the_rebuild_reads_the_ledger_s_rows_through_the_meta_key_index(): void {
+		global $wpdb;
+		$this->ledger->record( $this->about, 'old-about' );
+		$sql  = '';
+		$keep = static function ( string $query ) use ( &$sql ): string {
+			if ( str_contains( $query, 'ORDER BY pm.meta_id DESC LIMIT' ) ) {
+				$sql = $query;
+			}
+			return $query;
+		};
+		add_filter( 'query', $keep );
+		Ledger::rebuild_recent();
+		remove_filter( 'query', $keep );
+
+		$plan = $wpdb->get_results( 'EXPLAIN ' . $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The rebuild's own prepared query.
+		$this->assertSame( 'meta_key', $plan[0]['key'], 'Not a walk of the primary key through every newer row of other meta.' );
+		$this->assertSame( 'range', $plan[0]['type'] );
+	}
+
 	public function test_records_made_before_the_list_reach_it_on_the_first_rebuild(): void {
 		$first  = $this->old_entry( $this->about, 'first' );
 		$second = $this->old_entry( $this->about, 'second' );
