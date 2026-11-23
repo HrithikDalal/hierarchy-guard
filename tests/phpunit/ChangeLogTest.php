@@ -424,7 +424,7 @@ final class ChangeLogTest extends WP_UnitTestCase {
 	 */
 	private function two_site_saves( bool $end_switched ): void {
 		if ( ! is_multisite() ) {
-			$this->markTestSkipped( 'Run with WP_MULTISITE=1.' );
+			$this->markTestSkipped( 'Multisite only: run with npm run test:php:multisite.' );
 		}
 		wp_set_current_user( $this->admin );
 		Post_Types::reset();

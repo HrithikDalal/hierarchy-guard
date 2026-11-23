@@ -720,7 +720,7 @@ final class RecordsTest extends WP_UnitTestCase {
 
 	public function test_on_a_subdirectory_subsite_a_main_site_url_that_shares_a_recorded_path_saves_and_is_sent(): void {
 		if ( ! is_multisite() ) {
-			$this->markTestSkipped( 'Multisite only: run with WP_MULTISITE=1.' );
+			$this->markTestSkipped( 'Multisite only: run with npm run test:php:multisite.' );
 		}
 		$main = get_permalink( $this->ids['about'] );
 		$blog = self::factory()->blog->create( [ 'path' => '/sub/' ] );
@@ -802,7 +802,7 @@ final class RecordsTest extends WP_UnitTestCase {
 
 	public function test_on_a_subdirectory_subsite_its_home_path_is_read_in_any_case(): void {
 		if ( ! is_multisite() ) {
-			$this->markTestSkipped( 'Multisite only: run with WP_MULTISITE=1.' );
+			$this->markTestSkipped( 'Multisite only: run with npm run test:php:multisite.' );
 		}
 		$origin = untrailingslashit( home_url() );
 		$blog   = self::factory()->blog->create( [ 'path' => '/sub/' ] );

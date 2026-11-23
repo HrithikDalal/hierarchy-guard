@@ -710,7 +710,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 	public function test_a_job_on_another_site_keeps_its_record_on_that_site(): void {
 		if ( ! is_multisite() ) {
-			$this->markTestSkipped( 'Run with WP_MULTISITE=1.' );
+			$this->markTestSkipped( 'Multisite only: run with npm run test:php:multisite.' );
 		}
 		grant_super_admin( $this->admin );
 		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
