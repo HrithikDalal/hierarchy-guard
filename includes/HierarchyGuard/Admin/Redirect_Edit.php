@@ -310,10 +310,10 @@ final class Redirect_Edit {
 		if ( ! $this->records->delete( $record ) ) {
 			return $this->gone();
 		}
-		$deleted = esc_html__( 'Redirect deleted.', 'hierarchy-guard' );
-		/* translators: %s: the old URL, such as /about/team/. */
-		$through = sprintf( esc_html__( 'Hierarchy Guard no longer redirects %s.', 'hierarchy-guard' ), '<code>' . esc_html( $record['old'] ) . '</code>' );
-		return $this->notice( $deleted . ' ' . $through, 'success' );
+		// Says what was deleted, not what is no longer served: another record may still serve the same old URL.
+		/* translators: %s: the deleted redirect's old URL, such as /about/team/. */
+		$deleted = sprintf( esc_html__( 'The redirect from %s was deleted.', 'hierarchy-guard' ), '<code>' . esc_html( $record['old'] ) . '</code>' );
+		return $this->notice( $deleted, 'success' );
 	}
 
 	/**
@@ -335,9 +335,7 @@ final class Redirect_Edit {
 		}
 		/* translators: %s: number of redirects. */
 		$deleted = sprintf( _n( '%s redirect deleted.', '%s redirects deleted.', $count, 'hierarchy-guard' ), number_format_i18n( $count ) );
-		/* translators: "its" is the deleted redirect's, "their" the deleted redirects'. */
-		$through = _n( 'Hierarchy Guard no longer redirects its old URL.', 'Hierarchy Guard no longer redirects their old URLs.', $count, 'hierarchy-guard' );
-		return $this->notice( esc_html( $deleted . ' ' . $through ), 'success' );
+		return $this->notice( esc_html( $deleted ), 'success' );
 	}
 
 	/**

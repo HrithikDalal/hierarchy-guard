@@ -307,7 +307,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'Built-in redirects are off, so', $html, 'The switch is on: only the permalinks notice.' );
 	}
 
-	public function test_delete_from_a_row_deletes_the_record_and_says_its_old_url_no_longer_redirects_through_it(): void {
+	public function test_delete_from_a_row_deletes_the_record_and_says_which_redirect_was_deleted(): void {
 		$id = $this->recorded( $this->ids['about'], 'old-about' );
 		$this->ledger->set_target( 'page', 'old-about', $this->ids['about'], '', 302 );
 		$this->follow( Redirect_Edit::delete_url( $id ) );
@@ -319,7 +319,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertFalse( metadata_exists( 'post', $this->ids['about'], Ledger::target_key( 'page', 'old-about' ) ) );
 		$this->assertSame(
 			[
-				'message' => 'Redirect deleted. Hierarchy Guard no longer redirects <code>/old-about/</code>.',
+				'message' => 'The redirect from <code>/old-about/</code> was deleted.',
 				'type'    => 'success',
 			],
 			$this->kept_notice()
@@ -356,7 +356,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertSame( [], $this->ledger->paths_for( $this->ids['about'] ) );
 		$this->assertSame( [], $this->ledger->paths_for( $this->ids['team'] ) );
 		$this->assertSame( [ 'old-history' ], $this->ledger->paths_for( $this->ids['history'] ) );
-		$this->assertSame( '2 redirects deleted. Hierarchy Guard no longer redirects their old URLs.', $this->kept_notice()['message'] );
+		$this->assertSame( '2 redirects deleted.', $this->kept_notice()['message'] );
 	}
 
 	/**
@@ -524,7 +524,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		( new Redirect_Edit( $this->records ) )->handle();
 
 		$this->assertCount( 5, $this->ledger->paths_for( $this->ids['about'] ), 'Twenty deleted, one page of the table.' );
-		$this->assertSame( '20 redirects deleted. Hierarchy Guard no longer redirects their old URLs.', $this->kept_notice()['message'] );
+		$this->assertSame( '20 redirects deleted.', $this->kept_notice()['message'] );
 	}
 
 	public function test_filter_never_runs_a_bulk_delete_and_an_empty_selection_returns_to_the_list(): void {
