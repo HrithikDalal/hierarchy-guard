@@ -393,8 +393,9 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$entry         = $this->entry( 4, [] );
 		$entry['path'] = 'beta';
 		$blog          = (int) $GLOBALS['blog_id'];
-		// As switch_to_blog() sets it, which a single site does not have.
-		$GLOBALS['blog_id'] = $blog + 1;
+		// As switch_to_blog() sets it: a real site under multisite, where the
+		// change is written to that site's tables; any other ID on a single site.
+		$GLOBALS['blog_id'] = is_multisite() ? self::factory()->blog->create() : $blog + 1;
 		try {
 			$other = $this->log->record( $this->admin, 'save', 'page', $entry );
 			$this->assertNotSame( $main, $other, 'A save on another site is a change of its own.' );
@@ -405,6 +406,8 @@ final class ChangeLogTest extends WP_UnitTestCase {
 
 		$this->assertSame( $main, $this->log->latest( $this->admin )['id'] );
 		$this->assertSame( 'company/about', $this->log->latest( $this->admin )['roots'][4]['path'], 'This site’s change keeps its own root.' );
+		// Writes both changes now, so neither is left for the next test to write.
+		Change_Log::reset_request();
 	}
 
 	public function test_a_request_that_saves_on_two_sites_leaves_each_its_own_change(): void {
