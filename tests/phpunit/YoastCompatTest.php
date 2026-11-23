@@ -23,6 +23,7 @@ use Yoast\WP\SEO\Integrations\Watchers\Indexable_Post_Watcher;
  */
 final class YoastCompatTest extends WP_UnitTestCase {
 
+	use Error_Reports;
 	use Trash_Fixtures;
 
 	/**
@@ -242,31 +243,6 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->assertTrue( $yoast->skip_on_export( false, Yoast::PENDING ) );
 		$this->assertFalse( $yoast->skip_on_export( false, '_hierarchy_guard_yoast' ) );
 		$this->assertTrue( $yoast->skip_on_export( true, 'other' ) );
-	}
-
-	/**
-	 * What a callback reports through wp_trigger_error(), as
-	 * "function(): message", recorded rather than raised. WordPress 7.0 and
-	 * later announce each report even with WP_DEBUG off, as in the tests;
-	 * older versions announce none, so this returns null there.
-	 *
-	 * @param callable $run The callback.
-	 * @return string[]|null
-	 */
-	private function reports( callable $run ): ?array {
-		$reports = [];
-		$record  = static function ( string $function_name, string $message ) use ( &$reports ): void {
-			$reports[] = "{$function_name}(): {$message}";
-		};
-		add_action( 'wp_trigger_error_always_run', $record, 10, 2 );
-		add_filter( 'wp_trigger_error_trigger_error', '__return_false' );
-		try {
-			$run();
-		} finally {
-			remove_action( 'wp_trigger_error_always_run', $record, 10 );
-			remove_filter( 'wp_trigger_error_trigger_error', '__return_false' );
-		}
-		return version_compare( get_bloginfo( 'version' ), '7.0', '>=' ) ? $reports : null;
 	}
 
 	/**

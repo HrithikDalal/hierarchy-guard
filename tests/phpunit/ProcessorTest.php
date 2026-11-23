@@ -23,6 +23,7 @@ use WP_UnitTestCase;
  */
 final class ProcessorTest extends WP_UnitTestCase {
 
+	use Error_Reports;
 	use Trash_Fixtures;
 
 	/**
@@ -161,13 +162,16 @@ final class ProcessorTest extends WP_UnitTestCase {
 			2
 		);
 
-		$this->processor->handle();
+		$reports = $this->reports( fn() => $this->processor->handle() );
 
 		$this->assertTrue( $scheduled, 'A next run is scheduled while a step runs, so a run that dies leaves one.' );
 		$this->assertSame( [ $about ], $this->queue->roots(), 'Only the failed root is left.' );
 		$this->assertSame( 0, Subtree::count_live_children( $other, 'page', 10 ), 'The root behind it was stepped.' );
 		$this->assertFalse( $this->queue->is_scheduled(), 'The failed root waits for the watchdog, not the next page load.' );
 		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+		if ( null !== $reports ) {
+			$this->assertSame( [ "HierarchyGuard\\Batch\\Processor::handle(): The background job for post {$about} failed: Another plugin failed." ], $reports );
+		}
 	}
 
 	/**

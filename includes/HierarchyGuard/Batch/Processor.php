@@ -87,8 +87,8 @@ final class Processor {
 	 * next run is scheduled before the first step, so a run that dies still
 	 * leaves one, and cleared at the end unless a root this run could step is
 	 * left. A root another process holds is passed over: that process
-	 * schedules its own next run. So is a root whose step failed: the
-	 * watchdog restarts it, and the roots behind it go on.
+	 * schedules its own next run. So is a root whose step failed, reported
+	 * under WP_DEBUG: the watchdog restarts it, and the roots behind it go on.
 	 */
 	public function handle(): void {
 		$limit  = self::time_limit();
@@ -111,6 +111,15 @@ final class Processor {
 					}
 				} catch ( Throwable $e ) {
 					$skip[] = $root_id;
+					wp_trigger_error(
+						__METHOD__,
+						sprintf(
+							/* translators: 1: post ID, 2: the error's message. */
+							__( 'The background job for post %1$d failed: %2$s', 'hierarchy-guard' ),
+							$root_id,
+							$e->getMessage()
+						)
+					);
 				}
 			}
 		} while ( [] !== $roots );
