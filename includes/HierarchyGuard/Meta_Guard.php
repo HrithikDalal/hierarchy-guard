@@ -19,9 +19,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Duplicators and some translation tools copy every meta row of a post. A
  * copied ledger entry makes the copy the newest holder of an old URL, so the
  * URL redirects to the copy; a copied marker makes a restore move the copy
- * too. So the plugin's keys are written only by the plugin itself: markers
- * through their own direct insert, ledger rows inside writing(). A WordPress
- * import keeps its ledger rows, as an export carries them.
+ * too. So the plugin's keys are written and deleted only by the plugin
+ * itself: markers through their own direct SQL, the rest inside writing(). A
+ * WordPress import keeps its ledger rows, as an export carries them.
  */
 final class Meta_Guard {
 
@@ -39,6 +39,7 @@ final class Meta_Guard {
 	 */
 	public function register(): void {
 		add_filter( 'add_post_metadata', [ $this, 'refuse_copies' ], 10, 3 );
+		add_filter( 'delete_post_metadata', [ $this, 'refuse_deletes' ], 10, 3 );
 		add_filter( 'duplicate_post_excludelist_filter', [ $this, 'exclude_from_duplicates' ] );
 	}
 
@@ -71,6 +72,22 @@ final class Meta_Guard {
 			return $check;
 		}
 		return self::allowed( $key, self::$writing > 0, defined( 'WP_IMPORTING' ) && WP_IMPORTING ) ? $check : false;
+	}
+
+	/**
+	 * Refuses a delete of one of the plugin's keys that the plugin isn't
+	 * making. Yoast Duplicate Post's republish deletes each of the copy's keys
+	 * on the original before adding the copy's rows back; with those rows
+	 * refused, the delete alone would take the original's marker. Deleting a
+	 * post for good deletes its rows by meta ID, which this filter never sees.
+	 *
+	 * @param mixed $check     Null to let the delete go ahead, or an earlier callback's answer.
+	 * @param mixed $object_id Post ID.
+	 * @param mixed $meta_key  Meta key.
+	 * @return mixed False to refuse the delete, else $check.
+	 */
+	public function refuse_deletes( $check, $object_id, $meta_key ) {
+		return str_starts_with( (string) $meta_key, self::PREFIX ) && 0 === self::$writing ? false : $check;
 	}
 
 	/**

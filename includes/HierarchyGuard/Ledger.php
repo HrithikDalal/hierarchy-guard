@@ -218,7 +218,7 @@ final class Ledger {
 		$dropped = false;
 		foreach ( array_unique( array_map( 'intval', $ids ) ) as $id ) {
 			$this->drop_target( $id, $type, $path );
-			$dropped = delete_post_meta( $id, $key ) || $dropped;
+			$dropped = Meta_Guard::writing( static fn() => delete_post_meta( $id, $key ) ) || $dropped;
 		}
 		if ( $dropped ) {
 			$this->bump();
@@ -252,7 +252,7 @@ final class Ledger {
 		}
 
 		$this->drop_target( $post_id, (string) $post->post_type, $old_path );
-		delete_post_meta( $post_id, $key );
+		Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
 		$this->bump();
 
 		return true;
@@ -389,7 +389,7 @@ final class Ledger {
 		}
 
 		$this->drop_target( $post_id, (string) $post->post_type, $path );
-		delete_post_meta( $post_id, $key );
+		Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
 		$this->bump();
 
 		return 1;
@@ -575,7 +575,7 @@ final class Ledger {
 		if ( $holder > 0 ) {
 			$key = self::target_key( $post_type, $path );
 			if ( null === $target ) {
-				delete_post_meta( $holder, $key );
+				Meta_Guard::writing( static fn() => delete_post_meta( $holder, $key ) );
 			} else {
 				Meta_Guard::writing( static fn() => update_post_meta( $holder, $key, $target ) );
 			}
@@ -1167,7 +1167,7 @@ final class Ledger {
 	private function drop_target( int $post_id, string $post_type, string $path ): void {
 		$key = self::target_key( $post_type, $path );
 		if ( metadata_exists( 'post', $post_id, $key ) ) {
-			delete_post_meta( $post_id, $key );
+			Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
 		}
 	}
 

@@ -73,6 +73,33 @@ final class MetaGuardTest extends WP_UnitTestCase {
 		$this->assertSame( $this->ids['company'], (int) get_post( $copy )->post_parent );
 	}
 
+	public function test_republishing_a_rewrite_copy_keeps_the_original_s_marker_so_a_restore_moves_it_back(): void {
+		$copy = $this->duplicate( $this->ids['team'] );
+		wp_trash_post( $this->ids['about'] );
+		$this->assertSame( [ Markers::moved_key( $this->ids['about'] ) ], $this->plugin_keys( $copy ), 'Precondition: the trash moved the copy too.' );
+
+		$this->republish( $copy, $this->ids['team'] );
+		wp_untrash_post( $this->ids['about'] );
+
+		$this->assertSame( $this->ids['about'], (int) get_post( $this->ids['team'] )->post_parent );
+		$this->assertSame( [], $this->plugin_keys( $this->ids['team'] ), 'The restore took its marker off.' );
+	}
+
+	public function test_another_plugin_cannot_delete_the_plugins_rows_but_deleting_the_post_does(): void {
+		$ledger = new Ledger();
+		$ledger->record( $this->ids['history'], 'old-history' );
+		$key = Ledger::key( 'page', 'old-history' );
+
+		$this->assertFalse( delete_post_meta( $this->ids['history'], $key ) );
+		$this->assertFalse( delete_post_meta_by_key( $key ) );
+		$this->assertTrue( metadata_exists( 'post', $this->ids['history'], $key ) );
+
+		wp_delete_post( $this->ids['history'], true );
+
+		global $wpdb;
+		$this->assertSame( '0', $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id = %d", $this->ids['history'] ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads what the delete left.
+	}
+
 	public function test_the_plugins_own_writes_still_land(): void {
 		$ledger = new Ledger();
 		$ledger->record( $this->ids['history'], 'old-history' );
@@ -97,6 +124,37 @@ final class MetaGuardTest extends WP_UnitTestCase {
 		}
 	}
 
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_wordpress_import_adds_ledger_rows_but_no_marker(): void {
+		define( 'WP_IMPORTING', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Core's import flag, set as an importer sets it.
+
+		$this->assertIsInt( add_post_meta( $this->ids['team'], Ledger::key( 'page', 'imported' ), 'imported' ) );
+		$this->assertFalse( add_post_meta( $this->ids['team'], Markers::moved_key( $this->ids['about'] ), 'x' ) );
+	}
+
+	public function test_writing_nests_and_ends_even_when_the_write_throws(): void {
+		Meta_Guard::writing(
+			function (): void {
+				Meta_Guard::writing( static fn() => null );
+				$this->assertIsInt( add_post_meta( $this->ids['team'], Ledger::key( 'page', 'outer' ), 'outer' ), 'Still writing once the inner write ends.' );
+			}
+		);
+		try {
+			Meta_Guard::writing(
+				static function (): void {
+					throw new \RuntimeException( 'The write failed.' );
+				}
+			);
+		} catch ( \RuntimeException $e ) {
+			$this->assertSame( 'The write failed.', $e->getMessage() );
+		}
+
+		$this->assertFalse( add_post_meta( $this->ids['team'], Ledger::key( 'page', 'after' ), 'after' ), 'No longer writing after the failed write.' );
+	}
+
 	public function test_other_meta_is_left_alone(): void {
 		$this->assertIsInt( add_post_meta( $this->ids['team'], '_other_plugin', 'x' ) );
 		$this->assertIsInt( add_post_meta( $this->ids['team'], 'hierarchy_guard_lookalike', 'x' ) );
@@ -109,8 +167,10 @@ final class MetaGuardTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Copies a page as Yoast Duplicate Post does by default: a draft with no
-	 * slug under the same parent, with every meta row added again.
+	 * Copies a page as a duplicator that copies every meta row does, as Yoast
+	 * Duplicate Post's Rewrite & Republish does without its exclude list: a
+	 * draft with no slug under the same parent, with every meta row added
+	 * again.
 	 *
 	 * @param int $post_id Page to copy.
 	 * @return int The copy.
@@ -131,6 +191,23 @@ final class MetaGuardTest extends WP_UnitTestCase {
 			}
 		}
 		return $copy;
+	}
+
+	/**
+	 * Copies a copy's meta onto the original as Yoast Duplicate Post's
+	 * republish does: each of the copy's keys deleted on the original, then
+	 * added again with the copy's values.
+	 *
+	 * @param int $copy     The copy.
+	 * @param int $original The original.
+	 */
+	private function republish( int $copy, int $original ): void {
+		foreach ( (array) get_post_custom_keys( $copy ) as $key ) {
+			delete_post_meta( $original, $key );
+			foreach ( (array) get_post_custom_values( $key, $copy ) as $value ) {
+				add_post_meta( $original, $key, wp_slash( maybe_unserialize( $value ) ) );
+			}
+		}
 	}
 
 	/**

@@ -545,7 +545,7 @@ final class Operations {
 		foreach ( is_array( $aliases ) ? $aliases : [] as $alias ) {
 			$this->ledger->forget_alias( (string) $job['post_type'], (int) ( $alias['to'] ?? 0 ), (string) ( $alias['path'] ?? '' ) );
 		}
-		delete_post_meta( $root, Markers::ALIASES );
+		Meta_Guard::writing( static fn() => delete_post_meta( $root, Markers::ALIASES ) );
 		$this->ledger->prune( $root );
 	}
 

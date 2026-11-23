@@ -99,7 +99,7 @@ final class Yoast {
 				// Read past each flag, so one that can't be taken off is tried once a run.
 				$after = $meta_id;
 				// Taken off before the call, so a page that kills the run is not tried again forever.
-				delete_post_meta( $id, self::PENDING );
+				Meta_Guard::writing( static fn() => delete_post_meta( $id, self::PENDING ) );
 				self::build( $watcher, $id );
 			}
 		}
