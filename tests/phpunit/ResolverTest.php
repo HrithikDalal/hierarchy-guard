@@ -122,6 +122,58 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->assertSame( $this->about, $this->ledger->find( 'page', $deep ) );
 	}
 
+	/**
+	 * Request paths the site's own links never produce. A segment is cut to
+	 * 200 bytes, as core's sanitize_title() cuts it.
+	 *
+	 * @return array<string,array{0:string,1:string|null,2:int,3:array<string,string>,4:string|null}> Path, first prefix, prefixes read, hits by prefix, page it resolves to.
+	 */
+	public static function crafted_paths(): array {
+		$deep = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 60 ) ) );
+		return [
+			'all-digit segments'             => [ '2024/05/old', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'an all-digit prefix'            => [ '2024/05/old/7', '2024/05/old/7', 4, [ '2024/05/old' => 'about' ], null ],
+			'percent-encoded'                => [ '/caf%E2%80%99/', 'caf%e2%80%99', 1, [ 'caf%e2%80%99' => 'about' ], 'about' ],
+			'raw curly apostrophe'           => [ "caf\u{2019}", 'caf%e2%80%99', 1, [ 'caf%e2%80%99' => 'about' ], 'about' ],
+			'a plus sign'                    => [ 'A+B', 'a-b', 1, [ 'a-b' => 'team' ], 'team' ],
+			'upper case'                     => [ '2024/05/OLD', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'an empty segment'               => [ '2024//05/old', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'dot segments'                   => [ '../2024/05/old/.', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'encoded slashes'                => [ '%2F%2F2024%2F05/old', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'empty'                          => [ '', null, 0, [], null ],
+			'slashes only'                   => [ '///', null, 0, [], null ],
+			'sixty segments'                 => [ $deep, $deep, 50, [], null ],
+			'one five-thousand-byte segment' => [ str_repeat( 'z', 5000 ), str_repeat( 'z', 200 ), 1, [], null ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_paths
+	 *
+	 * @param string                $path     Request path.
+	 * @param string|null           $first    The first prefix read.
+	 * @param int                   $count    Prefixes read.
+	 * @param array<string,string>  $hits     Prefixes with an entry, and whose.
+	 * @param string|null           $resolves The page the path resolves to.
+	 */
+	public function test_a_crafted_path_is_looked_up_by_its_normalized_prefixes( string $path, ?string $first, int $count, array $hits, ?string $resolves ): void {
+		$this->ledger->record( $this->about, '2024/05/old' );
+		$this->ledger->record( $this->about, "caf\u{2019}" );
+		$this->ledger->record( $this->team, 'a-b' );
+		$ids = [
+			'about' => $this->about,
+			'team'  => $this->team,
+		];
+
+		$found = $this->ledger->find_prefixes( 'page', $path );
+
+		$this->assertCount( $count, $found );
+		$this->assertSame( $first, [] === $found ? null : (string) array_key_first( $found ) );
+		$this->assertSame( array_map( static fn( string $name ): int => $ids[ $name ], $hits ), array_filter( $found, static fn( ?int $id ): bool => null !== $id ) );
+		$result = $this->resolver->resolve( 'page', $path );
+		$this->assertSame( null === $resolves ? null : $ids[ $resolves ], $result instanceof \WP_Post ? $result->ID : $result );
+	}
+
 	public function test_each_prefix_of_a_path_answers_as_its_own_lookup_does(): void {
 		$this->ledger->record( $this->about, 'old-about' );
 		$this->ledger->record_root( 'page', 'archive' );
