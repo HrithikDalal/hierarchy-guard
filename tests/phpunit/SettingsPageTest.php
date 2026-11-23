@@ -219,7 +219,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
-		$this->assertStringContainsString( 'Custom Redirects is active and can serve these redirects instead.', $html );
+		$this->assertStringContainsString( 'Custom Redirects is active and can redirect old URLs to their new pages instead.', $html );
 	}
 
 	public function test_trash_policy_field_renders_three_radios_with_the_stored_choice(): void {
@@ -287,7 +287,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
-		$this->assertStringContainsString( 'A redirect plugin is active and can serve these redirects instead.', $html );
+		$this->assertStringContainsString( 'A redirect plugin is active and can redirect old URLs to their new pages instead.', $html );
 	}
 
 	public function test_settings_links_open_the_page_at_their_field(): void {

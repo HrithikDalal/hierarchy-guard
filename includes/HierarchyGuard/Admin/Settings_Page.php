@@ -435,9 +435,9 @@ final class Settings_Page {
 		$name = null !== $provider ? trim( (string) ( $provider['name'] ?? '' ) ) : '';
 		if ( null !== $provider && '' !== $name ) {
 			/* translators: %s: name of the detected redirect plugin. */
-			$help = sprintf( __( '%s is active and can serve these redirects instead.', 'hierarchy-guard' ), $name );
+			$help = sprintf( __( '%s is active and can redirect old URLs to their new pages instead.', 'hierarchy-guard' ), $name );
 		} elseif ( null !== $provider ) {
-			$help = __( 'A redirect plugin is active and can serve these redirects instead.', 'hierarchy-guard' );
+			$help = __( 'A redirect plugin is active and can redirect old URLs to their new pages instead.', 'hierarchy-guard' );
 		} elseif ( Settings::serve_redirects() ) {
 			$help = __( 'No redirect plugin was found.', 'hierarchy-guard' );
 		} else {
