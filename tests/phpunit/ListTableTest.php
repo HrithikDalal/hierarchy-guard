@@ -292,6 +292,41 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertSame( [ $this->ids['history'], $early, $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'], 'Not level by level, where branches interleave.' );
 	}
 
+	/**
+	 * Sort orders the list's own links never send.
+	 *
+	 * @return array<string,array{0:mixed,1:mixed}> The orderby query var, the orderby the list query gets.
+	 */
+	public static function crafted_orderby(): array {
+		return [
+			'post__in itself' => [ 'post__in', 'post__in' ],
+			'wrong case'      => [ 'Menu_Order Title', 'Menu_Order Title' ],
+			'an array'        => [ [ 'title' ], [ 'title' ] ],
+			'empty'           => [ '', '' ],
+			'slashed'         => [ 'menu_order\\ title', 'menu_order\\ title' ],
+			'none'            => [ null, null ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_orderby
+	 *
+	 * @param mixed $orderby  The orderby query var, null for none.
+	 * @param mixed $expected The orderby the list query gets, null for none.
+	 */
+	public function test_a_crafted_orderby_is_left_as_sent_and_the_subtree_still_filters( $orderby, $expected ): void {
+		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
+		$vars                          = [ 'post_type' => 'page' ];
+		if ( null !== $orderby ) {
+			$vars['orderby'] = $orderby;
+		}
+
+		$vars = $this->table->filter_request( $vars );
+
+		$this->assertSame( $expected, $vars['orderby'] ?? null );
+		$this->assertSame( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'] );
+	}
+
 	public function test_a_sorted_list_keeps_its_sort(): void {
 		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
 
