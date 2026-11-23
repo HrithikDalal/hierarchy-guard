@@ -34,6 +34,8 @@ final class Subtree {
 		/**
 		 * Filters the cap on subtree counts.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param int $cap Largest count reported exactly, 1,000 by default.
 		 */
 		return max( 1, (int) apply_filters( 'hierarchy_guard_count_cap', self::COUNT_CAP ) );

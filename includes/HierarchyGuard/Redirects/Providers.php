@@ -80,6 +80,8 @@ final class Providers {
 		/**
 		 * Filters the redirect plugins Hierarchy Guard can detect.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param array<string,array{name:string,active:bool,url:string,csv:string,note?:string}> $providers Keyed by slug: the plugin's name, whether it is active, its redirects screen, one of the Csv::LAYOUTS names, and an optional sentence shown before importing.
 		 */
 		return (array) apply_filters( 'hierarchy_guard_redirect_providers', $providers );

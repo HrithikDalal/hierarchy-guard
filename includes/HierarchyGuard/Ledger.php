@@ -136,6 +136,8 @@ final class Ledger {
 		/**
 		 * Filters whether an old path is recorded for a post.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param bool    $record   Whether to record.
 		 * @param WP_Post $post     The post the path maps to.
 		 * @param string  $old_path The normalized old path.

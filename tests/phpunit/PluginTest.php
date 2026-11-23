@@ -13,6 +13,7 @@ use HierarchyGuard\Batch\Queue;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Meta_Guard;
 use HierarchyGuard\Plugin;
+use HierarchyGuard\Redirects\Server;
 use HierarchyGuard\Trash\Operations;
 use WP_UnitTestCase;
 
@@ -92,6 +93,90 @@ final class PluginTest extends WP_UnitTestCase {
 		$this->assertSame( 1700000000, (int) get_option( Plugin::NETWORK_OPTION ) );
 		$jobs->delete( $root );
 		wp_clear_scheduled_hook( Queue::WATCHDOG );
+	}
+
+	public function test_an_integration_can_reach_and_unhook_the_plugin_s_own_objects(): void {
+		$server = Plugin::instance()->get( Server::class );
+
+		$this->assertInstanceOf( Server::class, $server );
+		$this->assertSame( $server, Plugin::instance()->get( '\\' . Server::class ), 'With or without the leading backslash.' );
+		$this->assertSame( Server::PRIORITY, has_action( 'template_redirect', [ $server, 'maybe_redirect' ] ) );
+		$this->assertTrue( remove_action( 'template_redirect', [ $server, 'maybe_redirect' ], Server::PRIORITY ) );
+		add_action( 'template_redirect', [ $server, 'maybe_redirect' ], Server::PRIORITY );
+		$this->assertInstanceOf( Ledger::class, Plugin::instance()->get( Ledger::class ) );
+		$this->assertNull( Plugin::instance()->get( 'Nope' ) );
+	}
+
+	public function test_every_public_hook_says_since_when(): void {
+		$public    = [];
+		$seen      = [];
+		$elsewhere = 0;
+		$root      = dirname( __DIR__, 2 ) . '/includes';
+		foreach ( new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS ) ) as $file ) {
+			$code  = (string) file_get_contents( $file->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local source file.
+			$class = basename( $file->getPathname(), '.php' );
+			preg_match_all( '#\b(?:apply_filters|do_action)(?:_ref_array|_deprecated)?\(\s*([^,)]+?)\s*[,)]#', $code, $calls, PREG_OFFSET_CAPTURE );
+			foreach ( $calls[1] as [ $hook, $offset ] ) {
+				$hook   = str_replace( 'self::', $class . '::', $hook );
+				$seen[] = $hook;
+				if ( 1 !== preg_match( "#^'(hierarchy_guard_[a-z_]+)'$#", $hook, $name ) ) {
+					continue;
+				}
+				// The docblock right above the call's own line.
+				$before = substr( $code, 0, $offset );
+				$end    = (int) strrpos( $before, '*/' );
+				$doc    = substr( $before, (int) strrpos( substr( $before, 0, $end ), '/**' ), $end );
+				$this->assertSame( 1, preg_match( '#\A[ \t]*\n[^\n;{}]*\z#', substr( $before, $end + 2 ) ), $name[1] . ' has a docblock right above it.' );
+				if ( str_contains( $doc, 'is documented in' ) ) {
+					++$elsewhere;
+					$this->assertSame( 'hierarchy_guard_children_reparented', $name[1], 'Only the restore\'s second call refers to another docblock.' );
+					continue;
+				}
+				$this->assertStringContainsString( '@since 1.0.0', $doc, $name[1] );
+				$public[] = $name[1];
+			}
+		}
+
+		sort( $public );
+		$this->assertSame(
+			[
+				'hierarchy_guard_batch_threshold',
+				'hierarchy_guard_children_reparented',
+				'hierarchy_guard_core_call_threshold',
+				'hierarchy_guard_count_cap',
+				'hierarchy_guard_default_trash_policy',
+				'hierarchy_guard_job_finished',
+				'hierarchy_guard_max_segments',
+				'hierarchy_guard_post_types',
+				'hierarchy_guard_redirect_providers',
+				'hierarchy_guard_redirect_status',
+				'hierarchy_guard_redirect_url',
+				'hierarchy_guard_should_record',
+				'hierarchy_guard_trash_policy',
+			],
+			$public,
+			'The 13 public hooks, each documented once.'
+		);
+		$this->assertSame( 1, $elsewhere );
+
+		// Every other call is a core hook or one of the two internal signals, each counted.
+		$others = array_count_values( array_diff( $seen, array_map( static fn( string $hook ): string => "'{$hook}'", $public ), [ "'hierarchy_guard_children_reparented'" ] ) );
+		ksort( $others );
+		$this->assertSame(
+			[
+				'"edit_{$post_type}_per_page"' => 1,
+				"'edit_posts_per_page'"        => 1,
+				"'the_title'"                  => 1,
+				"'wp_check_post_lock_window'"  => 1,
+				'List_Table::SCRIPT'           => 5,
+				'Tree_View::SCRIPT'            => 1,
+			],
+			$others
+		);
+		foreach ( [ 'Admin/List_Table.php', 'Admin/Tree_View.php' ] as $declares ) {
+			$code = (string) file_get_contents( $root . '/HierarchyGuard/' . $declares ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local source file.
+			$this->assertSame( 1, preg_match( '#@internal\s*\*/\s*do_action\( self::SCRIPT \)#', $code ), $declares . ' marks its signal internal.' );
+		}
 	}
 
 	public function test_the_main_file_and_every_file_in_includes_stop_when_requested_directly(): void {

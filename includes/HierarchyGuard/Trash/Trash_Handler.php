@@ -131,6 +131,8 @@ final class Trash_Handler {
 		/**
 		 * Filters the trash policy for one page with subpages.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param string  $policy One of Settings::POLICIES.
 		 * @param WP_Post $post   The page being trashed.
 		 */

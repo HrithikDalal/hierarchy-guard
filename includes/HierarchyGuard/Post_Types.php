@@ -50,6 +50,8 @@ final class Post_Types {
 		/**
 		 * Filters the post types Hierarchy Guard acts on.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param string[] $types Post type names.
 		 */
 		$types = (array) apply_filters( 'hierarchy_guard_post_types', $types );

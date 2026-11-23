@@ -91,6 +91,8 @@ final class Settings {
 		/**
 		 * Filters the default trash policy.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param string $policy One of Settings::POLICIES.
 		 */
 		$policy = (string) apply_filters( 'hierarchy_guard_default_trash_policy', $policy );

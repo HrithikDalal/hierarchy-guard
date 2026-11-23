@@ -36,6 +36,13 @@ final class Plugin {
 	private bool $registered = false;
 
 	/**
+	 * The objects register() created, by class name.
+	 *
+	 * @var array<string,object>
+	 */
+	private array $services = [];
+
+	/**
 	 * Returns the shared instance.
 	 *
 	 * @return Plugin
@@ -45,6 +52,32 @@ final class Plugin {
 			self::$instance = new self();
 		}
 		return self::$instance;
+	}
+
+	/**
+	 * The plugin's object of a class, as it was hooked in, or null. With it
+	 * an integration can unhook one part, for example the redirect server:
+	 * remove_action( 'template_redirect', [ Plugin::instance()->get( Redirects\Server::class ), 'maybe_redirect' ], 9 ).
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $class_name Class name, such as Redirects\Server::class.
+	 * @return object|null
+	 */
+	public function get( string $class_name ): ?object {
+		return $this->services[ ltrim( $class_name, '\\' ) ] ?? null;
+	}
+
+	/**
+	 * Keeps an object register() creates, for get().
+	 *
+	 * @template T of object
+	 * @param T $service The object.
+	 * @return T
+	 */
+	private function keep( object $service ): object {
+		$this->services[ get_class( $service ) ] = $service;
+		return $service;
 	}
 
 	/**
@@ -116,35 +149,35 @@ final class Plugin {
 		add_action( Ledger::REBUILD_HOOK, [ Ledger::class, 'rebuild_recent' ] );
 		add_action( 'admin_init', [ self::class, 'maybe_upgrade' ] );
 
-		$ledger    = new Ledger();
-		$log       = new Trash\Change_Log();
-		$providers = new Redirects\Providers();
-		( new Change_Listener( $ledger, $log ) )->register();
-		( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
+		$ledger    = $this->keep( new Ledger() );
+		$log       = $this->keep( new Trash\Change_Log() );
+		$providers = $this->keep( new Redirects\Providers() );
+		$this->keep( new Change_Listener( $ledger, $log ) )->register();
+		$this->keep( new Redirects\Server( new Redirects\Resolver( $ledger ) ) )->register();
 		add_action( 'init', [ Settings::class, 'register_option' ] );
-		( new Admin\Settings_Page( $providers, new Redirects\Records( $ledger ) ) )->register();
-		( new Trash\Markers() )->register();
-		( new Meta_Guard() )->register();
+		$this->keep( new Admin\Settings_Page( $providers, new Redirects\Records( $ledger ) ) )->register();
+		$this->keep( new Trash\Markers() )->register();
+		$this->keep( new Meta_Guard() )->register();
 
-		$queue      = new Batch\Queue();
-		$operations = new Trash\Operations( $ledger, new Trash\Mover() );
-		$processor  = new Batch\Processor( $queue, $operations, $log );
+		$queue      = $this->keep( new Batch\Queue() );
+		$operations = $this->keep( new Trash\Operations( $ledger, new Trash\Mover() ) );
+		$processor  = $this->keep( new Batch\Processor( $queue, $operations, $log ) );
 		$processor->register();
-		( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
-		( new Compat\Yoast() )->register();
+		$this->keep( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
+		$this->keep( new Compat\Yoast() )->register();
 
-		$pairs    = new Redirects\Pairs();
-		$overview = new Overview( $providers, $log );
-		( new Admin\Notices( $log, $queue, $pairs, $providers ) )->register();
-		$tree = new Admin\Tree_View();
+		$pairs    = $this->keep( new Redirects\Pairs() );
+		$overview = $this->keep( new Overview( $providers, $log ) );
+		$this->keep( new Admin\Notices( $log, $queue, $pairs, $providers ) )->register();
+		$tree = $this->keep( new Admin\Tree_View() );
 		$tree->register();
-		( new Admin\List_Table( $tree ) )->register();
-		( new REST\Hierarchy_Controller( $overview ) )->register();
-		( new REST\Csv_Download() )->register();
-		( new Admin\Trash_Choice() )->register();
-		( new REST\Changes_Controller( $log, $pairs ) )->register();
-		( new Admin\Meta_Box( $overview ) )->register();
-		( new Admin\Assets( $providers ) )->register();
+		$this->keep( new Admin\List_Table( $tree ) )->register();
+		$this->keep( new REST\Hierarchy_Controller( $overview ) )->register();
+		$this->keep( new REST\Csv_Download() )->register();
+		$this->keep( new Admin\Trash_Choice() )->register();
+		$this->keep( new REST\Changes_Controller( $log, $pairs ) )->register();
+		$this->keep( new Admin\Meta_Box( $overview ) )->register();
+		$this->keep( new Admin\Assets( $providers ) )->register();
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			\WP_CLI::add_command( 'hierarchy-guard', new Batch\CLI_Command( $queue, $processor ) );

@@ -134,6 +134,8 @@ final class Server {
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param int          $status Status code: the 301 or 302 chosen on the Redirects tab, or else 301, or 302 while a restore from the trash could still undo the move the redirect follows.
 		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
 		 * @param string       $path   The requested path, normalized, suffixes removed.
@@ -147,6 +149,8 @@ final class Server {
 		 * Filters the URL a hierarchy redirect sends visitors to. A page
 		 * target's URL still passes wp_validate_redirect(); a URL target's is
 		 * sent only while it is http(s).
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param string       $url    Target URL, with the request's query string appended.
 		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
@@ -303,6 +307,8 @@ final class Server {
 	public static function max_segments(): int {
 		/**
 		 * Filters the maximum number of path segments a request may have to be resolved.
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param int $max Segment cap.
 		 */

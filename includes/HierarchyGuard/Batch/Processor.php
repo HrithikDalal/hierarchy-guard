@@ -206,6 +206,8 @@ final class Processor {
 					/**
 					 * Fires when a background batch job completes.
 					 *
+					 * @since 1.0.0
+					 *
 					 * @param array<string,mixed> $job The finished job.
 					 */
 					do_action( 'hierarchy_guard_job_finished', $job );

@@ -75,6 +75,8 @@ final class Operations {
 		/**
 		 * Filters how many subpages one step moves with a direct update.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param int $threshold Moves per step, 200 by default.
 		 */
 		return max( 1, (int) apply_filters( 'hierarchy_guard_batch_threshold', self::DEFAULT_THRESHOLD ) );
@@ -89,6 +91,8 @@ final class Operations {
 		/**
 		 * Filters how many subpages one step trashes or restores through core,
 		 * which runs every plugin's save hooks for each of them.
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param int $threshold Core calls per step, 25 by default.
 		 */
@@ -268,6 +272,8 @@ final class Operations {
 			 * when their parent is trashed and again when it is restored. No
 			 * save_post runs for them, so search indexes and SEO plugins that cache
 			 * permalinks can re-sync these IDs here.
+			 *
+			 * @since 1.0.0
 			 *
 			 * @param int[] $ids  Moved post IDs.
 			 * @param int   $from The parent they left: the trashed page, or on restore the page they had moved up to, 0 for top level.
