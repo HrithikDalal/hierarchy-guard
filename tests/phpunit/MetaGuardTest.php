@@ -130,9 +130,14 @@ final class MetaGuardTest extends WP_UnitTestCase {
 	 */
 	public function test_a_wordpress_import_adds_ledger_rows_but_no_marker(): void {
 		define( 'WP_IMPORTING', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Core's import flag, set as an importer sets it.
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+		$changed = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
 
 		$this->assertIsInt( add_post_meta( $this->ids['team'], Ledger::key( 'page', 'imported' ), 'imported' ) );
 		$this->assertFalse( add_post_meta( $this->ids['team'], Markers::moved_key( $this->ids['about'] ), 'x' ) );
+
+		$this->assertNotSame( $changed, wp_cache_get_last_changed( Ledger::CACHE_GROUP ), 'Lookups cached before the import read the ledger again.' );
+		$this->assertLessThanOrEqual( time(), wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The imported entry reaches the newest records soon.' );
 	}
 
 	public function test_writing_nests_and_ends_even_when_the_write_throws(): void {

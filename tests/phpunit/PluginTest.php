@@ -43,6 +43,21 @@ final class PluginTest extends WP_UnitTestCase {
 		$this->assertSame( $queries, get_num_queries(), 'Set up already: an autoloaded read.' );
 	}
 
+	public function test_activation_sets_the_site_up(): void {
+		$root = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$jobs = new Queue();
+		$jobs->save( Operations::new_job( Operations::TYPE_REPARENT, $root, 'page', 0, [ 'to' => 0 ] ) );
+		delete_option( Plugin::VERSION_OPTION );
+		wp_clear_scheduled_hook( Queue::WATCHDOG );
+
+		do_action( 'activate_' . plugin_basename( HIERARCHY_GUARD_FILE ), false ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's activation hook for this plugin.
+
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ), 'The job waiting from before is resumed.' );
+		$this->assertSame( HIERARCHY_GUARD_VERSION, get_option( Plugin::VERSION_OPTION ) );
+		$jobs->delete( $root );
+		wp_clear_scheduled_hook( Queue::WATCHDOG );
+	}
+
 	public function test_an_update_schedules_the_rebuild_a_site_with_entries_needs(): void {
 		$page = self::factory()->post->create( [ 'post_type' => 'page' ] );
 		Meta_Guard::writing( static fn() => add_post_meta( $page, Ledger::key( 'page', 'old' ), 'old', true ) );

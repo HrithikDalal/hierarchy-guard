@@ -51,7 +51,10 @@ final class Plugin {
 	 * What a site needs once, on activation, after an update and after a
 	 * network activation: the watchdog when jobs wait, the daily rebuild when
 	 * the ledger holds entries, and Yoast's run when pages wait for it.
-	 * Records the version and the network activation it was done for.
+	 * Records the version and the network activation it was done for. Core
+	 * stores a network activation's time only after the activation hook
+	 * runs, so on the site that hook ran on, 0 is recorded, and its next
+	 * admin load runs setup() once more.
 	 */
 	public static function setup(): void {
 		Batch\Processor::activate();
