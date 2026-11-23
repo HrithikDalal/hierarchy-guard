@@ -76,7 +76,7 @@ final class Processor {
 	 * @param mixed $root_id Root page, as the scheduler passes it.
 	 */
 	public function handle( $root_id ): void {
-		$this->run( (int) $root_id, $this->time_limit() );
+		$this->run( (int) $root_id, self::time_limit() );
 	}
 
 	/**
@@ -259,7 +259,7 @@ final class Processor {
 	 *
 	 * @return int
 	 */
-	private function time_limit(): int {
+	public static function time_limit(): int {
 		$max   = (int) ini_get( 'max_execution_time' );
 		$limit = self::TIME_LIMIT;
 		if ( $max > 0 ) {

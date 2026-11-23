@@ -78,6 +78,7 @@ final class Plugin {
 		$processor  = new Batch\Processor( $queue, $operations, $log );
 		$processor->register();
 		( new Trash\Trash_Handler( $ledger, $operations, $queue, $log ) )->register();
+		( new Compat\Yoast() )->register();
 
 		$pairs    = new Redirects\Pairs();
 		$overview = new Overview( $providers, $log );
