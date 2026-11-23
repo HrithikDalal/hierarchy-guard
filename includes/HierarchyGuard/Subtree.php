@@ -224,8 +224,9 @@ final class Subtree {
 	/**
 	 * Live children of the given parents, at most $limit, in menu order then
 	 * title then ID. The first query follows the post_parent index in its own
-	 * order and stops at the limit; the second sorts only that bounded set. No
-	 * query reads every child of a large parent.
+	 * order and stops at the limit, so past it the set is the oldest
+	 * children, by ID; the second sorts only that bounded set. No query reads
+	 * every child of a large parent.
 	 *
 	 * @param int[]  $parent_ids Parent post IDs; 0 stands for top level.
 	 * @param string $post_type  Post type name.
@@ -254,29 +255,45 @@ final class Subtree {
 	}
 
 	/**
-	 * Live descendants level by level, stopping at the cap.
+	 * Live descendants in the order a tree lists them, stopping at the cap:
+	 * each page followed by its own subpages, siblings in menu order then
+	 * title. The levels are read one query each, nearest the root first, so
+	 * past the cap the levels nearest the root are the ones kept.
 	 *
 	 * @param int    $root_id   Root post ID.
 	 * @param string $post_type Post type name.
 	 * @param int    $cap       Most IDs to return.
-	 * @return array{ids:int[],capped:bool} IDs root-near first, each level in menu order; capped when more exist.
+	 * @return array{ids:int[],capped:bool} IDs in tree order; capped when more exist.
 	 */
 	public static function descendant_ids( int $root_id, string $post_type, int $cap ): array {
 		$cap   = max( 1, $cap );
-		$ids   = [];
+		$rows  = [];
 		$found = 0;
 		$level = [ $root_id ];
 		$depth = 0;
 
 		while ( [] !== $level && $found <= $cap && $depth < 50 ) {
 			++$depth;
-			$level  = array_map( 'intval', array_column( self::ordered_children( $level, $post_type, $cap + 1 - $found ), 'ID' ) );
-			$ids    = array_merge( $ids, $level );
-			$found += count( $level );
+			$read   = self::ordered_children( $level, $post_type, $cap + 1 - $found );
+			$rows   = array_merge( $rows, $read );
+			$found += count( $read );
+			$level  = array_map( 'intval', array_column( $read, 'ID' ) );
+		}
+
+		$kids = [];
+		foreach ( array_slice( $rows, 0, $cap ) as $row ) {
+			$kids[ (int) $row['post_parent'] ][] = (int) $row['ID'];
+		}
+		$ids   = [];
+		$stack = array_reverse( $kids[ $root_id ] ?? [] );
+		while ( [] !== $stack ) {
+			$id    = array_pop( $stack );
+			$ids[] = $id;
+			$stack = array_merge( $stack, array_reverse( $kids[ $id ] ?? [] ) );
 		}
 
 		return [
-			'ids'    => array_slice( $ids, 0, $cap ),
+			'ids'    => $ids,
 			'capped' => $found > $cap,
 		];
 	}

@@ -441,7 +441,7 @@ describe( 'the Tree view', () => {
 
 	it( 'says past the cap that only the first are shown', () => {
 		expect( treeCappedSentence( 1000 ) ).toBe(
-			'Only the first 1,000 subpages are shown.'
+			'Only the 1,000 oldest subpages are shown.'
 		);
 	} );
 

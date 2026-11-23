@@ -123,16 +123,19 @@ final class SubtreeTest extends WP_UnitTestCase {
 		$this->assertSame( [], Subtree::child_counts( [], 'page', 2 ) );
 	}
 
-	public function test_descendant_ids_walks_level_by_level_up_to_the_cap(): void {
+	public function test_descendant_ids_lists_a_subtree_in_tree_order_up_to_the_cap(): void {
+		$team_b = $this->page( 'team-b', $this->ids['history'] );
+
 		$all = Subtree::descendant_ids( $this->ids['company'], 'page', 10 );
-		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $all['ids'], 'Level by level, each in menu order then title.' );
+		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $team_b, $this->ids['team'], $this->ids['leadership'] ], $all['ids'], 'Each page followed by its subpages, siblings in menu order then title.' );
 		$this->assertFalse( $all['capped'] );
 
+		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $this->ids['team'] ], Subtree::descendant_ids( $this->ids['company'], 'page', 3 )['ids'], 'Past the cap, the levels nearest the root stay.' );
 		$two = Subtree::descendant_ids( $this->ids['company'], 'page', 2 );
 		$this->assertSame( [ $this->ids['about'], $this->ids['history'] ], $two['ids'] );
 		$this->assertTrue( $two['capped'] );
 
-		$exact = Subtree::descendant_ids( $this->ids['company'], 'page', 4 );
+		$exact = Subtree::descendant_ids( $this->ids['company'], 'page', 5 );
 		$this->assertFalse( $exact['capped'], 'Exactly the cap is not capped.' );
 	}
 

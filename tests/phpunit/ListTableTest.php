@@ -273,16 +273,23 @@ final class ListTableTest extends WP_UnitTestCase {
 		);
 
 		$this->assertSame( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'] );
-		$this->assertSame(
-			[
-				'menu_order' => 'ASC',
-				'title'      => 'ASC',
-			],
-			$vars['orderby'],
-			'Not core’s tree mode, which loads every page.'
-		);
+		$this->assertSame( 'post__in', $vars['orderby'], 'The walk’s tree order, and not core’s tree mode, which loads every page.' );
 		$this->assertSame( 20, $vars['posts_per_page'] );
 		$this->assertArrayNotHasKey( 'fields', $vars );
+	}
+
+	public function test_the_filter_lists_each_page_followed_by_its_own_subpages(): void {
+		$early                         = $this->page( 'aa-early', $this->ids['history'] );
+		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
+
+		$vars = $this->table->filter_request(
+			[
+				'post_type' => 'page',
+				'orderby'   => 'menu_order title',
+			]
+		);
+
+		$this->assertSame( [ $this->ids['history'], $early, $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'], 'Not level by level, where branches interleave.' );
 	}
 
 	public function test_a_sorted_list_keeps_its_sort(): void {
@@ -499,7 +506,7 @@ final class ListTableTest extends WP_UnitTestCase {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
 		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
 
-		$this->assertStringContainsString( '<span class="hierarchy-guard-capped">Only the first 1 subpage is shown.</span>', $this->cell( $this->ids['about'] ) );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-capped">Only the 1 oldest subpage is shown.</span>', $this->cell( $this->ids['about'] ) );
 	}
 
 	public function test_a_tree_row_the_user_may_not_edit_has_no_toggle_but_keeps_its_count(): void {

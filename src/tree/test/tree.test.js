@@ -233,7 +233,7 @@ describe( 'the tree grid', () => {
 		expect( row( 30 ).hasAttribute( 'aria-posinset' ) ).toBe( false );
 		expect(
 			document.querySelector( '.hierarchy-guard-capped' ).textContent
-		).toBe( 'Only the first 1,000 subpages are shown.' );
+		).toBe( 'Only the 1,000 oldest subpages are shown.' );
 	} );
 
 	it( 'collapses every open row without a request', async () => {

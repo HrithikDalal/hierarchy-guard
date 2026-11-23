@@ -264,7 +264,7 @@ final class List_Table {
 			$parts[] = '<span class="hierarchy-guard-capped">' . esc_html(
 				sprintf(
 					/* translators: %s: the most subpages the tree shows, such as 1,000. */
-					_n( 'Only the first %s subpage is shown.', 'Only the first %s subpages are shown.', $cap, 'hierarchy-guard' ),
+					_n( 'Only the %s oldest subpage is shown.', 'Only the %s oldest subpages are shown.', $cap, 'hierarchy-guard' ),
 					Subtree::format_count( $cap )
 				)
 			) . '</span>';
@@ -352,9 +352,10 @@ final class List_Table {
 	}
 
 	/**
-	 * Narrows the list query to the filtered page's subtree, and asks for a
-	 * sort order so core renders normal paginated rows rather than loading
-	 * every page for its indented tree.
+	 * Narrows the list query to the filtered page's subtree. Unless a column
+	 * is sorted, the rows come in the walk's tree order, each page followed by
+	 * its own subpages; that sort also makes core render normal paginated
+	 * rows rather than loading every page for its indented tree.
 	 *
 	 * @param mixed $vars Query vars.
 	 * @return mixed
@@ -373,11 +374,8 @@ final class List_Table {
 		$vars['post__in'] = [] !== $walk['ids'] ? $walk['ids'] : [ 0 ];
 
 		if ( 'menu_order title' === ( $vars['orderby'] ?? '' ) ) {
-			$vars['orderby'] = [
-				'menu_order' => 'ASC',
-				'title'      => 'ASC',
-			];
-			unset( $vars['fields'], $vars['posts_per_archive_page'] );
+			$vars['orderby'] = 'post__in';
+			unset( $vars['order'], $vars['fields'], $vars['posts_per_archive_page'] );
 			$vars['posts_per_page'] = self::per_page( $type );
 		}
 

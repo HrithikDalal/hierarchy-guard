@@ -263,7 +263,7 @@ final class Overview {
 			return [];
 		}
 
-		// The first $cap children in menu order, read without sorting every child of a large parent.
+		// The $cap oldest children, in menu order: read without sorting every child of a large parent.
 		$rows = array_slice( Subtree::ordered_children( [ $parent_id ], $type, $cap ), $offset, $per_page );
 		$ids  = array_map( static fn( array $row ): int => (int) $row['ID'], $rows );
 		// Their meta and terms too, in one query each, so each row's edit lock and classes are read from the cache.

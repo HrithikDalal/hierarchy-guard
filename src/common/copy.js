@@ -897,7 +897,8 @@ export function treeShownLine( shown, total, capped = false ) {
 }
 
 /**
- * The Tree view's last row past the cap: "Only the first 1,000 subpages are shown."
+ * The Tree view's last row past the cap: "Only the 1,000 oldest subpages are shown.",
+ * in menu order, as the route reads a large parent's subpages without sorting every one.
  *
  * @param {number} cap The most subpages the tree shows.
  * @return {string} Sentence.
@@ -906,8 +907,8 @@ export function treeCappedSentence( cap ) {
 	return sprintf(
 		/* translators: %s: the most subpages the tree shows, such as 1,000. */
 		_n(
-			'Only the first %s subpage is shown.',
-			'Only the first %s subpages are shown.',
+			'Only the %s oldest subpage is shown.',
+			'Only the %s oldest subpages are shown.',
 			cap,
 			'hierarchy-guard'
 		),
