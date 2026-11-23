@@ -174,6 +174,22 @@ final class ResolverTest extends WP_UnitTestCase {
 		$this->assertSame( null === $resolves ? null : $ids[ $resolves ], $result instanceof \WP_Post ? $result->ID : $result );
 	}
 
+	public function test_a_holder_trashed_after_its_prefix_was_read_is_checked_again_on_the_next_ask(): void {
+		global $wpdb;
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->record_root( 'page', 'old-about' );
+		$view = new Live_View( $this->ledger );
+		$this->assertNull( $view->find( 'page', 'old-about/x' ) );
+		$this->assertSame( $this->about, $view->find( 'page', 'old-about' ) );
+
+		// Trashing the holder does not touch the ledger.
+		$wpdb->update( $wpdb->posts, [ 'post_status' => 'trash' ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+
+		$this->assertSame( 0, $view->find( 'page', 'old-about' ), 'The root list answers, as find() does.' );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'old-about' ) );
+	}
+
 	public function test_each_prefix_of_a_path_answers_as_its_own_lookup_does(): void {
 		$this->ledger->record( $this->about, 'old-about' );
 		$this->ledger->record_root( 'page', 'archive' );

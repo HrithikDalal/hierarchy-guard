@@ -419,18 +419,34 @@ final class Ledger {
 
 	/**
 	 * What a path and the next shorter prefixes of it used to lead to, as
-	 * find() answers each: up to PREFIXES_PER_READ of them, read in one query
-	 * and cached under the path as one answer per prefix. So a 404 several
-	 * segments deep costs what a one-segment one does, and a path of any
-	 * depth costs a bounded query, cache entry and memory per call. A caller
-	 * that needs a shorter prefix than those answered asks again from it, so
-	 * every depth is looked up.
+	 * find() answers each: holders() read through answer().
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Path, any form; normalized here.
 	 * @return array<string,int|null> By prefix, the path itself first: post ID, 0 for the root list, null when unknown.
 	 */
 	public function find_prefixes( string $post_type, string $path ): array {
+		$out = [];
+		foreach ( $this->holders( $post_type, $path ) as $prefix => $id ) {
+			$out[ $prefix ] = $this->answer( $post_type, (string) $prefix, $id );
+		}
+		return $out;
+	}
+
+	/**
+	 * The entries' holders of a path and the next shorter prefixes of it: up
+	 * to PREFIXES_PER_READ of them, read in one query and cached under the
+	 * path as one holder per prefix. So a 404 several segments deep costs
+	 * what a one-segment one does, and a path of any depth costs a bounded
+	 * query, cache entry and memory per call. A caller that needs a shorter
+	 * prefix than those answered asks again from it, so every depth is
+	 * looked up. The holders' status is not read here: see answer().
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return array<string,int|null> By prefix, the path itself first: the live holder, else one in the trash; 0 for the root list; null when unknown.
+	 */
+	public function holders( string $post_type, string $path ): array {
 		$path = Paths::normalize( $path );
 		if ( '' === $path ) {
 			return [];
@@ -457,17 +473,29 @@ final class Ledger {
 			wp_cache_set( $cache_key, $found, self::CACHE_GROUP, self::CACHE_TTL );
 		}
 
-		// The cache keeps the holder; its status is read on every call, because
-		// trashing, restoring or deleting the holder does not touch the ledger.
 		$out = [];
 		foreach ( $prefixes as $i => $prefix ) {
-			$id = $found[ $i ] ?? null;
-			if ( null !== $id && $id > 0 && in_array( get_post_status( $id ), [ false, 'trash' ], true ) ) {
-				$id = in_array( $prefix, $this->roots()[ $post_type ] ?? [], true ) ? 0 : null;
-			}
-			$out[ $prefix ] = $id;
+			$out[ $prefix ] = $found[ $i ] ?? null;
 		}
 		return $out;
+	}
+
+	/**
+	 * What find() answers for a prefix whose holder holders() read. The
+	 * holder's status is read on every call, because trashing, restoring or
+	 * deleting it does not touch the ledger: a holder gone or in the trash
+	 * answers as if it held nothing.
+	 *
+	 * @param string   $post_type Post type name.
+	 * @param string   $prefix    Normalized path.
+	 * @param int|null $holder    What holders() read for it.
+	 * @return int|null Post ID, 0 for the root list, null when unknown.
+	 */
+	public function answer( string $post_type, string $prefix, ?int $holder ): ?int {
+		if ( null !== $holder && $holder > 0 && in_array( get_post_status( $holder ), [ false, 'trash' ], true ) ) {
+			return in_array( $prefix, $this->roots()[ $post_type ] ?? [], true ) ? 0 : null;
+		}
+		return $holder;
 	}
 
 	/**
