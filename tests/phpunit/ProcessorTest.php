@@ -249,11 +249,10 @@ final class ProcessorTest extends WP_UnitTestCase {
 		add_action(
 			'hierarchy_guard_children_reparented',
 			static function () use ( $queue, &$marked ): void {
-				$marked[] = $queue->stepping();
+				$marked[] = $queue->noted()['root'];
 			}
 		);
-		// What a run that died of a fatal error while stepping About leaves.
-		$this->queue->mark_stepping( $this->ids['about'] );
+		$this->died_stepping( $this->ids['about'] );
 
 		$this->processor->handle();
 
@@ -261,9 +260,102 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'About was passed over.' );
 		$this->assertSame( 0, Subtree::count_live_children( $other, 'page', 10 ) );
 		$this->assertSame( [ $this->ids['about'] ], $this->queue->roots() );
-		$this->assertSame( 0, $this->queue->stepping(), 'Cleared at the end, so the run the watchdog starts steps About again.' );
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [],
+			],
+			$this->queue->noted(),
+			'Cleared at the end, so the run the watchdog starts steps About again.'
+		);
 		$this->assertFalse( $this->queue->is_scheduled(), 'About waits for the watchdog.' );
 		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+	}
+
+	/**
+	 * Leaves the note a run leaves when it dies of a fatal error while
+	 * stepping a root, having passed others over.
+	 *
+	 * @param int   $root_id Root it died on.
+	 * @param int[] $passed  Roots it passed over.
+	 */
+	private function died_stepping( int $root_id, array $passed = [] ): void {
+		$dead = new Queue();
+		$dead->passed_over();
+		$dead->mark_stepping( $root_id, $passed );
+	}
+
+	public function test_two_roots_that_each_kill_the_run_are_both_passed_over_so_the_roots_behind_them_go_on(): void {
+		$bad    = $this->queue_behind( 'bad', 1 );
+		$behind = $this->queue_behind( 'behind', 1 );
+		// About killed one run, then Bad killed the next.
+		$this->died_stepping( $bad, [ $this->ids['about'] ] );
+
+		$this->processor->handle();
+
+		$this->assertSame( 0, Subtree::count_live_children( $behind, 'page', 10 ), 'The root behind them was stepped.' );
+		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assertSame( 1, Subtree::count_live_children( $bad, 'page', 10 ) );
+		$this->assertSame( [ $this->ids['about'], $bad ], $this->queue->roots() );
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [],
+			],
+			$this->queue->noted(),
+			'A run that ends leaves both to the watchdog’s run.'
+		);
+		$this->assertFalse( $this->queue->is_scheduled() );
+	}
+
+	public function test_a_root_that_killed_a_run_stays_passed_over_through_time_stops_until_a_run_ends(): void {
+		$first  = $this->queue_behind( 'first', 1 );
+		$second = $this->queue_behind( 'second', 1 );
+		$this->died_stepping( $this->ids['about'] );
+		$processor = $this->slow_steps();
+
+		$processor->handle();
+
+		$this->assertSame( 0, Subtree::count_live_children( $first, 'page', 10 ) );
+		$this->assertSame( 1, Subtree::count_live_children( $second, 'page', 10 ), 'The run stopped for time.' );
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [ $this->ids['about'] ],
+			],
+			$this->queue->noted(),
+			'The time stop carries About forward.'
+		);
+
+		$processor->handle();
+
+		$this->assertSame( 0, Subtree::count_live_children( $second, 'page', 10 ) );
+		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'The next run passed About over too.' );
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [],
+			],
+			$this->queue->noted(),
+			'That run ended, so the watchdog’s run tries About again.'
+		);
+	}
+
+	public function test_the_watchdog_retries_a_passed_over_root_left_waiting(): void {
+		$fresh = $this->queue_behind( 'fresh', 1 );
+		$this->age_job( time() - HOUR_IN_SECONDS, time() - HOUR_IN_SECONDS );
+		$this->died_stepping( 0, [ $this->ids['about'], $fresh ] );
+
+		$this->processor->watchdog();
+
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [ $fresh ],
+			],
+			$this->queue->noted(),
+			'About waited past STALE_AFTER: the next run tries it. Fresh was passed over just now.'
+		);
 	}
 
 	/**
@@ -292,7 +384,7 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertSame( 3, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'About took one step of two subpages.' );
 		$this->assertSame( 2, Subtree::count_live_children( $other, 'page', 10 ), 'Other waits for the next run.' );
 		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'The next run is queued.' );
-		$this->assertSame( 0, $this->queue->stepping() );
+		$this->assertSame( 0, $this->queue->noted()['root'] );
 	}
 
 	public function test_a_root_another_process_holds_is_passed_over_and_left_to_that_process(): void {

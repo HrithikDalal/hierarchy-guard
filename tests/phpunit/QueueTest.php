@@ -130,6 +130,51 @@ final class QueueTest extends WP_UnitTestCase {
 		$this->assertNotNull( $this->queue->load( 11 ) );
 	}
 
+	public function test_overlapping_runs_write_and_delete_only_their_own_stepping_note(): void {
+		$first = new Queue();
+		$this->assertSame( [], $first->passed_over() );
+		$first->mark_stepping( 10, [] );
+
+		$second = new Queue();
+		$this->assertSame( [ 10 ], $second->passed_over(), 'A run starting takes the note over, passing the root being stepped over.' );
+		$second->mark_stepping( 11, [ 10 ] );
+
+		$first->mark_stepping( 12, [] );
+		$this->assertSame(
+			[
+				'root'   => 11,
+				'passed' => [ 10 ],
+			],
+			$this->queue->noted(),
+			'The first run does not overwrite the note the second wrote since.'
+		);
+
+		$third = new Queue();
+		$third->passed_over();
+		$third->mark_stepping( 13, [ 10, 11 ] );
+		$second->end_stepping();
+		$this->assertSame( 13, $this->queue->noted()['root'], 'The second run’s end leaves the note the third wrote since.' );
+
+		$third->end_stepping();
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [],
+			],
+			$this->queue->noted()
+		);
+		$first->mark_stepping( 14, [] );
+		$this->assertSame( 14, $this->queue->noted()['root'], 'With no note left, a run writes its own again.' );
+	}
+
+	public function test_the_roots_passed_over_are_capped_and_keep_the_newest(): void {
+		$dead = new Queue();
+		$dead->passed_over();
+		$dead->mark_stepping( 99, range( 1, 30 ) );
+
+		$this->assertSame( array_merge( range( 12, 30 ), [ 99 ] ), $this->queue->passed_over() );
+	}
+
 	public function test_a_lock_is_held_until_its_owner_releases_it(): void {
 		$token = $this->queue->lock( 10 );
 

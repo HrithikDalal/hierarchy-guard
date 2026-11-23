@@ -35,6 +35,7 @@ final class Queue {
 	public const LOCK_PREFIX  = 'hierarchy_guard_lock_';
 	public const LOCK_TTL     = 300;
 	public const STEPPING     = 'hierarchy_guard_stepping';
+	public const PASSED_CAP   = 20;
 
 	/**
 	 * Whether this request has the run queued in Action Scheduler, so a bulk
@@ -43,6 +44,20 @@ final class Queue {
 	 * @var bool
 	 */
 	private bool $queued_in_as = false;
+
+	/**
+	 * The stepping note as this process last wrote or took it over, '' for none.
+	 *
+	 * @var string
+	 */
+	private string $note = '';
+
+	/**
+	 * This run's mark in its notes, so two runs never write the same value.
+	 *
+	 * @var string
+	 */
+	private string $run = '';
 
 	/**
 	 * Option name of a root's job slot.
@@ -197,27 +212,114 @@ final class Queue {
 	}
 
 	/**
-	 * Notes the root a run is about to step, so that if the run dies of an
-	 * error nothing can catch the next run knows which root it died on.
+	 * Starts a run's stepping note: the roots the note says runs before
+	 * passed over, and the root a run died on, which the run passes over
+	 * too. The run takes the note over from there.
 	 *
-	 * @param int $root_id Root page, or 0 to clear the note.
+	 * @return int[] At most PASSED_CAP roots, the newest last.
 	 */
-	public function mark_stepping( int $root_id ): void {
-		if ( $root_id > 0 ) {
-			$this->write( self::STEPPING, [ 'root' => $root_id ] );
-		} else {
-			$this->erase( self::STEPPING );
+	public function passed_over(): array {
+		$raw        = $this->read( self::STEPPING );
+		$this->note = $raw ?? '';
+		$this->run  = wp_generate_uuid4();
+		$note       = $this->noted();
+		$roots      = $note['passed'];
+		if ( $note['root'] > 0 ) {
+			$roots[] = $note['root'];
 		}
+		return array_slice( array_values( array_unique( $roots ) ), -self::PASSED_CAP );
 	}
 
 	/**
-	 * The root a run was stepping when it died, or 0.
+	 * Writes the run's note: the root it is about to step, 0 between roots,
+	 * and the roots it passes over, so that if the run dies of an error
+	 * nothing can catch, the next run passes that root over too, and the run
+	 * after a time stop keeps passing the others over. Runs that overlap
+	 * share the one row: a run writes only over the note it wrote or took
+	 * over, as unlock() releases only its own lock, so a run beside it keeps
+	 * its note.
 	 *
-	 * @return int
+	 * @param int   $root_id Root page, or 0.
+	 * @param int[] $passed  Roots the run passes over.
 	 */
-	public function stepping(): int {
+	public function mark_stepping( int $root_id, array $passed ): void {
+		global $wpdb;
+
+		$value = maybe_serialize(
+			[
+				'run'    => $this->run,
+				'root'   => $root_id,
+				'passed' => array_values( array_map( 'intval', $passed ) ),
+			]
+		);
+		if ( $value === $this->note ) {
+			return;
+		}
+		if ( '' !== $this->note ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Replaces only this run's own note.
+			$updated = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $value, self::STEPPING, $this->note ) );
+			if ( 1 === $updated ) {
+				$this->note = $value;
+				return;
+			}
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Writes the note only where no run has one.
+		$inserted   = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", self::STEPPING, $value ) );
+		$this->note = 1 === $inserted ? $value : '';
+	}
+
+	/**
+	 * Deletes the run's note when the run ends without a time stop, so the
+	 * next run, as the watchdog starts it, tries the roots it passed over
+	 * again. Only the note this run wrote is deleted.
+	 */
+	public function end_stepping(): void {
+		global $wpdb;
+
+		if ( '' !== $this->note ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Deletes only this run's own note.
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::STEPPING, $this->note ) );
+		}
+		$this->note = '';
+	}
+
+	/**
+	 * Takes roots out of the note's passed-over list, so the next run tries
+	 * them: the watchdog's retry of a root left waiting. A note a run
+	 * rewrites meanwhile is left as it is.
+	 *
+	 * @param int[] $roots Roots to try again.
+	 */
+	public function retry( array $roots ): void {
+		global $wpdb;
+
+		$raw  = $this->read( self::STEPPING );
+		$note = $this->decode( $raw );
+		if ( null === $raw || null === $note ) {
+			return;
+		}
+		$was            = $this->noted();
+		$note['passed'] = array_values( array_diff( $was['passed'], $roots ) );
+		$note['root']   = in_array( $was['root'], $roots, true ) ? 0 : $was['root'];
+		if ( $note['passed'] === $was['passed'] && $note['root'] === $was['root'] ) {
+			return;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Replaces only the value read.
+		$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", maybe_serialize( $note ), self::STEPPING, $raw ) );
+	}
+
+	/**
+	 * What the stepping note holds: the root a run is stepping, or died on,
+	 * and the roots runs pass over.
+	 *
+	 * @return array{root:int,passed:int[]}
+	 */
+	public function noted(): array {
 		$note = $this->decode( $this->read( self::STEPPING ) );
-		return (int) ( $note['root'] ?? 0 );
+		return [
+			'root'   => (int) ( $note['root'] ?? 0 ),
+			'passed' => array_values( array_filter( array_map( 'intval', (array) ( $note['passed'] ?? [] ) ), static fn( int $id ): bool => $id > 0 ) ),
+		];
 	}
 
 	/**
