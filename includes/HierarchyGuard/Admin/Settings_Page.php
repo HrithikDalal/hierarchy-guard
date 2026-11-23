@@ -255,16 +255,16 @@ final class Settings_Page {
 		$provider = $this->providers->detect();
 		if ( null !== $provider ) {
 			$name = trim( (string) ( $provider['name'] ?? '' ) );
-			if ( '' !== $name ) {
-				/* translators: %s: name of the detected redirect plugin. */
-				$active = sprintf( __( '%s is active.', 'hierarchy-guard' ), $name );
-				/* translators: %s: name of the detected redirect plugin. */
-				$recorded = sprintf( __( 'After each URL change, Hierarchy Guard’s notice offers to add these redirects to %s.', 'hierarchy-guard' ), $name );
-			} else {
-				$active   = __( 'A redirect plugin is active.', 'hierarchy-guard' );
-				$recorded = __( 'After each URL change, Hierarchy Guard’s notice offers to add these redirects to that plugin.', 'hierarchy-guard' );
+			/* translators: %s: name of the detected redirect plugin. */
+			$active = '' !== $name ? sprintf( __( '%s is active.', 'hierarchy-guard' ), $name ) : __( 'A redirect plugin is active.', 'hierarchy-guard' );
+			// The notices offer the redirects to add only while built-in redirects are off; with them on, they say the old URLs redirect.
+			if ( ! Settings::serve_redirects() ) {
+				$active .= ' ' . ( '' !== $name
+					/* translators: %s: name of the detected redirect plugin. */
+					? sprintf( __( 'After each URL change, Hierarchy Guard’s notice offers to add these redirects to %s.', 'hierarchy-guard' ), $name )
+					: __( 'After each URL change, Hierarchy Guard’s notice offers to add these redirects to that plugin.', 'hierarchy-guard' ) );
 			}
-			$this->inline_notice( esc_html( $active . ' ' . $recorded ), 'info' );
+			$this->inline_notice( esc_html( $active ), 'info' );
 		}
 		if ( $table->is_capped() ) {
 			$cap = Subtree::count_cap();

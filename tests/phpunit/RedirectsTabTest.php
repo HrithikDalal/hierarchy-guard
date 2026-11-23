@@ -271,17 +271,21 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'notice notice-warning inline', $html );
 		$this->assertStringNotContainsString( 'is active.', $html );
 
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$provider = static function ( array $providers ): array {
 			$providers['redirection']['active'] = true;
 			return $providers;
 		};
 		add_filter( 'hierarchy_guard_redirect_providers', $provider );
 		$html = $this->rendered();
+		$this->assertStringContainsString( 'Redirection is active. After each URL change, Hierarchy Guard’s notice offers to add these redirects to Redirection.', $html, 'Built-in redirects off: the notices offer the redirects to add.' );
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$html = $this->rendered();
 		remove_filter( 'hierarchy_guard_redirect_providers', $provider );
 
 		$this->assertStringNotContainsString( 'Built-in redirects are off', $html );
-		$this->assertStringContainsString( 'Redirection is active. After each URL change, Hierarchy Guard’s notice offers to add these redirects to Redirection.', $html );
+		$this->assertStringContainsString( '<p>Redirection is active.</p>', $html );
+		$this->assertStringNotContainsString( 'offers to add these redirects', $html, 'Built-in redirects on: the notices say the old URLs redirect and offer nothing to add.' );
 
 		$cap = static fn(): int => 1;
 		add_filter( 'hierarchy_guard_count_cap', $cap );
@@ -290,6 +294,25 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 		$this->assertStringContainsString( 'Only the newest 1 recorded redirect is listed. To find another, search for its full old URL.', $html );
 		$this->assertStringContainsString( '<span class="displaying-num">1+ item</span>', $html, 'Past the cap, the count is a lower bound.' );
+	}
+
+	public function test_a_redirect_plugin_without_a_name_is_named_generically_with_built_in_redirects_off_or_on(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+		$provider = static fn(): array => [
+			'custom' => [
+				'active' => true,
+				'url'    => '',
+				'csv'    => 'generic',
+			],
+		];
+		add_filter( 'hierarchy_guard_redirect_providers', $provider );
+		$off      = $this->rendered();
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$on = $this->rendered();
+		remove_filter( 'hierarchy_guard_redirect_providers', $provider );
+
+		$this->assertStringContainsString( '<p>A redirect plugin is active. After each URL change, Hierarchy Guard’s notice offers to add these redirects to that plugin.</p>', $off );
+		$this->assertStringContainsString( '<p>A redirect plugin is active.</p>', $on );
 	}
 
 	public function test_under_plain_permalinks_a_notice_says_why_nothing_is_served(): void {
