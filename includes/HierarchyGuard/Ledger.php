@@ -43,6 +43,19 @@ final class Ledger {
 	private const CACHE_TTL = 12 * HOUR_IN_SECONDS;
 
 	/**
+	 * Most old URLs one request asks VIP's edge to purge. VIP purges at most
+	 * 100 a request and drops the rest, its own purges included.
+	 */
+	private const PURGE_LIMIT = 50;
+
+	/**
+	 * Old URLs this request asked VIP's edge to purge.
+	 *
+	 * @var array<string,true>
+	 */
+	private static array $purged = [];
+
+	/**
 	 * Nesting depth of deferred() calls.
 	 *
 	 * @var int
@@ -140,6 +153,7 @@ final class Ledger {
 		if ( is_int( $meta_id ) ) {
 			self::remember( (string) $post->post_type, [ $meta_id ] );
 		}
+		self::purge( (string) $post->post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -172,6 +186,7 @@ final class Ledger {
 		$roots[ $post_type ] = array_values( $list );
 
 		update_option( self::ROOT_OPTION, $roots, false );
+		self::purge( $post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -226,6 +241,7 @@ final class Ledger {
 			$dropped = Meta_Guard::writing( static fn() => delete_post_meta( $id, $key ) ) || $dropped;
 		}
 		if ( $dropped ) {
+			self::purge( $type, $path );
 			$this->bump();
 		}
 
@@ -258,6 +274,7 @@ final class Ledger {
 
 		$this->drop_target( $post_id, (string) $post->post_type, $old_path );
 		Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
+		self::purge( (string) $post->post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -281,6 +298,7 @@ final class Ledger {
 		$roots[ $post_type ] = array_values( array_diff( $list, [ $old_path ] ) );
 		update_option( self::ROOT_OPTION, $roots, false );
 		$this->drop_root_targets( $post_type, [ $old_path ] );
+		self::purge( $post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -652,6 +670,7 @@ final class Ledger {
 			$this->save_root_targets( $all );
 		}
 
+		self::purge( $post_type, $path );
 		$this->bump();
 	}
 
@@ -1245,6 +1264,31 @@ final class Ledger {
 		if ( metadata_exists( 'post', $post_id, $key ) ) {
 			Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
 		}
+	}
+
+	/**
+	 * Asks WordPress VIP's edge to forget an old URL whose redirect changed,
+	 * once a request, up to PURGE_LIMIT URLs. VIP's edge keeps a 301 for 30
+	 * minutes and a 302 for a minute whatever the response's headers say, and
+	 * a purge clears that exact URL only: URLs under it keep a cached
+	 * redirect until it expires.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized path.
+	 */
+	private static function purge( string $post_type, string $path ): void {
+		// VIP's current name, else the one it deprecated.
+		$purge = function_exists( 'wpvip_purge_edge_cache_for_url' ) ? 'wpvip_purge_edge_cache_for_url' : 'wpcom_vip_purge_edge_cache_for_url';
+		if ( '' === $path || ! function_exists( $purge ) ) {
+			return;
+		}
+		$prefix = Redirects\Server::prefix( $post_type );
+		$url    = home_url( user_trailingslashit( '' !== $prefix ? $prefix . '/' . $path : $path ) );
+		if ( isset( self::$purged[ $url ] ) || count( self::$purged ) >= self::PURGE_LIMIT ) {
+			return;
+		}
+		self::$purged[ $url ] = true;
+		$purge( $url );
 	}
 
 	/**

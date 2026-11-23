@@ -86,11 +86,12 @@ final class Paths {
 	private static function chain( WP_Post $post, callable $slug_of, array $as_before = [] ): string {
 		$segments  = [ (string) $slug_of( $post ) ];
 		$parent_id = (int) $post->post_parent;
-		$guard     = 0;
+		// However deep, as get_page_uri() goes; a parent seen before is a loop in the data, and ends the walk.
+		$seen = [ (int) $post->ID => true ];
 
-		while ( $parent_id > 0 && $guard < 50 ) {
-			++$guard;
-			$parent = $as_before[ $parent_id ] ?? get_post( $parent_id );
+		while ( $parent_id > 0 && ! isset( $seen[ $parent_id ] ) ) {
+			$seen[ $parent_id ] = true;
+			$parent             = $as_before[ $parent_id ] ?? get_post( $parent_id );
 			if ( ! $parent instanceof WP_Post ) {
 				break;
 			}

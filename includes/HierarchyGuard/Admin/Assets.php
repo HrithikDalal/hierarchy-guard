@@ -58,13 +58,6 @@ final class Assets {
 	private bool $wanted = false;
 
 	/**
-	 * Whether the Tree view asked for its stylesheet in the head.
-	 *
-	 * @var bool
-	 */
-	private bool $styled = false;
-
-	/**
 	 * Constructor.
 	 *
 	 * @param Providers $providers Redirect plugin detection.
@@ -82,7 +75,6 @@ final class Assets {
 		add_action( 'enqueue_block_editor_assets', [ $this, 'enqueue_editor' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
 		add_action( List_Table::SCRIPT, [ $this, 'want_list_table' ] );
-		add_action( Tree_View::STYLE, [ $this, 'want_list_style' ] );
 		add_action( 'admin_footer', [ $this, 'enqueue_list_table' ] );
 	}
 
@@ -91,14 +83,6 @@ final class Assets {
 	 */
 	public function want_list_table(): void {
 		$this->wanted = true;
-	}
-
-	/**
-	 * Notes that the Tree view loads, so the list screen's stylesheet goes in
-	 * the head: the indents are in it.
-	 */
-	public function want_list_style(): void {
-		$this->styled = true;
 	}
 
 	/**
@@ -141,8 +125,8 @@ final class Assets {
 		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
 		}
-		if ( $this->styled && 'edit.php' === $hook_suffix ) {
-			// The Tree view's indents print with the head; its script follows in the footer.
+		if ( 'edit.php' === $hook_suffix ) {
+			// In the head, so the Hierarchy column's width and the Tree view's indents are there as the rows paint; the script follows in the footer when the screen asks for it.
 			$this->enqueue_style( 'list-table' );
 		}
 		if ( in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true ) && ! $screen->is_block_editor() ) {

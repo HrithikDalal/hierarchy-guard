@@ -72,6 +72,59 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( 9, has_action( 'template_redirect', [ $this->server_from_plugin(), 'maybe_redirect' ] ) );
 	}
 
+	public function test_a_served_redirect_goes_out_through_wp_redirect_with_its_status(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/' );
+		$sent = [];
+		$stop = static function ( $location, $status ) use ( &$sent ) {
+			$sent = [ (string) $location, (int) $status ];
+			return false;
+		};
+		add_filter( 'wp_redirect', $stop, 10, 2 );
+
+		$this->server->maybe_redirect();
+
+		remove_filter( 'wp_redirect', $stop, 10 );
+		$this->assertSame( [ get_permalink( $this->team ), 301 ], $sent );
+	}
+
+	/**
+	 * In a process of its own, where nothing is printed before the test, so
+	 * core sends headers.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_served_redirect_goes_out_with_core_s_no_cache_headers(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/' );
+		$order = [];
+		$cache = static function ( array $headers ) use ( &$order ): array {
+			$order[] = 'no-cache';
+			return $headers;
+		};
+		$stop  = static function () use ( &$order ) {
+			$order[] = 'redirect';
+			return false;
+		};
+		add_filter( 'nocache_headers', $cache );
+		add_filter( 'wp_redirect', $stop );
+
+		$this->server->maybe_redirect();
+
+		$this->assertSame( [ 'no-cache', 'redirect' ], $order );
+	}
+
 	public function test_redirects_an_old_subpage_url_to_the_new_permalink(): void {
 		wp_update_post(
 			[

@@ -1064,12 +1064,34 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_the_trash_preview_skips_pages_the_user_cannot_trash(): void {
+	public function test_the_trash_preview_answers_only_users_who_can_trash_some_supported_type(): void {
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
+		$this->assertSame( 403, $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_status(), 'Not the policy or the cap either.' );
 
-		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_data();
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'author' ] ) );
+		$this->assertSame( 403, $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_status(), 'An author can’t trash pages.' );
+	}
 
-		$this->assertSame( [], $data['pages'] );
+	public function test_the_trash_preview_skips_pages_the_user_cannot_trash(): void {
+		$editor = self::factory()->user->create( [ 'role' => 'editor' ] );
+		$mine   = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_author' => $editor,
+			]
+		);
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'contributor' ] ) );
+		add_filter(
+			'user_has_cap',
+			static function ( array $caps ) {
+				$caps['delete_pages'] = true;
+				return $caps;
+			}
+		);
+
+		$data = $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'], $mine ] ] )->get_data();
+
+		$this->assertSame( [], $data['pages'], 'Allowed to ask, but not to trash these pages.' );
 	}
 
 	public function test_the_trash_preview_carries_each_page_s_own_policy(): void {

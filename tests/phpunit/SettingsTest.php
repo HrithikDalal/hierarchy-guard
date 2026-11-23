@@ -95,6 +95,10 @@ final class SettingsTest extends WP_UnitTestCase {
 		];
 	}
 
+	public function test_a_trash_policy_that_is_not_text_falls_back_without_a_warning(): void {
+		$this->assertSame( Settings::POLICY_REPARENT, Settings::sanitize( [ 'trash_policy' => [ 'keep' ] ] )['trash_policy'] );
+	}
+
 	public function test_sanitize_reads_the_string_false_as_off(): void {
 		$this->assertFalse( Settings::sanitize( [ 'serve_redirects' => 'false' ] )['serve_redirects'] );
 	}

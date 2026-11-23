@@ -145,7 +145,7 @@ final class Settings {
 			}
 		}
 
-		$policy = isset( $input['trash_policy'] ) ? sanitize_key( (string) $input['trash_policy'] ) : self::POLICY_REPARENT;
+		$policy = isset( $input['trash_policy'] ) && is_string( $input['trash_policy'] ) ? sanitize_key( $input['trash_policy'] ) : self::POLICY_REPARENT;
 		if ( ! in_array( $policy, self::POLICIES, true ) ) {
 			$policy = self::POLICY_REPARENT;
 		}

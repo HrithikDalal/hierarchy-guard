@@ -63,6 +63,53 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( 'about-us', get_post_meta( $this->about, Ledger::key( 'page', 'about-us' ), true ) );
 	}
 
+	public function test_every_change_to_an_old_url_s_redirect_purges_it_from_a_vip_edge_cache_once(): void {
+		require_once __DIR__ . '/stubs/vip.php';
+		$this->forget_purges();
+		$other = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'other',
+			]
+		);
+
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 302 );
+		$this->ledger->forget( $this->about, 'old-about' );
+		$this->ledger->record_root( 'page', 'section' );
+		$this->ledger->forget_root( 'page', 'section' );
+		$this->ledger->record( $other, 'about' );
+		$this->ledger->claim( get_post( $this->about ) );
+
+		$this->assertSame( [ home_url( '/old-about/' ), home_url( '/section/' ), home_url( '/about/' ) ], $GLOBALS['hierarchy_guard_purged'], 'VIP\'s current function, each URL once a request.' );
+		$this->assertSame( [], $GLOBALS['hierarchy_guard_purged_deprecated'] );
+		$this->forget_purges();
+	}
+
+	public function test_a_request_purges_at_most_fifty_old_urls_so_vip_keeps_its_own(): void {
+		require_once __DIR__ . '/stubs/vip.php';
+		$this->forget_purges();
+
+		for ( $i = 1; $i <= 60; $i++ ) {
+			$this->ledger->record( $this->about, "old-{$i}" );
+		}
+
+		$this->assertCount( 50, $GLOBALS['hierarchy_guard_purged'] );
+		$this->assertSame( home_url( '/old-50/' ), end( $GLOBALS['hierarchy_guard_purged'] ) );
+		$this->forget_purges();
+	}
+
+	/**
+	 * Clears what the VIP stubs recorded and what this request purged.
+	 */
+	private function forget_purges(): void {
+		$GLOBALS['hierarchy_guard_purged']            = [];
+		$GLOBALS['hierarchy_guard_purged_deprecated'] = [];
+		$purged                                       = new \ReflectionProperty( Ledger::class, 'purged' );
+		$purged->setAccessible( true );
+		$purged->setValue( null, [] );
+	}
+
 	public function test_record_is_idempotent(): void {
 		$this->assertTrue( $this->ledger->record( $this->about, 'about-us' ) );
 		$this->assertFalse( $this->ledger->record( $this->about, 'about-us' ) );

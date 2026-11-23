@@ -64,6 +64,10 @@ final class Server {
 		if ( null === $target ) {
 			return;
 		}
+		// Browsers and caches that honour these headers keep no redirect, which a restore or an
+		// administrator's edit can make wrong. VIP's edge keeps redirects for times of its own; the
+		// ledger purges an old URL there when its record changes.
+		nocache_headers();
 
 		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- A page target passed wp_validate_redirect() in target_for_current_request(); a URL target, which only an administrator can set, passed esc_url_raw() as http(s).
 		if ( wp_redirect( $target['url'], $target['status'], 'Hierarchy Guard' ) ) {
