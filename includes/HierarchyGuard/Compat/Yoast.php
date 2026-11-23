@@ -84,25 +84,28 @@ final class Yoast {
 		}
 		$limit = Processor::time_limit();
 		$start = microtime( true );
+		$after = 0;
 		// Scheduled first, so a run that dies part way still leaves the next one.
 		self::schedule();
 		while ( true ) {
-			$ids = self::pending( self::BATCH );
-			if ( [] === $ids ) {
+			$flags = self::pending( self::BATCH, $after );
+			if ( [] === $flags ) {
 				break;
 			}
-			foreach ( $ids as $id ) {
+			foreach ( $flags as $meta_id => $id ) {
 				if ( microtime( true ) - $start >= $limit ) {
 					return;
 				}
+				// Read past each flag, so one that can't be taken off is tried once a run.
+				$after = $meta_id;
 				// Taken off before the call, so a page that kills the run is not tried again forever.
 				delete_post_meta( $id, self::PENDING );
 				self::build( $watcher, $id );
 			}
 		}
 		wp_clear_scheduled_hook( self::HOOK );
-		// A page added after the last read found the run scheduled and left it to this one.
-		if ( [] !== self::pending( 1 ) ) {
+		// A page flagged after the last read found the run scheduled and left it to this one.
+		if ( [] !== self::pending( 1, $after ) ) {
 			self::schedule();
 		}
 	}
@@ -114,6 +117,13 @@ final class Yoast {
 		if ( [] !== self::pending( 1 ) ) {
 			self::schedule();
 		}
+	}
+
+	/**
+	 * Clears the run, as on deactivation.
+	 */
+	public static function unschedule(): void {
+		wp_clear_scheduled_hook( self::HOOK );
 	}
 
 	/**
@@ -204,17 +214,22 @@ final class Yoast {
 	}
 
 	/**
-	 * Pending pages, oldest first.
+	 * Pending pages, oldest first, past a flag already read.
 	 *
 	 * @param int $limit Most to read.
-	 * @return int[]
+	 * @param int $after Meta ID of the last flag read, 0 for none.
+	 * @return array<int,int> Post IDs keyed by their flag's meta ID.
 	 */
-	private static function pending( int $limit ): array {
+	private static function pending( int $limit, int $after = 0 ): array {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- A range on the meta_key index, bounded by LIMIT.
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = %s ORDER BY meta_id ASC LIMIT %d", self::PENDING, max( 1, $limit ) ) );
-		return array_map( 'intval', (array) $ids );
+		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT meta_id, post_id FROM {$wpdb->postmeta} WHERE meta_key = %s AND meta_id > %d ORDER BY meta_id ASC LIMIT %d", self::PENDING, $after, max( 1, $limit ) ) );
+		$flags = [];
+		foreach ( (array) $rows as $row ) {
+			$flags[ (int) $row->meta_id ] = (int) $row->post_id;
+		}
+		return $flags;
 	}
 
 	/**

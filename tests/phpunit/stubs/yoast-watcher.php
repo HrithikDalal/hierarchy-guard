@@ -37,6 +37,13 @@ class Indexable_Post_Watcher {
 	public array $broken_for = [];
 
 	/**
+	 * Seconds each build takes, as a slow page's content filters might.
+	 *
+	 * @var float
+	 */
+	public float $delay = 0.0;
+
+	/**
 	 * Records one build.
 	 *
 	 * @param int $post_id Post ID.
@@ -49,6 +56,9 @@ class Indexable_Post_Watcher {
 		}
 		if ( in_array( (int) $post_id, $this->broken_for, true ) ) {
 			throw new \Error( 'A content filter failed.' );
+		}
+		if ( $this->delay > 0 ) {
+			usleep( (int) ( $this->delay * 1000000 ) );
 		}
 		$this->built[] = (int) $post_id;
 	}

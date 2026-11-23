@@ -14,7 +14,12 @@ use WP_UnitTestCase;
 use Yoast\WP\SEO\Integrations\Watchers\Indexable_Post_Watcher;
 
 /**
+ * Each test runs in a process of its own, so the stub Yoast SEO it loads
+ * never reaches another test class.
+ *
  * @covers \HierarchyGuard\Compat\Yoast
+ * @runTestsInSeparateProcesses
+ * @preserveGlobalState disabled
  */
 final class YoastCompatTest extends WP_UnitTestCase {
 
@@ -27,13 +32,10 @@ final class YoastCompatTest extends WP_UnitTestCase {
 	 */
 	private array $ids;
 
-	public static function set_up_before_class(): void {
-		parent::set_up_before_class();
+	public function set_up(): void {
+		// Here rather than before the class, which also runs in the parent process.
 		require_once __DIR__ . '/stubs/yoast-watcher.php';
 		require_once __DIR__ . '/stubs/yoast-main.php';
-	}
-
-	public function set_up(): void {
 		parent::set_up();
 		$this->set_permalink_structure( '/%postname%/' );
 		$this->ids = $this->make_tree();
@@ -44,6 +46,7 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$watcher->built      = [];
 		$watcher->broken     = false;
 		$watcher->broken_for = [];
+		$watcher->delay      = 0.0;
 	}
 
 	public function tear_down(): void {
@@ -157,7 +160,74 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->assertContains( $this->ids['history'], $this->watcher()->built );
 	}
 
-	public function test_activation_resumes_pages_still_waiting(): void {
+	public function test_an_auto_draft_is_not_a_subpage_that_makes_a_page_wait(): void {
+		self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_status' => 'auto-draft',
+				'post_parent' => $this->ids['history'],
+			]
+		);
+
+		wp_trash_post( $this->ids['about'] );
+
+		$this->assertContains( $this->ids['history'], $this->watcher()->built );
+	}
+
+	public function test_a_run_stops_when_its_time_is_up_and_leaves_the_next_run_scheduled(): void {
+		$this->page( 'jobs', $this->page( 'careers', $this->ids['about'] ) );
+		$this->page( 'news', $this->page( 'press', $this->ids['about'] ) );
+		wp_trash_post( $this->ids['about'] );
+		// As when cron runs the event: it is no longer scheduled.
+		wp_clear_scheduled_hook( Yoast::HOOK );
+		$this->watcher()->built = [];
+		$this->watcher()->delay = 0.6;
+		$max                    = (string) ini_get( 'max_execution_time' );
+		set_time_limit( 2 ); // Half of it, 1 second, is the run's limit.
+
+		( new Yoast() )->rebuild_pending();
+		set_time_limit( (int) $max );
+
+		$this->assertCount( 2, $this->watcher()->built, 'The second page ends past the 1-second limit, so the third waits.' );
+		$this->assertCount(
+			1,
+			get_posts(
+				[
+					'post_type' => 'page',
+					'meta_key'  => Yoast::PENDING,
+					'fields'    => 'ids',
+				]
+			)
+		); // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- Three test pages.
+		$this->assertNotFalse( wp_next_scheduled( Yoast::HOOK ), 'Scheduled before the work, so the page left waits for the next run.' );
+	}
+
+	public function test_a_flag_that_cannot_be_taken_off_is_tried_once_and_brings_no_run_back(): void {
+		wp_trash_post( $this->ids['about'] );
+		$this->watcher()->built = [];
+		$keep                   = static fn( $check, $object_id, $meta_key ) => Yoast::PENDING === $meta_key ? false : $check;
+		add_filter( 'delete_post_metadata', $keep, 10, 3 );
+		$max                    = (string) ini_get( 'max_execution_time' );
+		set_time_limit( 2 ); // Bounds the run to 1 second, should it loop.
+
+		( new Yoast() )->rebuild_pending();
+		set_time_limit( (int) $max );
+		remove_filter( 'delete_post_metadata', $keep, 10 );
+
+		$this->assertSame( [ $this->ids['team'] ], $this->watcher()->built );
+		$this->assertFalse( wp_next_scheduled( Yoast::HOOK ) );
+	}
+
+	public function test_deactivation_clears_the_run(): void {
+		wp_trash_post( $this->ids['about'] );
+		$this->assertNotFalse( wp_next_scheduled( Yoast::HOOK ), 'Precondition: a page waits.' );
+
+		do_action( 'deactivate_' . plugin_basename( HIERARCHY_GUARD_FILE ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core's deactivation hook for this plugin.
+
+		$this->assertFalse( wp_next_scheduled( Yoast::HOOK ) );
+	}
+
+	public function test_resume_schedules_the_run_for_pages_still_waiting(): void {
 		wp_trash_post( $this->ids['about'] );
 		wp_clear_scheduled_hook( Yoast::HOOK );
 
