@@ -175,6 +175,10 @@ final class Redirect_Edit {
 		$old     = (string) $record['old'];
 		$in_code = '<code>' . esc_html( $old ) . '</code>';
 		$help    = [];
+		// A refused URL: the field is marked invalid, described by why, and focused. Core's notice says it
+		// too, but describing the field by the notice would read its Dismiss button as well.
+		$invalid = null !== $this->refused ? ' aria-invalid="true" autofocus' : '';
+		$why     = null !== $this->refused ? '<span class="screen-reader-text" id="hierarchy-guard-target-error">' . esc_html( $this->refused['message'] ) . '</span>' : '';
 		if ( Records::is_top_level( $record ) ) {
 			/* translators: "them" are the URLs under the old URL, which go to the same pages at the top level. */
 			$help[] = esc_html__( 'Leave this empty to keep sending them to the same page at the top level.', 'hierarchy-guard' );
@@ -205,12 +209,13 @@ final class Redirect_Edit {
 		/* translators: 1: the old URL, such as /about/; 2: a URL under it, such as /about/example/; 3: where that one leads, such as /example/. */
 		$now = Records::is_top_level( $record ) ? '<p id="hierarchy-guard-target-now">' . sprintf( esc_html__( 'URLs under %1$s now go to the same page at the top level, for example %2$s to %3$s.', 'hierarchy-guard' ), $in_code, '<code>' . esc_html( $example ) . '</code>', '<code>' . esc_html( $top ) . '</code>' ) . '</p>' : '';
 		printf(
-			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="%5$shierarchy-guard-target-description"><div id="hierarchy-guard-target-description"><p class="description">%4$s</p></div></td></tr>',
+			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="%5$shierarchy-guard-target-description"%6$s><div id="hierarchy-guard-target-description"><p class="description">%4$s</p></div></td></tr>',
 			esc_html__( 'Redirect to', 'hierarchy-guard' ),
-			$now, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
+			$now . $why, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 			esc_attr( $url ),
 			implode( '</p><p class="description">', $help ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Each sentence is escaped above; the old URL is escaped inside its <code>.
-			'' !== $now ? 'hierarchy-guard-target-now ' : ''
+			( '' !== $why ? 'hierarchy-guard-target-error ' : '' ) . ( '' !== $now ? 'hierarchy-guard-target-now ' : '' ),
+			$invalid // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Escaped above.
 		);
 		echo '<tr><th scope="row">' . esc_html_x( 'Code', 'redirect code', 'hierarchy-guard' ) . '</th><td><fieldset><legend class="screen-reader-text"><span>' . esc_html_x( 'Code', 'redirect code', 'hierarchy-guard' ) . '</span></legend>';
 		printf( '<label><input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description" %1$s> %2$s</label><p class="description" id="hierarchy-guard-code-automatic-description">%3$s</p>', checked( 0, $code, false ), esc_html_x( 'Automatic', 'redirect code', 'hierarchy-guard' ), esc_html__( 'Uses 301 (permanent), or 302 (temporary) while a restore from the Trash can still undo the move.', 'hierarchy-guard' ) );
@@ -267,9 +272,11 @@ final class Redirect_Edit {
 		if ( is_wp_error( $result ) ) {
 			add_settings_error( 'hierarchy_guard', $result->get_error_code(), esc_html( $result->get_error_message() ), 'error' );
 			$this->refused = [
-				'record' => $record,
-				'url'    => $url,
-				'code'   => in_array( $code, [ 301, 302 ], true ) ? $code : 0,
+				'record'  => $record,
+				'url'     => $url,
+				'code'    => in_array( $code, [ 301, 302 ], true ) ? $code : 0,
+				'error'   => (string) $result->get_error_code(),
+				'message' => (string) $result->get_error_message(),
 			];
 			return null;
 		}

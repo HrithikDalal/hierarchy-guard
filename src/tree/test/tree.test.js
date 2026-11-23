@@ -838,6 +838,27 @@ describe( 'the tree grid', () => {
 		}
 	} );
 
+	it( 'swaps left and right right to left, as the toggle’s arrow does', async () => {
+		setLocaleData( { 'text direction\u0004ltr': [ 'rtl' ] } );
+		try {
+			bindTree( document, fetchChildren );
+			row( 4 ).focus();
+
+			press( row( 4 ), 'ArrowLeft' );
+			await settle();
+			expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+			press( row( 4 ), 'ArrowLeft' );
+			expect( document.activeElement ).toBe( row( 5 ) );
+
+			press( row( 5 ), 'ArrowRight' );
+			expect( document.activeElement ).toBe( row( 4 ) );
+			press( row( 4 ), 'ArrowRight' );
+			expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'false' );
+		} finally {
+			setLocaleData( { 'text direction\u0004ltr': [ 'ltr' ] } );
+		}
+	} );
+
 	it( 'shows a row once whatever the clicks while it loads', async () => {
 		let answer;
 		const load = vi.fn(

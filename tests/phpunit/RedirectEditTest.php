@@ -125,7 +125,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
 		$this->assertStringContainsString( '<form method="post" action="' . esc_url( Settings_Page::url( 'redirects' ) ) . '">', $html );
 		$this->assertStringContainsString( '<tr><th scope="row">Old URL</th><td><code>/old-about/</code> and the URLs under it</td></tr>', $html );
-		$this->assertStringContainsString( '<td><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" dir="ltr" aria-describedby="hierarchy-guard-target-description">', $html, 'A text field, so a path is not stopped by the browser.' );
+		$this->assertStringContainsString( '<td><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" dir="ltr" aria-describedby="hierarchy-guard-target-description">', $html, 'A text field, so a path is not stopped by the browser; not marked invalid before a save.' );
 		$this->assertStringContainsString( '<div id="hierarchy-guard-target-description"><p class="description">If you enter a page on this site, the redirect follows that page when it moves, and URLs under <code>/old-about/</code> go to the matching URLs under that page.</p><p class="description">If you enter any other URL, only <code>/old-about/</code> itself redirects there, and URLs under it are no longer redirected.</p><p class="description">You can enter a path on this site, such as <code>/about/team/</code>, instead of a full URL.</p></div>', $html, 'One sentence a line, for each kind of target.' );
 		$this->assertStringContainsString( 'URLs under <code>/old-about/</code> go to', $html, 'The old URL prints in <code> in the help, so it reads left to right in a right-to-left admin.' );
 		$this->assertStringNotContainsString( 'Leave this empty', $html );
@@ -195,7 +195,8 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
 		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
-		$this->assertStringContainsString( 'value="ftp://example.org/"', $html );
+		$this->assertStringContainsString( '<span class="screen-reader-text" id="hierarchy-guard-target-error">Enter a URL that starts with http:// or https://, or a path on this site that starts with /.</span><input', $html, 'Why, without the notice’s Dismiss button.' );
+		$this->assertStringContainsString( 'value="ftp://example.org/" dir="ltr" aria-describedby="hierarchy-guard-target-error hierarchy-guard-target-description" aria-invalid="true" autofocus>', $html, 'Marked invalid, described by why, and focused.' );
 		$this->assertMatchesRegularExpression( '#value="301"\s+checked=\'checked\'#', $html );
 		$this->assertStringNotContainsString( 'wp-list-table', $html );
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ) );

@@ -802,7 +802,13 @@ export function createTree( { body, data, cap, fetchChildren } ) {
 			return;
 		}
 		const expanded = row.getAttribute( 'aria-expanded' );
-		switch ( event.key ) {
+		// Right to left, the arrows swap, as the toggle's arrow does.
+		const mirrored = { ArrowLeft: 'ArrowRight', ArrowRight: 'ArrowLeft' };
+		const key =
+			isRTL() && mirrored[ event.key ]
+				? mirrored[ event.key ]
+				: event.key;
+		switch ( key ) {
 			case 'ArrowDown':
 				focus( row.nextElementSibling );
 				break;

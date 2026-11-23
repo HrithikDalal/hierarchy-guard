@@ -215,7 +215,14 @@ export default function RedirectsModal( {
 					{ error }
 				</Notice>
 			) }
-			{ ! data && loading && <Spinner /> }
+			{ ! data && loading && (
+				<>
+					<Spinner />
+					<span className="screen-reader-text">
+						{ __( 'Loading…', 'hierarchy-guard' ) }
+					</span>
+				</>
+			) }
 			{ data && (
 				<>
 					{ data.total > 0 && <p>{ intro }</p> }

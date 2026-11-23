@@ -87,7 +87,8 @@ final class Meta_Box {
 			$data['redirects']['serving'] ? 1 : 0
 		);
 
-		echo '<p><strong>' . esc_html__( 'Parent pages', 'hierarchy-guard' ) . '</strong><br>';
+		// Headings in the look of core's Page Attributes labels, at the level under the box's own title.
+		echo '<p class="post-attributes-label-wrapper" role="heading" aria-level="3"><span class="post-attributes-label">' . esc_html__( 'Parent pages', 'hierarchy-guard' ) . '</span></p><p>';
 		if ( [] === $data['ancestors'] ) {
 			esc_html_e( 'None.', 'hierarchy-guard' );
 			echo ' ';
@@ -98,7 +99,7 @@ final class Meta_Box {
 		}
 		echo '</p>';
 
-		echo '<p><strong>' . esc_html__( 'Subpages', 'hierarchy-guard' ) . '</strong><br>';
+		echo '<p class="post-attributes-label-wrapper" role="heading" aria-level="3"><span class="post-attributes-label">' . esc_html__( 'Subpages', 'hierarchy-guard' ) . '</span></p><p>';
 		if ( 0 === (int) $data['children_total'] ) {
 			esc_html_e( 'No subpages.', 'hierarchy-guard' );
 			echo '</p>';

@@ -411,7 +411,9 @@ final class Redirects_Table extends WP_List_Table {
 
 	/**
 	 * A record's old URL as HTML, in code so it reads left to right in a
-	 * right-to-left language too, with "and the URLs under it" for a page
+	 * right-to-left language too; as a row title, core's monospace .code
+	 * without code's grey fill, which takes the link below AA contrast on a
+	 * striped row. With "and the URLs under it" for a page
 	 * target, or as "The URLs under it" for a top-level root-list entry,
 	 * which never redirects the old URL itself; linked, as a row title, when
 	 * a link is given.
@@ -424,7 +426,7 @@ final class Redirects_Table extends WP_List_Table {
 		$old = '<code>' . esc_html( (string) $item['old'] ) . '</code>';
 		if ( '' !== $edit ) {
 			// Named by its own text, the old URL, as core's row titles are.
-			$old = sprintf( '<a class="row-title" href="%1$s">%2$s</a>', esc_url( $edit ), $old );
+			$old = sprintf( '<a class="row-title" href="%1$s"><span class="code">%2$s</span></a>', esc_url( $edit ), esc_html( (string) $item['old'] ) );
 		}
 		if ( null !== $item['target'] && '' !== (string) $item['target']['url'] ) {
 			return $old;

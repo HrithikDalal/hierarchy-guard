@@ -83,7 +83,10 @@ final class MetaBoxTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'data-descendants="3"', $html );
 		$this->assertStringContainsString( 'data-status="publish"', $html );
 		$this->assertStringContainsString( '>Company</a>', $html );
-		$this->assertStringContainsString( '<strong>Subpages</strong>', $html );
+		$this->assertStringContainsString( '<p class="post-attributes-label-wrapper" role="heading" aria-level="3"><span class="post-attributes-label">Parent pages</span></p>', $html, 'Headings under the box’s own title, styled as core’s Page Attributes labels.' );
+		$this->assertStringContainsString( '<p class="post-attributes-label-wrapper" role="heading" aria-level="3"><span class="post-attributes-label">Subpages</span></p>', $html );
+		$this->assertStringNotContainsString( '<h3>', $html, 'A bare h3 would print larger than the box’s title.' );
+		$this->assertStringNotContainsString( '<strong>', $html );
 		$this->assertStringContainsString( '2 direct · 3 in total', $html );
 		$this->assertStringContainsString( '>Team</a><span aria-hidden="true"> · </span>1 subpage</li>', $html );
 		$this->assertStringContainsString( 'Trashing this page moves its 2 subpages under “Company”.', $html );

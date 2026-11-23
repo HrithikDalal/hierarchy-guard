@@ -165,12 +165,13 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<code>/old-about/</code></a> and the URLs under it', $html, 'In code, so it reads left to right in a right-to-left language too.' );
-		$this->assertStringContainsString( '<code>/careers/</code><', $html, 'A URL target covers its exact old URL only.' );
+		$this->assertStringContainsString( '<span class="code">/old-about/</span></a> and the URLs under it', $html, 'Core’s monospace, left to right in a right-to-left language too, without code’s grey fill behind the link.' );
+		$this->assertStringNotContainsString( '<code>/old-about/</code></a>', $html );
+		$this->assertStringContainsString( '<span class="code">/careers/</span><', $html, 'A URL target covers its exact old URL only.' );
 		$this->assertStringContainsString( '>The URLs under <a class="row-title"', $html, 'A top-level entry never redirects its old URL itself.' );
-		$this->assertStringContainsString( '<code>/archive/</code></a>', $html );
-		$this->assertStringNotContainsString( '<code>/archive/</code></a> and the URLs under it', $html );
-		$this->assertStringContainsString( '<code>/archive/</code></a><p class="description">This redirect stays until you delete it, even after the pages under it are gone.</p>', $html );
+		$this->assertStringContainsString( '<span class="code">/archive/</span></a>', $html );
+		$this->assertStringNotContainsString( '<span class="code">/archive/</span></a> and the URLs under it', $html );
+		$this->assertStringContainsString( '<span class="code">/archive/</span></a><p class="description">This redirect stays until you delete it, even after the pages under it are gone.</p>', $html );
 		$this->assertSame( 1, substr_count( $html, 'This redirect stays until you delete it' ), 'Only the root-list record says so: the others go when their page does.' );
 		$this->assertStringContainsString( '<a href="' . esc_url( get_edit_post_link( $this->ids['about'] ) ) . '">About</a><br><span dir="ltr">/company/about/</span>', $html );
 		$this->assertStringContainsString( '">Whats-on</a> &mdash; <span class=\'post-state\'>Draft</span><br><span dir="ltr">/?page_id=' . $draft . '</span>', $html );
@@ -593,7 +594,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<code>/café/équipe/</code>', $html );
+		$this->assertStringContainsString( '<span class="code">/café/équipe/</span>', $html );
 		$this->assertStringNotContainsString( '/other/', $html );
 		$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong><span dir="ltr">' . esc_html( home_url( '/café/équipe/' ) ) . '</span></strong></span>', $html, 'A URL searched reads left to right in a right-to-left admin too.' );
 	}
@@ -647,7 +648,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 			$this->assertStringContainsString( $arg, $edit );
 			$this->assertStringContainsString( $arg, Redirect_Edit::delete_url( $id ) );
 		}
-		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '"><code>/old-21/</code></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do, named by its own text.' );
+		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '"><span class="code">/old-21/</span></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do, named by its own text.' );
 		$this->assertStringContainsString( '<a href="' . esc_url( $edit ) . '" aria-label="Edit the redirect from /old-21/">Edit</a>', $html );
 		$this->assertStringContainsString( '<a href="' . esc_url( Redirect_Edit::delete_url( $id ) ) . '" class="submitdelete"', $html );
 

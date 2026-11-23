@@ -371,7 +371,14 @@ export default function HierarchyPlugin() {
 						{ error }
 					</Notice>
 				) }
-				{ ! data && ! error && <Spinner /> }
+				{ ! data && ! error && (
+					<>
+						<Spinner />
+						<span className="screen-reader-text">
+							{ __( 'Loading…', 'hierarchy-guard' ) }
+						</span>
+					</>
+				) }
 				{ data && <Overview data={ data } /> }
 			</PluginDocumentSettingPanel>
 			{ modal && (
