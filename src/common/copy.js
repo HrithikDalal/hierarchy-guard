@@ -400,37 +400,42 @@ export function optionLabel( policy, page ) {
  * @return {string} Description or template.
  */
 export function optionDescription( policy, page, cap ) {
-	if ( 'trash_children' === policy ) {
-		if ( page && true === page.fallback ) {
-			return sprintf(
+	// Each sentence is passed as an argument, as in trashSentence(), so the
+	// minifier keeps its translator comment beside it.
+	const sentence = [];
+	if ( 'trash_children' === policy && page && true === page.fallback ) {
+		sentence.push(
+			sprintf(
 				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
 				__(
 					'Not available: there are more than %s.',
 					'hierarchy-guard'
 				),
 				formatCount( cap )
-			);
-		}
-		if ( ! page ) {
+			)
+		);
+	} else if ( 'trash_children' === policy && ! page ) {
+		sentence.push(
 			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
-			const any = __(
+			__(
 				'Restoring their parent restores them with their original status.',
 				'hierarchy-guard'
-			);
-			return any;
-		}
-		/* translators: %s: page title; "it" or "them" are its subpages. */
-		const restores = _n(
-			'Restoring “%s” restores it with its original status.',
-			'Restoring “%s” restores them with their original status.',
-			page.descendants.count,
-			'hierarchy-guard'
+			)
 		);
-		return sprintf( restores, page.title );
-	}
-	// Passed as an argument, as in trashSentence(), for the translator comments.
-	const sentence = [];
-	if ( 'keep' === policy && page && keptUrl( page ) ) {
+	} else if ( 'trash_children' === policy ) {
+		sentence.push(
+			sprintf(
+				/* translators: %s: page title; "it" or "them" are its subpages. */
+				_n(
+					'Restoring “%s” restores it with its original status.',
+					'Restoring “%s” restores them with their original status.',
+					page.descendants.count,
+					'hierarchy-guard'
+				),
+				page.title
+			)
+		);
+	} else if ( 'keep' === policy && page && keptUrl( page ) ) {
 		sentence.push(
 			/* translators: "Their" and "them" are the subpages; <from /> and <to /> are replaced by URLs. */
 			__(
