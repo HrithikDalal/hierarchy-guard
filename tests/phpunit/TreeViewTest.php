@@ -624,7 +624,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( html_entity_decode( $title[1], ENT_QUOTES, 'UTF-8' ), $loaded['title'], 'The text core’s row shows.' );
 	}
 
-	public function test_past_the_cap_the_opened_page_says_only_the_first_are_shown(): void {
+	public function test_past_the_cap_the_opened_page_pages_up_to_the_cap_and_is_marked_capped(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 60 );
 		$this->subpages( $this->ids['team'], 70 );
 		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['team'];
