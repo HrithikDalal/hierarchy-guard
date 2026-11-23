@@ -10,7 +10,6 @@ declare( strict_types=1 );
 namespace HierarchyGuard;
 
 use HierarchyGuard\Admin\List_Table;
-use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Trash_Handler;
@@ -87,11 +86,7 @@ final class Overview {
 				'serving'      => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
 				// The pairs list only pages the server redirects to, so it serves them whenever it serves the type.
 				'pairs_served' => Settings::serve_redirects() && is_post_type_viewable( $type ),
-				'provider'     => null === $provider ? null : [
-					'name' => (string) ( $provider['name'] ?? '' ),
-					'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
-					'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
-				],
+				'provider'     => Providers::described( $provider ),
 			],
 			'trash_policy'   => $fallback ? Settings::POLICY_REPARENT : $policy,
 			'trash_fallback' => $fallback,

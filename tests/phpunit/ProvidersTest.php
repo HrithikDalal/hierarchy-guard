@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Redirects\Providers;
 use WP_UnitTestCase;
 
@@ -25,8 +26,54 @@ final class ProvidersTest extends WP_UnitTestCase {
 			$this->assertIsString( $all[ $slug ]['name'] );
 			$this->assertIsBool( $all[ $slug ]['active'] );
 			$this->assertStringStartsWith( admin_url(), $all[ $slug ]['url'] );
-			$this->assertContains( $all[ $slug ]['csv'], [ 'redirection', 'srm', 'generic' ] );
+			$this->assertArrayHasKey( $all[ $slug ]['csv'], Csv::LAYOUTS );
 		}
+	}
+
+	public function test_each_provider_gets_its_own_import_layout_or_the_generic_one(): void {
+		$layouts = array_map( static fn( array $provider ): string => $provider['csv'], ( new Providers() )->all() );
+
+		$this->assertSame(
+			[
+				'redirection'           => 'redirection',
+				'safe-redirect-manager' => 'srm',
+				'yoast-premium'         => 'yoast',
+				'rank-math'             => 'rank-math',
+				'aioseo'                => 'generic',
+				'seopress-pro'          => 'generic',
+				'simple-301'            => 'simple-301',
+			],
+			$layouts
+		);
+	}
+
+	public function test_a_provider_whose_import_needs_more_says_so(): void {
+		$all = ( new Providers() )->all();
+
+		$this->assertStringContainsString( 'wp safe-redirect-manager import', $all['safe-redirect-manager']['note'] );
+		$this->assertStringContainsString( 'PRO', $all['rank-math']['note'] );
+		$this->assertStringContainsString( '301', $all['simple-301']['note'] );
+		$this->assertArrayNotHasKey( 'note', $all['redirection'] );
+	}
+
+	public function test_the_scripts_get_a_provider_s_name_screen_layout_and_note(): void {
+		$this->assertNull( Providers::described( null ) );
+		$this->assertSame(
+			[
+				'name' => 'Custom',
+				'url'  => admin_url( 'admin.php?page=custom' ),
+				'csv'  => 'generic',
+				'note' => '',
+			],
+			Providers::described(
+				[
+					'name' => 'Custom',
+					'url'  => admin_url( 'admin.php?page=custom' ),
+					'csv'  => 'unknown',
+					'note' => [ 'not text' ],
+				]
+			)
+		);
 	}
 
 	public function test_detect_returns_null_when_no_provider_is_active(): void {

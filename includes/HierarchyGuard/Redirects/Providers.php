@@ -9,16 +9,19 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Redirects;
 
+use HierarchyGuard\Export\Csv;
+
 /**
  * Known redirect plugins: a presence check, the URL of their redirects screen,
- * and which CSV layout they import.
+ * which CSV layout they import, and what to know before importing it.
  */
 final class Providers {
 
 	/**
-	 * Every known provider, active or not.
+	 * Every known provider, active or not. A provider with the generic layout
+	 * has no documented import format, so its download isn't named after it.
 	 *
-	 * @return array<string,array{name:string,active:bool,url:string,csv:string}>
+	 * @return array<string,array{name:string,active:bool,url:string,csv:string,note?:string}>
 	 */
 	public function all(): array {
 		$providers = [
@@ -33,18 +36,21 @@ final class Providers {
 				'active' => function_exists( 'srm_create_redirect' ),
 				'url'    => admin_url( 'edit.php?post_type=redirect_rule' ),
 				'csv'    => 'srm',
+				/* translators: %s: a WP-CLI command, which stays as it is. */
+				'note'   => sprintf( __( 'Safe Redirect Manager imports a CSV only from WP-CLI: %s', 'hierarchy-guard' ), 'wp safe-redirect-manager import <file>' ),
 			],
 			'yoast-premium'         => [
 				'name'   => 'Yoast SEO Premium',
 				'active' => defined( 'WPSEO_PREMIUM_VERSION' ),
 				'url'    => admin_url( 'admin.php?page=wpseo_redirects' ),
-				'csv'    => 'generic',
+				'csv'    => 'yoast',
 			],
 			'rank-math'             => [
 				'name'   => 'Rank Math',
 				'active' => class_exists( 'RankMath\\Helper' ) && is_callable( [ 'RankMath\\Helper', 'is_module_active' ] ) && (bool) call_user_func( [ 'RankMath\\Helper', 'is_module_active' ], 'redirections' ),
 				'url'    => admin_url( 'admin.php?page=rank-math-redirections' ),
-				'csv'    => 'generic',
+				'csv'    => 'rank-math',
+				'note'   => __( 'Rank Math imports a CSV only in its PRO version.', 'hierarchy-guard' ),
 			],
 			'aioseo'                => [
 				'name'   => 'All in One SEO',
@@ -62,16 +68,35 @@ final class Providers {
 				'name'   => 'Simple 301 Redirects',
 				'active' => class_exists( 'Simple301Redirects' ),
 				'url'    => admin_url( 'options-general.php?page=301options' ),
-				'csv'    => 'generic',
+				'csv'    => 'simple-301',
+				'note'   => __( 'Simple 301 Redirects imports every row as a 301.', 'hierarchy-guard' ),
 			],
 		];
 
 		/**
 		 * Filters the redirect plugins Hierarchy Guard can detect.
 		 *
-		 * @param array<string,array{name:string,active:bool,url:string,csv:string}> $providers Keyed by slug.
+		 * @param array<string,array{name:string,active:bool,url:string,csv:string,note?:string}> $providers Keyed by slug: the plugin's name, whether it is active, its redirects screen, one of the Csv::LAYOUTS names, and an optional sentence shown before importing.
 		 */
 		return (array) apply_filters( 'hierarchy_guard_redirect_providers', $providers );
+	}
+
+	/**
+	 * What the scripts and the hierarchy route say about a detected provider.
+	 *
+	 * @param array<string,mixed>|null $provider From detect().
+	 * @return array{name:string,url:string,csv:string,note:string}|null
+	 */
+	public static function described( ?array $provider ): ?array {
+		if ( null === $provider ) {
+			return null;
+		}
+		return [
+			'name' => (string) ( $provider['name'] ?? '' ),
+			'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
+			'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
+			'note' => is_string( $provider['note'] ?? null ) ? $provider['note'] : '',
+		];
 	}
 
 	/**

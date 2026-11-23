@@ -10,7 +10,6 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Admin;
 
-use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\REST\Hierarchy_Controller;
 use HierarchyGuard\Redirects\Providers;
@@ -246,11 +245,7 @@ final class Assets {
 		return [
 			'namespace'   => Hierarchy_Controller::NAMESPACE,
 			'serving'     => Settings::serve_redirects(),
-			'provider'    => null === $provider ? null : [
-				'name' => (string) ( $provider['name'] ?? '' ),
-				'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
-				'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
-			],
+			'provider'    => Providers::described( $provider ),
 			'settingsUrl' => current_user_can( 'manage_options' ) ? Settings_Page::redirects_url() : '',
 			'policyUrl'   => current_user_can( 'manage_options' ) ? Settings_Page::policy_url() : '',
 			'policy'      => Settings::trash_policy(),

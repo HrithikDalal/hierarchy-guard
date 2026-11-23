@@ -46,6 +46,30 @@ final class CsvTest extends WP_UnitTestCase {
 		$this->assertSame( Csv::build( 'redirection', $this->pairs() ), Csv::build( 'srm', $this->pairs() ) );
 	}
 
+	public function test_on_a_site_in_a_subdirectory_only_redirection_s_paths_carry_the_home_path(): void {
+		$home  = static fn(): string => 'http://example.org/blog';
+		add_filter( 'pre_option_home', $home );
+		$pairs = [
+			[
+				'old' => '/about/team/',
+				'new' => '/company/team/',
+			],
+			[
+				'old' => '/old/',
+				'new' => 'https://other.example/new/',
+			],
+		];
+
+		$redirection = Csv::build( 'redirection', $pairs );
+		$srm         = Csv::build( 'srm', $pairs );
+		$yoast       = Csv::build( 'yoast', $pairs );
+		remove_filter( 'pre_option_home', $home );
+
+		$this->assertSame( "source,target,regex,code\r\n/blog/about/team/,/blog/company/team/,0,301\r\n/blog/old/,https://other.example/new/,0,301\r\n", $redirection );
+		$this->assertSame( "source,target,regex,code\r\n/about/team/,/company/team/,0,301\r\n/old/,https://other.example/new/,0,301\r\n", $srm, 'Safe Redirect Manager strips the home path itself.' );
+		$this->assertStringContainsString( "\n/about/team/,/company/team/,301,plain\n", $yoast );
+	}
+
 	public function test_the_generic_layout_has_source_target_and_code(): void {
 		$this->assertSame( "source,target,code\r\n/about/team/,/company/team/,301\r\n", Csv::build( 'generic', [ $this->pairs()[0] ] ) );
 	}
@@ -63,6 +87,30 @@ final class CsvTest extends WP_UnitTestCase {
 		$this->assertSame(
 			"source,target,code\r\n/about/team/,/company/team/,301\r\n/about/team/leadership/,/company/team/leadership/,302\r\n",
 			Csv::build( 'generic', $pairs )
+		);
+	}
+
+	public function test_yoast_reads_origin_target_type_and_a_plain_format_on_unix_lines(): void {
+		$pairs                 = $this->pairs();
+		$pairs[1]['temporary'] = true;
+
+		$this->assertSame(
+			"Origin,Target,Type,Format\n/about/team/,/company/team/,301,plain\n/about/team/leadership/,/company/team/leadership/,302,plain\n",
+			Csv::build( 'yoast', $pairs )
+		);
+	}
+
+	public function test_rank_math_reads_source_destination_and_type(): void {
+		$this->assertSame( "source,destination,type\r\n/about/team/,/company/team/,301\r\n", Csv::build( 'rank-math', [ $this->pairs()[0] ] ) );
+	}
+
+	public function test_simple_301_reads_request_and_destination_only(): void {
+		$pairs                 = $this->pairs();
+		$pairs[1]['temporary'] = true;
+
+		$this->assertSame(
+			"request,destination\r\n/about/team/,/company/team/\r\n/about/team/leadership/,/company/team/leadership/\r\n",
+			Csv::build( 'simple-301', $pairs )
 		);
 	}
 

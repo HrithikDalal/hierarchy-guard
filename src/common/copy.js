@@ -620,6 +620,52 @@ export function viewRedirectsLabel( count, capped ) {
 }
 
 /**
+ * The CSV button's label: it names the redirect plugin only when the file is
+ * in that plugin's own import layout.
+ *
+ * @param {(Object|null)} provider The detected redirect plugin: `name` and `csv`, its layout.
+ * @return {string} Label.
+ */
+export function csvLabel( provider ) {
+	if ( provider && provider.name && 'generic' !== provider.csv ) {
+		return sprintf(
+			/* translators: %s: name of the redirect plugin. */
+			__( 'Download CSV for %s', 'hierarchy-guard' ),
+			provider.name
+		);
+	}
+	return __( 'Download CSV', 'hierarchy-guard' );
+}
+
+/**
+ * What to know before importing the CSV into the detected redirect plugin:
+ * its own note, then that a plugin which adds a redirect for a changed page
+ * on its own already has that row.
+ *
+ * @param {(Object|null)} provider The detected redirect plugin: `name` and `note`.
+ * @return {string[]} Sentences.
+ */
+export function importNotes( provider ) {
+	if ( ! provider ) {
+		return [];
+	}
+	const own = provider.name
+		? sprintf(
+				/* translators: %s: name of the redirect plugin. */
+				__(
+					'If %s already added any of these redirects itself, skip those rows.',
+					'hierarchy-guard'
+				),
+				provider.name
+			)
+		: __(
+				'If your redirect plugin already added any of these redirects itself, skip those rows.',
+				'hierarchy-guard'
+			);
+	return provider.note ? [ provider.note, own ] : [ own ];
+}
+
+/**
  * What handles the redirects of a page's pairs: the server redirects them
  * whenever it serves the type, even when the page itself is not viewable,
  * since the pairs list only pages it redirects to. A page's own old URL

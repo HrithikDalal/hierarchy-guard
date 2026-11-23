@@ -10,9 +10,11 @@ import {
 	changedStatus,
 	copiedSentence,
 	countsLine,
+	csvLabel,
 	deniedSentence,
 	dialogTitle,
 	formatCount,
+	importNotes,
 	initialSentence,
 	keptUrl,
 	optionDescription,
@@ -355,6 +357,35 @@ describe( 'warnings and outcomes', () => {
 				{ old: '/a/c/', new: '/b/c/' },
 			] )
 		).toBe( '/a/ /b/\n/a/c/ /b/c/' );
+	} );
+} );
+
+describe( 'the CSV download', () => {
+	it( 'names the redirect plugin only for a file in its own layout', () => {
+		expect( csvLabel( { name: 'Redirection', csv: 'redirection' } ) ).toBe(
+			'Download CSV for Redirection'
+		);
+		expect( csvLabel( { name: 'SEOPress PRO', csv: 'generic' } ) ).toBe(
+			'Download CSV'
+		);
+		expect( csvLabel( { name: '', csv: 'yoast' } ) ).toBe( 'Download CSV' );
+		expect( csvLabel( null ) ).toBe( 'Download CSV' );
+	} );
+
+	it( 'says what to know before importing, the plugin’s own note first', () => {
+		expect(
+			importNotes( {
+				name: 'Rank Math',
+				note: 'Rank Math imports a CSV only in its PRO version.',
+			} )
+		).toEqual( [
+			'Rank Math imports a CSV only in its PRO version.',
+			'If Rank Math already added any of these redirects itself, skip those rows.',
+		] );
+		expect( importNotes( { name: '', note: '' } ) ).toEqual( [
+			'If your redirect plugin already added any of these redirects itself, skip those rows.',
+		] );
+		expect( importNotes( null ) ).toEqual( [] );
 	} );
 } );
 

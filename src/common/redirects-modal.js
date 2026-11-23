@@ -15,7 +15,9 @@ import { csvUrl, fetchPairs } from './api';
 import config from './config';
 import {
 	copiedSentence,
+	csvLabel,
 	formatCount,
+	importNotes,
 	pairsRedirects,
 	pairsText,
 	unresolvedSentence,
@@ -335,16 +337,7 @@ export default function RedirectsModal( {
 								href={ csvUrl( source, layout ) }
 								download
 							>
-								{ name
-									? sprintf(
-											/* translators: %s: name of the redirect plugin. */
-											__(
-												'Download CSV for %s',
-												'hierarchy-guard'
-											),
-											name
-										)
-									: __( 'Download CSV', 'hierarchy-guard' ) }
+								{ csvLabel( provider ) }
 							</Button>
 						) }
 						{ /* Never offered while redirects are on for the site, even when this page isn't served. */ }
@@ -362,6 +355,13 @@ export default function RedirectsModal( {
 								</Button>
 							) }
 					</div>
+					{ data.total > 0 &&
+						! serving &&
+						importNotes( provider ).map( ( note ) => (
+							<p key={ note } className="description">
+								{ note }
+							</p>
+						) ) }
 				</>
 			) }
 		</Modal>

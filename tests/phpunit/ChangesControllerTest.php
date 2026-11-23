@@ -241,8 +241,56 @@ final class ChangesControllerTest extends WP_UnitTestCase {
 		$this->assertStringStartsWith( "source,target,regex,code\r\n/company/about/history/,/company/history/,0,302\r\n", $response->get_data() );
 	}
 
-	public function test_an_unknown_csv_layout_is_refused(): void {
-		$this->assertSame( 400, $this->get( '/changes/' . $this->change_id . '/csv', [ 'format' => 'excel' ] )->get_status() );
+	/**
+	 * Layouts the download offers no button for.
+	 *
+	 * @return array<string,array{0:mixed}>
+	 */
+	public static function crafted_formats(): array {
+		return [
+			'unknown'          => [ 'excel' ],
+			'wrong case'       => [ 'Yoast' ],
+			'trailing space'   => [ 'yoast ' ],
+			'empty'            => [ '' ],
+			'array'            => [ [ 'yoast' ] ],
+			'two layouts'      => [ 'yoast,redirection' ],
+			'path to a layout' => [ '../yoast' ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_formats
+	 *
+	 * @param mixed $format The format parameter.
+	 */
+	public function test_a_layout_the_buttons_never_send_is_refused( $format ): void {
+		$this->assertSame( 400, $this->get( '/changes/' . $this->change_id . '/csv', [ 'format' => $format ] )->get_status() );
+	}
+
+	/**
+	 * Each documented layout's first two lines.
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public static function layouts(): array {
+		return [
+			'Yoast SEO Premium'    => [ 'yoast', "Origin,Target,Type,Format\n/company/about/history/,/company/history/,302,plain\n" ],
+			'Rank Math'            => [ 'rank-math', "source,destination,type\r\n/company/about/history/,/company/history/,302\r\n" ],
+			'Simple 301 Redirects' => [ 'simple-301', "request,destination\r\n/company/about/history/,/company/history/\r\n" ],
+		];
+	}
+
+	/**
+	 * @dataProvider layouts
+	 *
+	 * @param string $format Layout.
+	 * @param string $start  The file's first two lines.
+	 */
+	public function test_the_route_gives_each_documented_layout( string $format, string $start ): void {
+		$response = $this->get( '/changes/' . $this->change_id . '/csv', [ 'format' => $format ] );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertStringStartsWith( $start, $response->get_data() );
 	}
 
 	public function test_the_gone_message_says_a_later_change_replaced_them_and_how_long_they_are_kept(): void {
