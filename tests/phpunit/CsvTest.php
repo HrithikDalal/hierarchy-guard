@@ -42,11 +42,16 @@ final class CsvTest extends WP_UnitTestCase {
 		);
 	}
 
-	public function test_safe_redirect_manager_uses_the_same_columns(): void {
-		$this->assertSame( Csv::build( 'redirection', $this->pairs() ), Csv::build( 'srm', $this->pairs() ) );
+	public function test_safe_redirect_manager_uses_the_same_columns_with_full_url_targets(): void {
+		$home = static fn(): string => 'http://example.org';
+		add_filter( 'pre_option_home', $home );
+		$file = Csv::build( 'srm', $this->pairs() );
+		remove_filter( 'pre_option_home', $home );
+
+		$this->assertSame( "source,target,regex,code\r\n/about/team/,http://example.org/company/team/,0,301\r\n/about/team/leadership/,http://example.org/company/team/leadership/,0,301\r\n", $file );
 	}
 
-	public function test_on_a_site_in_a_subdirectory_only_redirection_s_paths_carry_the_home_path(): void {
+	public function test_on_a_site_in_a_subdirectory_each_layout_s_cells_lead_to_the_right_page(): void {
 		$home  = static fn(): string => 'http://example.org/blog';
 		add_filter( 'pre_option_home', $home );
 		$pairs = [
@@ -58,16 +63,30 @@ final class CsvTest extends WP_UnitTestCase {
 				'old' => '/old/',
 				'new' => 'https://other.example/new/',
 			],
+			[
+				'old' => '/cdn/',
+				'new' => '//cdn.example/new/',
+			],
 		];
 
-		$redirection = Csv::build( 'redirection', $pairs );
-		$srm         = Csv::build( 'srm', $pairs );
-		$yoast       = Csv::build( 'yoast', $pairs );
+		$files = [];
+		foreach ( array_keys( Csv::LAYOUTS ) as $layout ) {
+			$files[ $layout ] = Csv::build( $layout, $pairs );
+		}
 		remove_filter( 'pre_option_home', $home );
 
-		$this->assertSame( "source,target,regex,code\r\n/blog/about/team/,/blog/company/team/,0,301\r\n/blog/old/,https://other.example/new/,0,301\r\n", $redirection );
-		$this->assertSame( "source,target,regex,code\r\n/about/team/,/company/team/,0,301\r\n/old/,https://other.example/new/,0,301\r\n", $srm, 'Safe Redirect Manager strips the home path itself.' );
-		$this->assertStringContainsString( "\n/about/team/,/company/team/,301,plain\n", $yoast );
+		$this->assertSame(
+			[
+				'redirection' => "source,target,regex,code\r\n/blog/about/team/,/blog/company/team/,0,301\r\n/blog/old/,https://other.example/new/,0,301\r\n/blog/cdn/,http://cdn.example/new/,0,301\r\n",
+				'srm'         => "source,target,regex,code\r\n/about/team/,http://example.org/blog/company/team/,0,301\r\n/old/,https://other.example/new/,0,301\r\n/cdn/,http://cdn.example/new/,0,301\r\n",
+				'yoast'       => "Origin,Target,Type,Format\n/about/team/,/company/team/,301,plain\n/old/,https://other.example/new/,301,plain\n/cdn/,http://cdn.example/new/,301,plain\n",
+				'rank-math'   => "source,destination,type\r\n/about/team/,/company/team/,301\r\n/old/,https://other.example/new/,301\r\n/cdn/,http://cdn.example/new/,301\r\n",
+				'simple-301'  => "request,destination\r\n/about/team/,/company/team/\r\n/old/,https://other.example/new/\r\n/cdn/,http://cdn.example/new/\r\n",
+				'generic'     => "source,target,code\r\n/about/team/,/company/team/,301\r\n/old/,https://other.example/new/,301\r\n/cdn/,http://cdn.example/new/,301\r\n",
+			],
+			$files,
+			'Redirection matches the whole request path and sends a target as it is; Safe Redirect Manager strips the home path from the request only and sends a path target from the domain root; the others strip the home path from both, and Yoast SEO Premium and Simple 301 Redirects read a protocol-relative target as a path.'
+		);
 	}
 
 	public function test_the_generic_layout_has_source_target_and_code(): void {
@@ -83,7 +102,11 @@ final class CsvTest extends WP_UnitTestCase {
 			"source,target,regex,code\r\n/about/team/,/company/team/,0,301\r\n/about/team/leadership/,/company/team/leadership/,0,302\r\n",
 			Csv::build( 'redirection', $pairs )
 		);
-		$this->assertSame( Csv::build( 'redirection', $pairs ), Csv::build( 'srm', $pairs ) );
+		$home = static fn(): string => 'http://example.org';
+		add_filter( 'pre_option_home', $home );
+		$srm  = Csv::build( 'srm', $pairs );
+		remove_filter( 'pre_option_home', $home );
+		$this->assertSame( "source,target,regex,code\r\n/about/team/,http://example.org/company/team/,0,301\r\n/about/team/leadership/,http://example.org/company/team/leadership/,0,302\r\n", $srm );
 		$this->assertSame(
 			"source,target,code\r\n/about/team/,/company/team/,301\r\n/about/team/leadership/,/company/team/leadership/,302\r\n",
 			Csv::build( 'generic', $pairs )

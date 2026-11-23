@@ -70,6 +70,12 @@ final class Csv {
 	private const FROM_ROOT = [ 'redirection' ];
 
 	/**
+	 * Layouts whose plugin strips the home path from the request but sends a
+	 * path target from the domain root, so their targets are full URLs.
+	 */
+	private const FULL_TARGETS = [ 'srm' ];
+
+	/**
 	 * A known layout name, falling back to generic.
 	 *
 	 * @param string $layout Requested layout.
@@ -80,7 +86,9 @@ final class Csv {
 	}
 
 	/**
-	 * The whole file: a header row, then one row per pair.
+	 * The whole file: a header row, then one row per pair. A protocol-relative
+	 * target gets the home URL's scheme, since Yoast SEO Premium and Simple
+	 * 301 Redirects would read it as a path.
 	 *
 	 * @param string                                                  $layout Layout name.
 	 * @param array<int,array{old:string,new:string,temporary?:bool}> $pairs  Old URLs relative to the home URL, new ones relative too or a URL target as set, and whether each is temporary.
@@ -88,14 +96,17 @@ final class Csv {
 	 */
 	public static function build( string $layout, array $pairs ): string {
 		$layout = self::layout( $layout );
-		$base   = in_array( $layout, self::FROM_ROOT, true ) ? untrailingslashit( (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH ) ) : '';
+		$home   = home_url( '/' );
+		$base   = in_array( $layout, self::FROM_ROOT, true ) ? untrailingslashit( (string) wp_parse_url( $home, PHP_URL_PATH ) ) : '';
+		$full   = in_array( $layout, self::FULL_TARGETS, true );
 		$lines  = [ self::line( array_keys( self::LAYOUTS[ $layout ] ) ) ];
 		foreach ( $pairs as $pair ) {
-			$old = (string) $pair['old'];
+			$old = $base . (string) $pair['old'];
 			$new = (string) $pair['new'];
-			if ( '' !== $base ) {
-				$old = $base . $old;
-				$new = str_starts_with( $new, '/' ) && ! str_starts_with( $new, '//' ) ? $base . $new : $new;
+			if ( str_starts_with( $new, '//' ) ) {
+				$new = wp_parse_url( $home, PHP_URL_SCHEME ) . ':' . $new;
+			} elseif ( str_starts_with( $new, '/' ) ) {
+				$new = $full ? home_url( $new ) : $base . $new;
 			}
 			$lines[] = self::line( self::row( $layout, $old, $new, ! empty( $pair['temporary'] ) ) );
 		}
