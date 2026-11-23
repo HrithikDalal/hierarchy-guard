@@ -1161,6 +1161,9 @@ final class RecordsTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ '/old-about/' ], array_column( $rows, 'old' ) );
 		$this->assertSame( [ Records::STATUS_PLAIN ], array_values( $this->records->statuses( $rows ) ), 'The server serves nothing without pretty permalinks.' );
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => false ] );
+		$this->assertSame( [ Records::STATUS_OFF ], array_values( $this->records->statuses( $rows ) ), 'With built-in redirects off too, the switch is the first reason.' );
 	}
 
 	public function test_a_page_url_pasted_without_its_slash_or_with_a_query_or_fragment_still_moves_the_record(): void {

@@ -233,7 +233,9 @@ final class Records {
 	}
 
 	/**
-	 * One row's status: the first check of statuses() that applies.
+	 * One row's status: the first check of statuses() that applies, from
+	 * three groups of reasons in order: what the page's state says, what the
+	 * server refuses, then the built-in redirects and permalinks switches.
 	 *
 	 * @param array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null} $row Row.
 	 * @param Resolver $resolver Resolver, shared by the page of rows.
@@ -242,30 +244,70 @@ final class Records {
 	 * @return string One of the STATUS_ constants.
 	 */
 	private function status_of( array $row, Resolver $resolver, bool $serving, bool $plain ): string {
-		$type   = $row['post_type'];
-		$path   = $row['path'];
 		$holder = $row['holder'] > 0 ? get_post( $row['holder'] ) : null;
 		$url    = null !== $row['target'] ? $row['target']['url'] : '';
-		if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
+		return self::page_reason( $row, $holder, $url )
+			?? self::refusal( $row, $url, $resolver )
+			?? self::switch_reason( $serving, $plain );
+	}
+
+	/**
+	 * Why a row isn't served by its page's state: its own page is in the
+	 * Trash, a post is at its old URL, or the page it points to can't be
+	 * reached.
+	 *
+	 * @param array{holder:int,post_type:string,path:string} $row    Row.
+	 * @param WP_Post|null                                   $holder The row's page, if it has one.
+	 * @param string                                         $url    The URL target, or ''.
+	 * @return string|null A STATUS_ constant, or null when the page's state is no reason.
+	 */
+	private static function page_reason( array $row, ?WP_Post $holder, string $url ): ?string {
+		if ( null !== $holder && 'trash' === $holder->post_status ) {
 			// Its own page is why it is not served, whatever else is at its old URL.
 			return self::STATUS_UNPUBLISHED;
 		}
-		if ( Server::shows_post( self::full_old_url( $type, $path ) ) ) {
+		if ( Server::shows_post( self::full_old_url( $row['post_type'], $row['path'] ) ) ) {
 			return self::STATUS_IN_USE;
 		}
-		if ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
+		if ( null !== $holder && ! self::reachable( $holder, $url ) ) {
 			return self::STATUS_UNPUBLISHED;
 		}
+		return null;
+	}
+
+	/**
+	 * Why the server refuses a row, whether built-in redirects are on or
+	 * off: too many levels, a URL target at its own old URL, or one that is
+	 * another redirected URL.
+	 *
+	 * @param array{holder:int,post_type:string,path:string} $row      Row.
+	 * @param string                                         $url      The URL target, or ''.
+	 * @param Resolver                                       $resolver Resolver, shared by the page of rows.
+	 * @return string|null A STATUS_ constant, or null when the server would send it.
+	 */
+	private static function refusal( array $row, string $url, Resolver $resolver ): ?string {
 		// A top-level root-list entry serves only the URLs one segment under it.
-		if ( self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 ) ) {
+		if ( self::too_deep( $row['post_type'], $row['path'], self::is_top_level( $row ) ? 1 : 0 ) ) {
 			return self::STATUS_TOO_DEEP;
 		}
-		if ( self::loops( $type, $path, $url ) ) {
+		if ( self::loops( $row['post_type'], $row['path'], $url ) ) {
 			return self::STATUS_LOOP;
 		}
 		if ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) ) {
 			return self::STATUS_CHAINED;
 		}
+		return null;
+	}
+
+	/**
+	 * A row's status by the switches alone: built-in redirects off, then
+	 * plain permalinks, else active.
+	 *
+	 * @param bool $serving Whether built-in redirects are on.
+	 * @param bool $plain   Whether the site has plain permalinks.
+	 * @return string One of the STATUS_ constants.
+	 */
+	private static function switch_reason( bool $serving, bool $plain ): string {
 		if ( ! $serving ) {
 			return self::STATUS_OFF;
 		}
