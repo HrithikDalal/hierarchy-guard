@@ -25,6 +25,13 @@ final class Yoast_Container {
 	private Indexable_Post_Watcher $watcher;
 
 	/**
+	 * Whether get() throws, as a container Yoast hasn't built might.
+	 *
+	 * @var bool
+	 */
+	public bool $unreachable = false;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
@@ -36,9 +43,12 @@ final class Yoast_Container {
 	 *
 	 * @param string $name Class name.
 	 * @return Indexable_Post_Watcher
-	 * @throws RuntimeException For any other class.
+	 * @throws RuntimeException For any other class, or for any class while unreachable.
 	 */
 	public function get( string $name ): Indexable_Post_Watcher {
+		if ( $this->unreachable ) {
+			throw new RuntimeException( 'The container is not ready.' );
+		}
 		if ( Indexable_Post_Watcher::class !== $name ) {
 			throw new RuntimeException( 'No such service.' );
 		}

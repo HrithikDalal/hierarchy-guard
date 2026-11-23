@@ -130,25 +130,40 @@ final class Yoast {
 
 	/**
 	 * Yoast's post watcher, or null when Yoast SEO isn't active or its
-	 * internals changed.
+	 * internals changed. An active Yoast SEO whose watcher can't be reached
+	 * is reported under WP_DEBUG.
 	 *
 	 * @return object|null
 	 */
 	private static function watcher(): ?object {
-		if ( ! function_exists( 'YoastSEO' ) || ! class_exists( Indexable_Post_Watcher::class ) ) {
+		if ( ! function_exists( 'YoastSEO' ) ) {
 			return null;
 		}
+		$reason = '';
 		try {
-			$watcher = YoastSEO()->classes->get( Indexable_Post_Watcher::class );
+			$watcher = class_exists( Indexable_Post_Watcher::class ) ? YoastSEO()->classes->get( Indexable_Post_Watcher::class ) : null;
 		} catch ( Throwable $e ) {
-			return null;
+			$watcher = null;
+			$reason  = $e->getMessage();
 		}
-		return is_object( $watcher ) ? $watcher : null;
+		if ( is_object( $watcher ) ) {
+			return $watcher;
+		}
+		if ( '' === $reason ) {
+			$message = __( 'Yoast SEO is active, but its post watcher could not be reached.', 'hierarchy-guard' );
+		} else {
+			/* translators: %s: the error's message. */
+			$message = sprintf( __( 'Yoast SEO is active, but its post watcher could not be reached: %s', 'hierarchy-guard' ), $reason );
+		}
+		wp_trigger_error( __METHOD__, $message );
+		return null;
 	}
 
 	/**
-	 * Rebuilds one page's indexable. A page Yoast fails on is left to Yoast's
-	 * own reindex, and the others still get theirs.
+	 * Rebuilds one page's indexable, and reports under WP_DEBUG a page Yoast
+	 * fails on; the others still get theirs. That page keeps its old
+	 * indexable until it is saved again or Yoast's indexables are rebuilt:
+	 * Yoast's own indexing only picks up posts without a current one.
 	 *
 	 * @param object $watcher Yoast's post watcher.
 	 * @param int    $id      Post ID.
@@ -157,7 +172,15 @@ final class Yoast {
 		try {
 			$watcher->build_indexable( $id );
 		} catch ( Throwable $e ) {
-			return;
+			wp_trigger_error(
+				__METHOD__,
+				sprintf(
+					/* translators: 1: post ID, 2: the error's message. */
+					__( 'Yoast SEO could not update its SEO data for post %1$d: %2$s', 'hierarchy-guard' ),
+					$id,
+					$e->getMessage()
+				)
+			);
 		}
 	}
 

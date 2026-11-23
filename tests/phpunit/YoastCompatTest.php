@@ -36,7 +36,10 @@ final class YoastCompatTest extends WP_UnitTestCase {
 	public function set_up(): void {
 		parent::set_up();
 		$this->set_permalink_structure( '/%postname%/' );
-		$this->ids           = $this->make_tree();
+		$this->ids = $this->make_tree();
+
+		YoastSEO()->classes->unreachable = false;
+
 		$watcher             = $this->watcher();
 		$watcher->built      = [];
 		$watcher->broken     = false;
@@ -80,20 +83,62 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$careers                     = $this->page( 'careers', $this->ids['about'] );
 		$this->watcher()->broken_for = [ $this->ids['history'] ];
 
-		wp_trash_post( $this->ids['about'] );
+		$reports = $this->reports( fn() => wp_trash_post( $this->ids['about'] ) );
 
 		$this->assertSame( [ $careers ], $this->watcher()->built );
+		if ( null !== $reports ) {
+			$this->assertSame( [ "HierarchyGuard\\Compat\\Yoast::build(): Yoast SEO could not update its SEO data for post {$this->ids['history']}: A content filter failed." ], $reports );
+		}
 	}
 
 	public function test_a_yoast_whose_internals_changed_leaves_the_trash_to_finish(): void {
 		$this->watcher()->broken = true;
 
-		wp_trash_post( $this->ids['about'] );
-		( new Yoast() )->rebuild_pending();
+		$reports = $this->reports(
+			function (): void {
+				wp_trash_post( $this->ids['about'] );
+				( new Yoast() )->rebuild_pending();
+			}
+		);
 
 		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['team'] )->post_parent );
 		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['history'] )->post_parent );
 		$this->assertSame( '', get_post_meta( $this->ids['team'], Yoast::PENDING, true ), 'Tried once, then left to Yoast.' );
+		if ( null !== $reports ) {
+			$this->assertSame(
+				[
+					"HierarchyGuard\\Compat\\Yoast::build(): Yoast SEO could not update its SEO data for post {$this->ids['history']}: Changed internals.",
+					"HierarchyGuard\\Compat\\Yoast::build(): Yoast SEO could not update its SEO data for post {$this->ids['team']}: Changed internals.",
+				],
+				$reports
+			);
+		}
+	}
+
+	public function test_a_watcher_that_cannot_be_reached_is_reported_and_no_page_waits(): void {
+		$reports = $this->reports(
+			function (): void {
+				YoastSEO()->classes->unreachable = true;
+				wp_trash_post( $this->ids['about'] );
+				( new Yoast() )->rebuild_pending();
+				YoastSEO()->classes->unreachable = false;
+			}
+		);
+
+		$this->assertSame( $this->ids['company'], (int) get_post( $this->ids['team'] )->post_parent, 'Precondition: the trash moved them up.' );
+		$this->assertSame( [], $this->watcher()->built );
+		$this->assertSame( '', get_post_meta( $this->ids['team'], Yoast::PENDING, true ) );
+		$this->assertFalse( wp_next_scheduled( Yoast::HOOK ) );
+		if ( null !== $reports ) {
+			$this->assertSame(
+				[
+					'HierarchyGuard\\Compat\\Yoast::watcher(): Yoast SEO is active, but its post watcher could not be reached: The container is not ready.',
+					'HierarchyGuard\\Compat\\Yoast::watcher(): Yoast SEO is active, but its post watcher could not be reached: The container is not ready.',
+				],
+				$reports,
+				'Once for the step, once for the run.'
+			);
+		}
 	}
 
 	public function test_a_revision_is_not_a_subpage_that_makes_a_page_wait(): void {
@@ -127,6 +172,31 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->assertTrue( $yoast->skip_on_export( false, Yoast::PENDING ) );
 		$this->assertFalse( $yoast->skip_on_export( false, '_hierarchy_guard_yoast' ) );
 		$this->assertTrue( $yoast->skip_on_export( true, 'other' ) );
+	}
+
+	/**
+	 * What a callback reports through wp_trigger_error(), as
+	 * "function(): message", recorded rather than raised. WordPress 7.0 and
+	 * later announce each report even with WP_DEBUG off, as in the tests;
+	 * older versions announce none, so this returns null there.
+	 *
+	 * @param callable $run The callback.
+	 * @return string[]|null
+	 */
+	private function reports( callable $run ): ?array {
+		$reports = [];
+		$record  = static function ( string $function_name, string $message ) use ( &$reports ): void {
+			$reports[] = "{$function_name}(): {$message}";
+		};
+		add_action( 'wp_trigger_error_always_run', $record, 10, 2 );
+		add_filter( 'wp_trigger_error_trigger_error', '__return_false' );
+		try {
+			$run();
+		} finally {
+			remove_action( 'wp_trigger_error_always_run', $record, 10 );
+			remove_filter( 'wp_trigger_error_trigger_error', '__return_false' );
+		}
+		return version_compare( get_bloginfo( 'version' ), '7.0', '>=' ) ? $reports : null;
 	}
 
 	/**
