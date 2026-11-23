@@ -661,23 +661,25 @@ final class Ledger {
 	}
 
 	/**
-	 * Makes sure the daily rebuild of the newest-records list is scheduled,
-	 * on activation and on admin_init: one single event, which schedules
-	 * the next one a day later when it runs, so on a site where the plugin
-	 * is no longer active nothing schedules it again. Until a first build
-	 * has completed, the list reads as being built and the rebuild runs on
-	 * the next cron run. A type supported later is built by the next daily
-	 * run, with no notice. It never runs in a web request, and once built a
-	 * page load only reads autoloaded options here.
+	 * Makes sure the daily rebuild of the newest-records list is scheduled
+	 * once the ledger holds an entry, on activation and after an update: one
+	 * single event, which schedules the next one a day later when it runs, so
+	 * on a site where the plugin is no longer active nothing schedules it
+	 * again. A site with no entry schedules nothing; its first entry
+	 * schedules the run (remember()). Until a first build has completed, the
+	 * list reads as being built and the rebuild runs on the next cron run. A
+	 * type supported later is built by the next daily run, with no notice.
+	 * It never runs in a web request.
 	 */
 	public static function schedule_rebuild(): void {
 		$state = (string) get_option( self::RECENT_STATE );
 		if ( str_starts_with( $state, 'done' ) ) {
-			// Missing, or a recurring event from an earlier build: one single run, a day ahead.
-			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) || false !== wp_get_schedule( self::REBUILD_HOOK ) ) {
-				self::clear_leftovers();
+			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) && self::has_any_entry() ) {
 				wp_schedule_single_event( time() + DAY_IN_SECONDS, self::REBUILD_HOOK );
 			}
+			return;
+		}
+		if ( ! self::has_any_entry() ) {
 			return;
 		}
 		if ( 'building' !== $state ) {
@@ -688,24 +690,22 @@ final class Ledger {
 
 	/**
 	 * Brings the rebuild forward to the next cron run, the one event moved
-	 * rather than another added, unless it is due within a minute already.
+	 * rather than another added, unless it is due within a minute already:
+	 * when deletes leave a full list short, and for entries an import adds,
+	 * which reach the list only through the rebuild.
 	 */
-	private static function rebuild_soon(): void {
-		$next  = wp_next_scheduled( self::REBUILD_HOOK );
-		$older = false !== $next && false !== wp_get_schedule( self::REBUILD_HOOK );
-		if ( false !== $next && ! $older && $next <= time() + MINUTE_IN_SECONDS ) {
+	public static function rebuild_soon(): void {
+		$next = wp_next_scheduled( self::REBUILD_HOOK );
+		if ( false !== $next && $next <= time() + MINUTE_IN_SECONDS ) {
 			return;
-		}
-		if ( false === $next || $older ) {
-			self::clear_leftovers();
 		}
 		wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		wp_schedule_single_event( time(), self::REBUILD_HOOK );
 	}
 
 	/**
-	 * Schedules the next daily run, from the rebuild itself, unless one is
-	 * scheduled already.
+	 * Schedules the next daily run, from the rebuild itself and when an entry
+	 * is recorded, unless one is scheduled already.
 	 */
 	private static function schedule_next(): void {
 		if ( false === wp_next_scheduled( self::REBUILD_HOOK ) ) {
@@ -714,16 +714,16 @@ final class Ledger {
 	}
 
 	/**
-	 * Upgrade cleanup, when the rebuild is first scheduled on a site: the
-	 * one-time backfill's event, the list's lock and queue rows, and a
-	 * recurring rebuild event, which development builds before the single
-	 * daily event left behind.
+	 * Whether any post holds an entry: one range read on the meta_key index
+	 * that stops at the first, on activation and after an update only.
+	 *
+	 * @return bool
 	 */
-	private static function clear_leftovers(): void {
-		wp_clear_scheduled_hook( 'hierarchy_guard_backfill_recent' );
-		wp_clear_scheduled_hook( self::REBUILD_HOOK );
-		delete_option( 'hierarchy_guard_recent_lock' );
-		delete_option( 'hierarchy_guard_recent_queue' );
+	private static function has_any_entry(): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the meta_key index, LIMIT 1; on activation and after an update only.
+		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$wpdb->postmeta} WHERE meta_key LIKE %s LIMIT 1", $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
 	}
 
 	/**
@@ -771,7 +771,8 @@ final class Ledger {
 	 * Running it again changes nothing. It first schedules the next daily
 	 * run. The first build marks the list as built, for those types; when
 	 * a query fails, that type's list is left as it was and the list is
-	 * not marked built.
+	 * not marked built. When no supported type has an entry left, nothing is
+	 * scheduled after it: the next entry recorded schedules the run again.
 	 */
 	public static function rebuild_recent(): void {
 		global $wpdb;
@@ -819,6 +820,9 @@ final class Ledger {
 		self::merge_back( $kept, array_keys( $found ), $cap );
 		if ( ! $failed ) {
 			update_option( self::RECENT_STATE, self::done_state( $types ), true );
+		}
+		if ( ! $failed && [] === array_filter( $kept, static fn( array $by_type ): bool => [] !== $by_type['ids'] ) ) {
+			wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		}
 	}
 
@@ -1084,6 +1088,7 @@ final class Ledger {
 	 * @param int[]  $meta_ids  Meta IDs, oldest first.
 	 */
 	private static function remember( string $post_type, array $meta_ids ): void {
+		self::schedule_next();
 		if ( self::$defer_depth > 0 ) {
 			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
 			return;

@@ -11,6 +11,7 @@ namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Meta_Guard;
+use HierarchyGuard\Plugin;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
 use WP_UnitTestCase;
@@ -643,6 +644,66 @@ final class LedgerTest extends WP_UnitTestCase {
 		return $out;
 	}
 
+	public function test_a_site_without_entries_schedules_no_rebuild(): void {
+		Ledger::schedule_rebuild();
+
+		$this->assertSame( [], self::rebuild_events() );
+		$this->assertFalse( get_option( Ledger::RECENT_STATE ) );
+		$this->assertFalse( Ledger::building(), 'Nothing to build, so no notice.' );
+	}
+
+	public function test_the_first_entry_recorded_schedules_the_daily_rebuild(): void {
+		$this->ledger->record( $this->about, 'first' );
+
+		$events = self::rebuild_events();
+		$this->assertCount( 1, $events );
+		$this->assertGreaterThan( time() + DAY_IN_SECONDS - MINUTE_IN_SECONDS, $events[0]['time'] );
+		$this->assertFalse( Ledger::building(), 'The entry is on the list already.' );
+	}
+
+	public function test_a_rebuild_that_finds_no_entry_schedules_nothing_after_it(): void {
+		$this->ledger->record( $this->about, 'gone' );
+		$this->ledger->forget( $this->about, 'gone' );
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+
+		self::run_rebuild();
+
+		$this->assertSame( [], self::rebuild_events(), 'The next entry recorded schedules it again.' );
+		$this->assertSame( 'done:page', get_option( Ledger::RECENT_STATE ) );
+	}
+
+	public function test_an_imported_entry_brings_the_rebuild_forward(): void {
+		$this->ledger->record( $this->about, 'kept' );
+		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'Precondition: a day ahead.' );
+
+		$this->assertNull( ( new Meta_Guard() )->check( null, Ledger::key( 'page', 'imported' ), true ), 'An import may add the row.' );
+		( new Meta_Guard() )->note_import( Ledger::key( 'page', 'imported' ), true );
+
+		$this->assertLessThanOrEqual( time(), wp_next_scheduled( Ledger::REBUILD_HOOK ) );
+		$this->assertCount( 1, self::rebuild_events() );
+	}
+
+	public function test_an_imported_entry_is_found_where_a_miss_was_cached(): void {
+		$this->assertNull( $this->ledger->find( 'page', 'imported-about' ), 'Precondition: the miss is cached now.' );
+		Meta_Guard::writing( fn() => add_post_meta( $this->about, Ledger::key( 'page', 'imported-about' ), 'imported-about' ) );
+		$this->assertNull( $this->ledger->find( 'page', 'imported-about' ), 'Precondition: a row added without a bump is not seen.' );
+
+		( new Meta_Guard() )->note_import( Ledger::key( 'page', 'imported-about' ), true );
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'imported-about' ) );
+	}
+
+	public function test_a_row_added_outside_an_import_brings_nothing_forward(): void {
+		$this->ledger->record( $this->about, 'kept' );
+		$changed = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+
+		( new Meta_Guard() )->note_import( Ledger::key( 'page', 'other' ), false );
+		( new Meta_Guard() )->note_import( '_other_key', true );
+
+		$this->assertSame( $changed, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ) );
+	}
+
 	public function test_records_made_before_the_list_reach_it_on_the_first_rebuild(): void {
 		$first  = $this->old_entry( $this->about, 'first' );
 		$second = $this->old_entry( $this->about, 'second' );
@@ -663,6 +724,7 @@ final class LedgerTest extends WP_UnitTestCase {
 	}
 
 	public function test_the_rebuild_schedules_its_own_next_run_a_day_later_and_only_one(): void {
+		$this->ledger->record( $this->about, 'kept' );
 		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
 
 		self::run_rebuild();
@@ -677,19 +739,6 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->record( $this->about, 'one' );
 		$this->ledger->forget( $this->about, 'one' );
 		$this->assertCount( 1, self::rebuild_events(), 'Never more than one.' );
-	}
-
-	public function test_an_old_recurring_rebuild_event_is_replaced_by_a_single_one(): void {
-		Ledger::schedule_rebuild();
-		Ledger::rebuild_recent();
-		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
-		wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', Ledger::REBUILD_HOOK );
-
-		Ledger::schedule_rebuild();
-
-		$events = self::rebuild_events();
-		$this->assertCount( 1, $events );
-		$this->assertFalse( $events[0]['schedule'] ?? false );
 	}
 
 	/**
@@ -848,13 +897,15 @@ final class LedgerTest extends WP_UnitTestCase {
 	public function test_once_built_a_normal_load_runs_nothing(): void {
 		global $wp_filter;
 
+		$this->old_entry( $this->about, 'old' );
 		Ledger::schedule_rebuild();
 		Ledger::rebuild_recent();
+		Plugin::setup();
 		$next = wp_next_scheduled( Ledger::REBUILD_HOOK );
 
 		$queries = get_num_queries();
-		Ledger::schedule_rebuild();
-		$this->assertSame( $queries, get_num_queries(), 'Reads of autoloaded options only.' );
+		Plugin::maybe_upgrade();
+		$this->assertSame( $queries, get_num_queries(), 'A read of an autoloaded option only.' );
 		$this->assertSame( $next, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The daily run is left where it is.' );
 
 		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
@@ -874,7 +925,8 @@ final class LedgerTest extends WP_UnitTestCase {
 			}
 			return false;
 		};
-		$this->assertTrue( $hooked( 'admin_init', 'schedule_rebuild' ) );
+		$this->assertFalse( $hooked( 'admin_init', 'schedule_rebuild' ), 'An admin load schedules nothing.' );
+		$this->assertSame( 10, has_action( 'admin_init', [ Plugin::class, 'maybe_upgrade' ] ) );
 		$this->assertTrue( $hooked( Ledger::REBUILD_HOOK, 'rebuild_recent' ) );
 		foreach ( [ 'init', 'wp', 'template_redirect', 'admin_init' ] as $hook ) {
 			$this->assertFalse( $hooked( $hook, 'rebuild_recent' ), "The rebuild never runs on $hook." );
@@ -912,7 +964,8 @@ final class LedgerTest extends WP_UnitTestCase {
 			]
 		);
 		$entry = (int) Meta_Guard::writing( static fn() => add_post_meta( $doc, Ledger::key( 'hg_docs', 'manual' ), 'manual', true ) );
-		$only  = static fn(): array => [ 'page' ];
+		$this->old_entry( $this->about, 'old' );
+		$only = static fn(): array => [ 'page' ];
 		add_filter( 'hierarchy_guard_post_types', $only );
 		Post_Types::reset();
 		Ledger::schedule_rebuild();
@@ -936,6 +989,7 @@ final class LedgerTest extends WP_UnitTestCase {
 	}
 
 	public function test_types_wp_cron_sees_differently_from_wp_admin_never_keep_the_notice_on(): void {
+		$this->old_entry( $this->about, 'old' );
 		Ledger::schedule_rebuild();
 		// WP-Cron supports only pages; wp-admin also a type registered there alone.
 		$cron = static fn(): array => [ 'page' ];
@@ -1007,27 +1061,6 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertSame( [], $this->ledger->recent( [ 'retired' ] )['ids'], 'Precondition: the entry left the list.' );
 		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The rebuild reads supported types only, so it is not brought forward for this one.' );
-	}
-
-	public function test_scheduling_the_daily_rebuild_clears_what_earlier_builds_left_once(): void {
-		Ledger::schedule_rebuild();
-		Ledger::rebuild_recent();
-		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
-		// Left by a build of the plugin from before the daily rebuild.
-		wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'hierarchy_guard_backfill_recent' );
-		add_option( 'hierarchy_guard_recent_lock', (string) ( time() + 10 ), '', false );
-		add_option( 'hierarchy_guard_recent_queue', '["add","page",[1]]', '', false );
-
-		Ledger::schedule_rebuild();
-
-		$this->assertFalse( wp_next_scheduled( 'hierarchy_guard_backfill_recent' ) );
-		$this->assertFalse( get_option( 'hierarchy_guard_recent_lock' ) );
-		$this->assertFalse( get_option( 'hierarchy_guard_recent_queue' ) );
-		$this->assertCount( 1, self::rebuild_events() );
-
-		$queries = get_num_queries();
-		Ledger::schedule_rebuild();
-		$this->assertSame( $queries, get_num_queries(), 'Once: with the daily run scheduled, nothing is cleared again.' );
 	}
 
 	public function test_the_daily_rebuild_restores_an_entry_a_lost_update_dropped(): void {

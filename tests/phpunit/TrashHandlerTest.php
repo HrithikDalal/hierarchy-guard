@@ -496,7 +496,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 		$this->assertSame( $parents, $this->queue->roots() );
 		$this->assertCount( 1, array_filter( _get_cron_array(), static fn( array $hooks ): bool => isset( $hooks[ Queue::HOOK ] ) ) );
-		$this->assertLessThanOrEqual( 2, $writes, 'The run and its watchdog, once each.' );
+		$this->assertLessThanOrEqual( 3, $writes, 'The run, its watchdog and the daily rebuild of the records, once each.' );
 
 		$this->processor()->handle();
 

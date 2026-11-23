@@ -30,7 +30,7 @@ One request moves at most 200 subpages and trashes or restores at most 25 throug
 wp hierarchy-guard process-jobs
 ```
 
-The Redirects tab lists the newest 1,000 records from a list the plugin keeps. A daily WP-Cron event rebuilds that list from the database: it adds records made before the list existed, or before their post type was supported, and an entry that two writes at the same moment lost, so a lost update heals within a day; a search by full URL finds any record meanwhile. The same event runs early when deletes leave a full list short. Until the list is first built, the tab says it is still being built. Without cron, run it with:
+The Redirects tab lists the newest 1,000 records from a list the plugin keeps. Once the site has a record, a daily WP-Cron event rebuilds that list from the database: it adds records made before the list existed, or before their post type was supported, and an entry that two writes at the same moment lost, so a lost update heals within a day; a search by full URL finds any record meanwhile. The same event runs early when deletes leave a full list short. Until the list is first built, the tab says it is still being built. Without cron, run it with:
 
 ```bash
 wp cron event run hierarchy_guard_rebuild_recent

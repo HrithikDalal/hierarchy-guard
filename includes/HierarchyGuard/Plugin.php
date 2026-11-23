@@ -18,6 +18,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Plugin {
 
+	public const VERSION_OPTION = 'hierarchy_guard_version';
+	public const NETWORK_OPTION = 'hierarchy_guard_network_setup';
+
 	/**
 	 * Singleton instance.
 	 *
@@ -45,6 +48,48 @@ final class Plugin {
 	}
 
 	/**
+	 * What a site needs once, on activation, after an update and after a
+	 * network activation: the watchdog when jobs wait, the daily rebuild when
+	 * the ledger holds entries, and Yoast's run when pages wait for it.
+	 * Records the version and the network activation it was done for.
+	 */
+	public static function setup(): void {
+		Batch\Processor::activate();
+		Ledger::schedule_rebuild();
+		Compat\Yoast::resume();
+		update_option( self::VERSION_OPTION, HIERARCHY_GUARD_VERSION, true );
+		if ( is_multisite() ) {
+			update_option( self::NETWORK_OPTION, self::network_activated(), true );
+		}
+	}
+
+	/**
+	 * Runs setup() when the stored version differs from the code's: after
+	 * an update, on a subsite of a network activation, or where the plugin
+	 * is loaded without its activation hook. On a network it runs, too, once
+	 * the plugin was network-activated again since this subsite was set up,
+	 * because core runs the activation hook on one site only. Otherwise one
+	 * read of an autoloaded option, and on a network one of a network option
+	 * core has loaded already.
+	 */
+	public static function maybe_upgrade(): void {
+		if ( HIERARCHY_GUARD_VERSION !== get_option( self::VERSION_OPTION ) || ( is_multisite() && self::network_activated() !== (int) get_option( self::NETWORK_OPTION, 0 ) ) ) {
+			self::setup();
+		}
+	}
+
+	/**
+	 * When the plugin was last network-activated, from core's own list, or
+	 * 0 when it isn't network-active.
+	 *
+	 * @return int
+	 */
+	private static function network_activated(): int {
+		$sitewide = get_site_option( 'active_sitewide_plugins', [] );
+		return is_array( $sitewide ) ? (int) ( $sitewide[ plugin_basename( HIERARCHY_GUARD_FILE ) ] ?? 0 ) : 0;
+	}
+
+	/**
 	 * Registers hooks. Safe to call more than once.
 	 */
 	public function register(): void {
@@ -64,9 +109,9 @@ final class Plugin {
 		add_action( 'deleted_post_meta', [ Ledger::class, 'on_deleted_meta' ], 10, 3 );
 		add_action( 'before_delete_post', [ Ledger::class, 'begin_delete' ], PHP_INT_MIN, 2 );
 		add_action( 'delete_post', [ Ledger::class, 'end_delete' ], PHP_INT_MAX );
-		// The newest-records list is rebuilt daily from WP-Cron; admin_init makes sure the run is scheduled.
-		add_action( 'admin_init', [ Ledger::class, 'schedule_rebuild' ] );
+		// The newest-records list is rebuilt daily from WP-Cron, once the ledger holds an entry.
 		add_action( Ledger::REBUILD_HOOK, [ Ledger::class, 'rebuild_recent' ] );
+		add_action( 'admin_init', [ self::class, 'maybe_upgrade' ] );
 
 		$ledger    = new Ledger();
 		$log       = new Trash\Change_Log();

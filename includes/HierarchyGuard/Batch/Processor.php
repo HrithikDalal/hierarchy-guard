@@ -272,8 +272,9 @@ final class Processor {
 	}
 
 	/**
-	 * Deactivation: stop scheduled runs. Stored jobs stay; activation
-	 * schedules the watchdog again while any wait.
+	 * Deactivation: stop scheduled runs. Stored jobs stay: activation, or on
+	 * a network a subsite's first admin load after the plugin is
+	 * network-activated again, schedules the watchdog while any wait.
 	 */
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( Queue::WATCHDOG );

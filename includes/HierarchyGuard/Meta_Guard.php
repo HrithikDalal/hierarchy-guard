@@ -39,6 +39,7 @@ final class Meta_Guard {
 	 */
 	public function register(): void {
 		add_filter( 'add_post_metadata', [ $this, 'refuse_copies' ], 10, 3 );
+		add_action( 'added_post_meta', [ $this, 'imported' ], 10, 3 );
 		add_filter( 'delete_post_metadata', [ $this, 'refuse_deletes' ], 10, 3 );
 		add_filter( 'duplicate_post_excludelist_filter', [ $this, 'exclude_from_duplicates' ] );
 	}
@@ -67,11 +68,51 @@ final class Meta_Guard {
 	 * @return mixed False to refuse the row, else $check.
 	 */
 	public function refuse_copies( $check, $object_id, $meta_key ) {
-		$key = (string) $meta_key;
+		return $this->check( $check, (string) $meta_key, defined( 'WP_IMPORTING' ) && WP_IMPORTING );
+	}
+
+	/**
+	 * What refuse_copies() answers, with whether an import is running.
+	 *
+	 * @param mixed  $check     Null to let the write go ahead, or an earlier callback's answer.
+	 * @param string $key       Meta key.
+	 * @param bool   $importing Whether a WordPress import is running.
+	 * @return mixed False to refuse the row, else $check.
+	 */
+	public function check( $check, string $key, bool $importing ) {
 		if ( ! str_starts_with( $key, self::PREFIX ) ) {
 			return $check;
 		}
-		return self::allowed( $key, self::$writing > 0, defined( 'WP_IMPORTING' ) && WP_IMPORTING ) ? $check : false;
+		if ( ! self::allowed( $key, self::$writing > 0, $importing ) ) {
+			return false;
+		}
+		return $check;
+	}
+
+	/**
+	 * After a meta row is added: see note_import().
+	 *
+	 * @param mixed $meta_id   Meta ID.
+	 * @param mixed $object_id Post ID.
+	 * @param mixed $meta_key  Meta key.
+	 */
+	public function imported( $meta_id, $object_id, $meta_key ): void {
+		$this->note_import( (string) $meta_key, defined( 'WP_IMPORTING' ) && WP_IMPORTING );
+	}
+
+	/**
+	 * An imported ledger entry: lookups cached before it read the ledger
+	 * again, and it reaches the newest-records list through the rebuild,
+	 * brought forward.
+	 *
+	 * @param string $key       Meta key of the row just added.
+	 * @param bool   $importing Whether a WordPress import is running.
+	 */
+	public function note_import( string $key, bool $importing ): void {
+		if ( $importing && 0 === self::$writing && str_starts_with( $key, Ledger::KEY_PREFIX ) ) {
+			wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+			Ledger::rebuild_soon();
+		}
 	}
 
 	/**
