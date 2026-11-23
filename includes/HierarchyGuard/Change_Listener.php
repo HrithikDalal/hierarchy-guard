@@ -27,13 +27,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 final class Change_Listener {
 
 	/**
-	 * When true, nothing is recorded: for code that changes many posts and records their paths itself.
-	 *
-	 * @var bool
-	 */
-	private static bool $suspended = false;
-
-	/**
 	 * Ledger.
 	 *
 	 * @var Ledger
@@ -126,24 +119,6 @@ final class Change_Listener {
 	}
 
 	/**
-	 * Suspends or resumes recording.
-	 *
-	 * @param bool $on True to suspend.
-	 */
-	public static function suspend( bool $on ): void {
-		self::$suspended = $on;
-	}
-
-	/**
-	 * Whether recording is suspended.
-	 *
-	 * @return bool
-	 */
-	public static function is_suspended(): bool {
-		return self::$suspended;
-	}
-
-	/**
 	 * Records the old path of a post whose slug or parent changed, and, once
 	 * the ledger holds that path on the post, the save as the current user's
 	 * latest change: the post at its old path under its new parent. With no
@@ -158,9 +133,6 @@ final class Change_Listener {
 	 * @param WP_Post $before  Post before the update.
 	 */
 	public function on_post_updated( int $post_id, WP_Post $after, WP_Post $before ): void {
-		if ( self::$suspended ) {
-			return;
-		}
 		if ( ! Post_Types::is_supported( (string) $after->post_type ) ) {
 			return;
 		}
@@ -275,9 +247,6 @@ final class Change_Listener {
 		if ( Ledger::has_entries( $post_id ) ) {
 			$this->deleting[ $post_id ] = true;
 		}
-		if ( self::$suspended ) {
-			return;
-		}
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
 			return;
 		}
@@ -354,7 +323,7 @@ final class Change_Listener {
 		if ( $new_status === $old_status ) {
 			return;
 		}
-		if ( 'publish' === $new_status && ! self::$suspended ) {
+		if ( 'publish' === $new_status ) {
 			// A page published, or published again, takes its path.
 			$this->ledger->claim( $post );
 		}

@@ -23,8 +23,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 final class Resolver {
 
-	public const MAX_ROUNDS = Rules::MAX_ROUNDS;
-
 	/**
 	 * The ledger and core, read live.
 	 *

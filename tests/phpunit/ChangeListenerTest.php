@@ -41,7 +41,6 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
 		Post_Types::reset();
-		Change_Listener::suspend( false );
 		Change_Log::reset_request();
 		$this->set_permalink_structure( '/%postname%/' );
 		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
@@ -72,7 +71,6 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		Change_Listener::suspend( false );
 		$this->set_permalink_structure( '' );
 		parent::tear_down();
 	}
@@ -227,16 +225,8 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 				'post_title' => 'About us',
 			]
 		);
-		Change_Listener::suspend( true );
-		wp_update_post(
-			[
-				'ID'        => $this->team,
-				'post_name' => 'crew',
-			]
-		);
-		Change_Listener::suspend( false );
 
-		$this->assertNull( $this->log->latest( $user ), 'A draft has no URL, a title is no URL, and a suspended listener records nothing.' );
+		$this->assertNull( $this->log->latest( $user ), 'A draft has no URL, and a title is no URL.' );
 	}
 
 	public function test_a_save_the_ledger_does_not_record_is_no_change(): void {
@@ -481,19 +471,6 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 
 		wp_untrash_post( $this->about );
 		$this->assertSame( 'about', get_post( $this->about )->post_name, 'Precondition: core restores the slug on untrash.' );
-		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
-	}
-
-	public function test_suspended_listener_records_nothing(): void {
-		Change_Listener::suspend( true );
-		wp_update_post(
-			[
-				'ID'        => $this->about,
-				'post_name' => 'company-info',
-			]
-		);
-
-		$this->assertTrue( Change_Listener::is_suspended() );
 		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
 	}
 

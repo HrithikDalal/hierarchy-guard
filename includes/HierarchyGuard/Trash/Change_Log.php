@@ -243,16 +243,6 @@ final class Change_Log {
 	}
 
 	/**
-	 * Clears a user's summary.
-	 *
-	 * @param int $user_id User ID.
-	 */
-	public function forget( int $user_id ): void {
-		unset( self::$pending[ get_current_blog_id() ][ $user_id ] );
-		delete_transient( self::key( $user_id ) );
-	}
-
-	/**
 	 * Saves a change: the one this request recorded waits in memory until the
 	 * request ends, and one from an earlier request, which a notice marks
 	 * shown, is written now. Once shutdown has begun nothing would write it

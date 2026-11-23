@@ -400,7 +400,6 @@ final class ChangeLogTest extends WP_UnitTestCase {
 			$this->assertNotSame( $main, $other, 'A save on another site is a change of its own.' );
 			$this->assertSame( 'beta', $this->log->latest( $this->admin )['roots'][4]['path'] );
 		} finally {
-			$this->log->forget( $this->admin );
 			$GLOBALS['blog_id'] = $blog;
 		}
 
@@ -470,28 +469,15 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( [ '/alpha/' ], array_column( $pairs->page( $pairs->collect_change( $main ), 1, 100 )['pairs'], 'old' ) );
 	}
 
-	public function test_forgetting_drops_the_change_waiting_to_be_written(): void {
-		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [] ) );
-
-		$this->log->forget( $this->admin );
-		Change_Log::reset_request();
-
-		$this->assertNull( $this->log->latest( $this->admin ) );
-		$this->assertFalse( get_transient( Change_Log::key( $this->admin ) ) );
-	}
-
 	public function test_nothing_is_stored_without_a_user(): void {
 		$this->assertSame( '', $this->log->record( 0, 'trash', 'page', $this->entry( 12, [] ) ) );
 		$this->assertFalse( get_transient( Change_Log::key( 0 ) ) );
 	}
 
-	public function test_mark_shown_and_forget(): void {
+	public function test_mark_shown(): void {
 		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [] ) );
 
 		$this->log->mark_shown( $this->admin, $id );
 		$this->assertTrue( $this->log->latest( $this->admin )['shown'] );
-
-		$this->log->forget( $this->admin );
-		$this->assertNull( $this->log->latest( $this->admin ) );
 	}
 }

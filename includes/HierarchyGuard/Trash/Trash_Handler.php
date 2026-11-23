@@ -16,7 +16,6 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
-use WP_Error;
 use WP_Post;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -43,13 +42,6 @@ final class Trash_Handler {
 	 * @var array<int,string>
 	 */
 	private array $pending = [];
-
-	/**
-	 * Pages undo() is restoring right now.
-	 *
-	 * @var array<int,true>
-	 */
-	private array $undo_ids = [];
 
 	/**
 	 * Inline work done in this request, across every page it trashed or restored.
@@ -114,7 +106,6 @@ final class Trash_Handler {
 		add_action( 'wp_after_insert_post', [ $this, 'after_save' ], 20 );
 		add_action( 'shutdown', [ $this, 'flush_pending' ] );
 		add_action( 'deleted_post', [ $this, 'on_deleted' ], 10, 2 );
-		add_filter( 'wp_untrash_post_status', [ $this, 'undo_status' ], 20, 3 );
 	}
 
 	/**
@@ -331,59 +322,6 @@ final class Trash_Handler {
 	}
 
 	/**
-	 * Restores a trashed page with the status it had, which brings its subpages
-	 * back too. Core's Restore link makes the page a draft instead; either way
-	 * its subpages return with their own statuses.
-	 *
-	 * @param int $root_id Trashed page.
-	 * @return true|WP_Error
-	 */
-	public function undo( int $root_id ) {
-		$post = get_post( $root_id );
-		if ( ! $post instanceof WP_Post || 'trash' !== $post->post_status ) {
-			return new WP_Error(
-				'hierarchy_guard_not_in_trash',
-				$post instanceof WP_Post
-					/* translators: %s: page title. */
-					? sprintf( __( '“%s” is no longer in the trash.', 'hierarchy-guard' ), self::title( $post ) )
-					: __( 'This page is no longer in the trash.', 'hierarchy-guard' )
-			);
-		}
-		if ( is_user_logged_in() && ! current_user_can( 'delete_post', $root_id ) ) {
-			return new WP_Error( 'hierarchy_guard_forbidden', __( 'Sorry, you are not allowed to restore this page from the trash.', 'hierarchy-guard' ) );
-		}
-
-		$this->undo_ids[ $root_id ] = true;
-		try {
-			wp_untrash_post( $root_id );
-		} finally {
-			unset( $this->undo_ids[ $root_id ] );
-		}
-
-		// A pre_untrash_post filter can answer true without restoring, so the status decides.
-		if ( 'trash' === Subtree::status( $root_id ) ) {
-			/* translators: %s: page title. */
-			return new WP_Error( 'hierarchy_guard_restore_failed', sprintf( __( '“%s” could not be restored from the trash.', 'hierarchy-guard' ), self::title( $post ) ) );
-		}
-		return true;
-	}
-
-	/**
-	 * Gives the page undo() restores the status it had before the trash.
-	 *
-	 * @param mixed $new_status      Status core is about to assign.
-	 * @param mixed $post_id         Post being untrashed.
-	 * @param mixed $previous_status Status it had before the trash.
-	 * @return string
-	 */
-	public function undo_status( $new_status, $post_id, $previous_status ): string {
-		if ( isset( $this->undo_ids[ (int) $post_id ] ) && '' !== (string) $previous_status ) {
-			return (string) $previous_status;
-		}
-		return (string) $new_status;
-	}
-
-	/**
 	 * WP-CLI lines about a trash or restore.
 	 *
 	 * @param string              $action trash or restore.
@@ -555,17 +493,5 @@ final class Trash_Handler {
 		foreach ( $lines as $line ) {
 			\WP_CLI::log( $line );
 		}
-	}
-
-	/**
-	 * A post's title for a message.
-	 *
-	 * @param WP_Post $post Post.
-	 * @return string
-	 */
-	private static function title( WP_Post $post ): string {
-		$title = get_the_title( $post );
-		// As _draft_or_post_title(): a title of "0" is no title either.
-		return ! empty( $title ) ? $title : __( '(no title)', 'hierarchy-guard' );
 	}
 }

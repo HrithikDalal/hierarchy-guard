@@ -23,7 +23,6 @@ use HierarchyGuard\Trash\Markers;
 use HierarchyGuard\Trash\Mover;
 use HierarchyGuard\Trash\Operations;
 use HierarchyGuard\Trash\Trash_Handler;
-use WP_Error;
 use WP_UnitTestCase;
 
 /**
@@ -94,6 +93,21 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 	 */
 	private function processor(): Processor {
 		return new Processor( $this->queue, new Operations( $this->ledger, new Mover() ), $this->log );
+	}
+
+	/**
+	 * Restores a page as core's Undo link does: edit.php gives it the status
+	 * it had before the trash.
+	 *
+	 * @param int $post_id Trashed page.
+	 */
+	private function core_undo( int $post_id ): void {
+		add_filter( 'wp_untrash_post_status', 'wp_untrash_post_set_previous_status', 10, 3 );
+		try {
+			wp_untrash_post( $post_id );
+		} finally {
+			remove_filter( 'wp_untrash_post_status', 'wp_untrash_post_set_previous_status', 10 );
+		}
 	}
 
 	/**
@@ -191,7 +205,6 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 			'wp_after_insert_post'   => 20,
 			'shutdown'               => 10,
 			'deleted_post'           => 10,
-			'wp_untrash_post_status' => 20,
 		];
 		foreach ( $hooks as $hook => $priority ) {
 			$found = false;
@@ -201,6 +214,11 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 				}
 			}
 			$this->assertTrue( $found, $hook );
+		}
+		foreach ( $wp_filter['wp_untrash_post_status']->callbacks ?? [] as $callbacks ) {
+			foreach ( $callbacks as $callback ) {
+				$this->assertFalse( is_array( $callback['function'] ) && $callback['function'][0] instanceof Trash_Handler, 'Undo gets its status from core.' );
+			}
 		}
 	}
 
@@ -287,7 +305,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( [], $this->queue->roots() );
 	}
 
-	public function test_trash_children_then_undo_restores_previous_statuses(): void {
+	public function test_trash_children_then_core_s_undo_restores_previous_statuses(): void {
 		$this->policy( Settings::POLICY_TRASH_CHILDREN );
 		$plans = $this->page( 'plans', $this->ids['team'], 'draft' );
 
@@ -297,7 +315,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		}
 		$this->assertSame( 'trash', get_post_status( $plans ) );
 
-		$this->assertTrue( $this->handler()->undo( $this->ids['about'] ) );
+		$this->core_undo( $this->ids['about'] );
 
 		$this->assertSame( 'publish', get_post_status( $this->ids['about'] ) );
 		foreach ( [ 'team', 'history', 'leadership' ] as $slug ) {
@@ -348,42 +366,13 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 2, $this->change()['counts']['moved'] );
 	}
 
-	public function test_undo_restores_the_parent_with_its_status_and_brings_subpages_back(): void {
+	public function test_core_s_undo_restores_the_parent_with_its_status_and_brings_subpages_back(): void {
 		wp_trash_post( $this->ids['about'] );
 
-		$this->assertTrue( $this->handler()->undo( $this->ids['about'] ) );
+		$this->core_undo( $this->ids['about'] );
 
 		$this->assertSame( 'publish', get_post_status( $this->ids['about'] ), 'Core alone would restore it as a draft.' );
 		$this->assertSame( $this->ids['about'], (int) get_post( $this->ids['history'] )->post_parent );
-	}
-
-	public function test_undo_explains_why_it_cannot_run(): void {
-		$result = $this->handler()->undo( $this->ids['about'] );
-		$this->assertInstanceOf( WP_Error::class, $result );
-		$this->assertSame( 'hierarchy_guard_not_in_trash', $result->get_error_code() );
-		$this->assertSame( '“About” is no longer in the trash.', $result->get_error_message() );
-
-		wp_trash_post( $this->ids['about'] );
-		wp_set_current_user( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
-		$result = $this->handler()->undo( $this->ids['about'] );
-		$this->assertSame( 'hierarchy_guard_forbidden', $result->get_error_code() );
-		$this->assertSame( 'trash', get_post_status( $this->ids['about'] ) );
-
-		wp_set_current_user( $this->admin );
-		add_filter( 'pre_untrash_post', '__return_true' );
-		$result = $this->handler()->undo( $this->ids['about'] );
-		$this->assertSame( 'hierarchy_guard_restore_failed', $result->get_error_code(), 'A filter that answers true without restoring is no success.' );
-		$this->assertSame( '“About” could not be restored from the trash.', $result->get_error_message() );
-	}
-
-	public function test_undo_names_a_page_titled_0_as_core_s_list_does(): void {
-		global $wpdb;
-		$wpdb->update( $wpdb->posts, [ 'post_title' => '0' ], [ 'ID' => $this->ids['about'] ] );
-		clean_post_cache( $this->ids['about'] );
-
-		$result = $this->handler()->undo( $this->ids['about'] );
-
-		$this->assertSame( '“(no title)” is no longer in the trash.', $result->get_error_message(), 'As _draft_or_post_title() names it.' );
 	}
 
 	public function test_large_subtrees_move_in_background_batches(): void {
@@ -528,7 +517,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 		// A real Undo is a new request with a fresh budget.
 		$this->handler()->reset_request_budget();
-		$this->assertTrue( $this->handler()->undo( $this->ids['about'] ) );
+		$this->core_undo( $this->ids['about'] );
 		$this->assertSame( 5, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'The inline restore already brought back the two that moved.' );
 		$this->processor()->run( $this->ids['about'] );
 
@@ -541,7 +530,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		wp_trash_post( $this->ids['about'] );
 		$token = $this->queue->lock( $this->ids['about'] );
 
-		$this->handler()->undo( $this->ids['about'] );
+		$this->core_undo( $this->ids['about'] );
 
 		$this->assertSame( Operations::TYPE_RESTORE, $this->queue->offered( $this->ids['about'] )['type'] );
 		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
@@ -613,7 +602,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->handler()->reset_request_budget();
 		$token = $this->queue->lock( $this->ids['about'] );
 
-		$this->handler()->undo( $this->ids['about'] );
+		$this->core_undo( $this->ids['about'] );
 		$this->assertSame( Operations::TYPE_RESTORE, $this->queue->offered( $this->ids['about'] )['type'], 'Precondition: the restore is offered to the run.' );
 		// The run adopts the offer and finishes it before the Undo request ends.
 		$this->in_another_process(
@@ -847,7 +836,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 'publish', get_post_status( $this->ids['history'] ), 'It still gets its previous status.' );
 		wp_trash_post( $this->ids['history'] );
 
-		$this->handler()->undo( $this->ids['about'] );
+		$this->core_undo( $this->ids['about'] );
 
 		$this->assertSame( 'trash', get_post_status( $this->ids['history'] ), 'Trashed on purpose since.' );
 		$this->assertSame( 'publish', get_post_status( $this->ids['team'] ) );
@@ -1195,7 +1184,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 'about-2', get_post( $twin )->post_name, 'The slug stays free for the parent.' );
 		$this->assertSame( $twin, $this->resolver->resolve( 'page', 'company/about/about' )->ID );
 
-		$this->assertTrue( $this->handler()->undo( $this->ids['about'] ) );
+		$this->core_undo( $this->ids['about'] );
 
 		$this->assertSame( 'about', get_post( $this->ids['about'] )->post_name );
 		$this->assertSame( $this->ids['about'], (int) get_post( $twin )->post_parent );
