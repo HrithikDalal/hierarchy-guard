@@ -30,6 +30,13 @@ final class Action_Scheduler_Stub {
 	public static int $asked = 0;
 
 	/**
+	 * Times as_has_scheduled_action() was asked.
+	 *
+	 * @var int
+	 */
+	public static int $checked = 0;
+
+	/**
 	 * Hooks of the pending actions.
 	 *
 	 * @var string[]
@@ -40,8 +47,9 @@ final class Action_Scheduler_Stub {
 	 * Turns the stubs off and forgets what they were asked.
 	 */
 	public static function reset(): void {
-		self::$on     = false;
-		self::$asked  = 0;
-		self::$queued = [];
+		self::$on      = false;
+		self::$asked   = 0;
+		self::$checked = 0;
+		self::$queued  = [];
 	}
 }

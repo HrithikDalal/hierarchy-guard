@@ -45,7 +45,11 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 	 * @return bool
 	 */
 	function as_has_scheduled_action(): bool {
-		return Action_Scheduler_Stub::$on && [] !== Action_Scheduler_Stub::$queued;
+		if ( ! Action_Scheduler_Stub::$on ) {
+			return false;
+		}
+		++Action_Scheduler_Stub::$checked;
+		return [] !== Action_Scheduler_Stub::$queued;
 	}
 
 	/**

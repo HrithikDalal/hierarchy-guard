@@ -123,6 +123,7 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertSame( 0, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
 		$this->assertSame( 0, Subtree::count_live_children( $other, 'page', 10 ) );
 		$this->assertFalse( $this->queue->is_scheduled(), 'Nothing is left for another run.' );
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ), 'With no job left, nothing is scheduled.' );
 	}
 
 	public function test_one_run_reads_more_roots_once_it_has_passed_the_first_hundred(): void {
@@ -249,6 +250,71 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertSame( 0, $this->queue->stepping(), 'Cleared at the end, so the run the watchdog starts steps About again.' );
 		$this->assertFalse( $this->queue->is_scheduled(), 'About waits for the watchdog.' );
 		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_run_out_of_time_stops_and_keeps_its_successor_even_when_a_run_beside_it_cleared_it(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$other                     = $this->queue_behind( 'other', 2 );
+		$this->slow_steps();
+		$cleared = false;
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function () use ( &$cleared ): void {
+				if ( ! $cleared ) {
+					// Another run ends meanwhile and clears the site's run.
+					( new Queue() )->unschedule();
+					$cleared = true;
+				}
+			}
+		);
+
+		$this->processor->handle();
+
+		$this->assertSame( 3, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'About took one step of two subpages.' );
+		$this->assertSame( 2, Subtree::count_live_children( $other, 'page', 10 ), 'Other waits for the next run.' );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'The next run is queued.' );
+		$this->assertSame( 0, $this->queue->stepping() );
+	}
+
+	public function test_a_root_another_process_holds_is_passed_over_and_left_to_that_process(): void {
+		$other = $this->queue_behind( 'other', 1 );
+		$token = $this->queue->lock( $other );
+
+		$this->processor->handle();
+
+		$this->assertSame( [ $other ], $this->queue->roots() );
+		$this->assertSame( 1, Subtree::count_live_children( $other, 'page', 10 ) );
+		$this->assertSame( 0, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assertFalse( $this->queue->is_scheduled(), 'The process holding Other schedules its own next run.' );
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ), 'A job waits.' );
+		$this->queue->unlock( $other, $token );
+	}
+
+	public function test_a_row_that_does_not_decode_schedules_no_run_and_the_watchdog_drops_it(): void {
+		global $wpdb;
+		$this->queue->delete( $this->ids['about'] );
+		$wpdb->insert(
+			$wpdb->options,
+			[
+				'option_name'  => Queue::job_option( $this->ids['about'] ),
+				'option_value' => 'a:1:{s:4:"root";',
+				'autoload'     => 'off',
+			]
+		);
+
+		$this->processor->handle();
+		$this->assertFalse( $this->queue->is_scheduled(), 'Nothing a run can step is left.' );
+
+		wp_unschedule_hook( Queue::WATCHDOG );
+		$this->processor->watchdog();
+
+		$this->assertSame( [], $this->queue->roots() );
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ), 'No job waits.' );
 	}
 
 	public function test_a_run_finishes_the_job_and_removes_it(): void {

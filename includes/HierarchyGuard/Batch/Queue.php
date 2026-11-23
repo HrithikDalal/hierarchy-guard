@@ -155,16 +155,18 @@ final class Queue {
 	}
 
 	/**
-	 * Roots with a stored job or offer, oldest first.
+	 * Roots with a stored job or offer, oldest first. A root has at most two
+	 * rows, so twice the limit in rows holds the limit in roots.
 	 *
-	 * @param int $limit Most option rows to read.
+	 * @param int $limit Most roots to return.
 	 * @return int[]
 	 */
 	public function roots( int $limit = 100 ): array {
 		global $wpdb;
 
+		$limit = max( 1, $limit );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Prefix range on the option_name index, bounded by LIMIT.
-		$names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s ORDER BY option_id ASC LIMIT %d", $wpdb->esc_like( self::JOB_PREFIX ) . '%', max( 1, $limit ) ) );
+		$names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s ORDER BY option_id ASC LIMIT %d", $wpdb->esc_like( self::JOB_PREFIX ) . '%', 2 * $limit ) );
 
 		$roots = [];
 		foreach ( $names as $name ) {
@@ -172,7 +174,26 @@ final class Queue {
 				$roots[ (int) $match[1] ] = true;
 			}
 		}
-		return array_keys( $roots );
+		return array_slice( array_keys( $roots ), 0, $limit );
+	}
+
+	/**
+	 * Drops a root's job or offer row that does not decode, so it keeps no
+	 * run or check scheduled. A row written meanwhile has another value, and
+	 * stays.
+	 *
+	 * @param int $root_id Root page.
+	 */
+	public function drop_unreadable( int $root_id ): void {
+		global $wpdb;
+
+		foreach ( [ self::job_option( $root_id ), self::offer_option( $root_id ) ] as $name ) {
+			$raw = $this->read( $name );
+			if ( null !== $raw && null === $this->decode( $raw ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Delete only the value read.
+				$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", $name, $raw ) );
+			}
+		}
 	}
 
 	/**

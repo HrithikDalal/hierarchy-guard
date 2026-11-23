@@ -32,6 +32,10 @@ final class QueueTest extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_a_bulk_trash_asks_action_scheduler_once_until_the_run_is_cleared(): void {
 		require_once __DIR__ . '/stubs/action-scheduler.php';
 		Action_Scheduler_Stub::$on = true;
@@ -95,6 +99,37 @@ final class QueueTest extends WP_UnitTestCase {
 		$this->assertSame( [ 10, 11 ], $this->queue->roots() );
 	}
 
+	public function test_roots_counts_roots_however_many_have_offers_beside_their_jobs(): void {
+		foreach ( [ 10, 11, 12 ] as $root ) {
+			$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, $root, 'page', 0 ) );
+			$this->queue->offer( Operations::new_job( Operations::TYPE_RESTORE, $root, 'page', 0 ) );
+		}
+
+		$this->assertSame( [ 10, 11 ], $this->queue->roots( 2 ) );
+		$this->assertSame( [ 10 ], $this->queue->roots( 1 ) );
+	}
+
+	public function test_only_a_row_that_does_not_decode_is_dropped(): void {
+		global $wpdb;
+		$wpdb->insert(
+			$wpdb->options,
+			[
+				'option_name'  => Queue::job_option( 10 ),
+				'option_value' => 'a:1:{s:4:"root";',
+				'autoload'     => 'off',
+			]
+		);
+		$this->queue->offer( Operations::new_job( Operations::TYPE_RESTORE, 10, 'page', 0 ) );
+		$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, 11, 'page', 0 ) );
+
+		$this->queue->drop_unreadable( 10 );
+		$this->queue->drop_unreadable( 11 );
+
+		$this->assertNull( $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Queue::job_option( 10 ) ) ) );
+		$this->assertNotNull( $this->queue->offered( 10 ), 'The offer beside it decodes, and stays.' );
+		$this->assertNotNull( $this->queue->load( 11 ) );
+	}
+
 	public function test_a_lock_is_held_until_its_owner_releases_it(): void {
 		$token = $this->queue->lock( 10 );
 
@@ -120,7 +155,7 @@ final class QueueTest extends WP_UnitTestCase {
 	}
 
 	public function test_schedule_uses_wp_cron_without_action_scheduler(): void {
-		$this->assertFalse( function_exists( 'as_enqueue_async_action' ) && Action_Scheduler_Stub::$on, 'Precondition: no Action Scheduler answers in the test site.' );
+		$this->assertFalse( function_exists( 'as_enqueue_async_action' ), 'Precondition: Action Scheduler is not loaded in the test site.' );
 		$this->assertFalse( $this->queue->is_scheduled() );
 
 		$this->assertTrue( $this->queue->schedule() );

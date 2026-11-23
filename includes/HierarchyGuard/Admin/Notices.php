@@ -387,7 +387,6 @@ final class Notices {
 			if ( null === $job || $job['change'] !== $change['id'] ) {
 				continue;
 			}
-			$this->keep_going();
 			$counts = (array) $job['counts'];
 			$done   = (int) $counts['moved'] + (int) $counts['trashed'] + (int) $counts['restored'] + (int) $counts['kept'] + (int) $counts['left'];
 			$title  = Overview::title( (int) $root['root'] );
@@ -415,6 +414,10 @@ final class Notices {
 			}
 		}
 
+		if ( [] !== $out ) {
+			$this->keep_going();
+		}
+
 		$rest = count( $running ) - count( $first );
 		if ( $rest > 0 && [] !== $out ) {
 			/* translators: %s: number of pages. */
@@ -424,11 +427,13 @@ final class Notices {
 	}
 
 	/**
-	 * A job is waiting: schedules the run when neither it nor the watchdog
-	 * is scheduled, as when the cron option lost both.
+	 * Jobs are waiting: schedules the run when neither it nor the watchdog
+	 * is scheduled, as when the cron option lost both. The watchdog is read
+	 * first, from the cron array in memory, so Action Scheduler is asked only
+	 * when it is missing.
 	 */
 	private function keep_going(): void {
-		if ( ! $this->queue->is_scheduled() && false === wp_next_scheduled( Queue::WATCHDOG ) ) {
+		if ( false === wp_next_scheduled( Queue::WATCHDOG ) && ! $this->queue->is_scheduled() ) {
 			$this->queue->schedule();
 		}
 	}

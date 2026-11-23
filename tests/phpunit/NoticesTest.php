@@ -734,6 +734,42 @@ final class NoticesTest extends WP_UnitTestCase {
 		wp_unschedule_hook( Queue::WATCHDOG );
 	}
 
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_waiting_jobs_shown_check_the_schedule_once_and_ask_action_scheduler_only_without_a_watchdog(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$queue                     = new Queue();
+		$team                      = array_merge( $this->about( [ 'job' => true ] ), [ 'root' => $this->ids['team'] ] );
+		$id                        = $this->change( 'trash', [ $this->about( [ 'job' => true ] ), $team ] )['id'];
+		foreach ( [ $this->ids['about'], $this->ids['team'] ] as $root ) {
+			$queue->save(
+				[
+					'root'   => $root,
+					'change' => $id,
+					'total'  => 40,
+					'counts' => array_merge( Change_Log::empty_counts(), [ 'moved' => 25 ] ),
+				]
+			);
+		}
+		$notices = fn(): Notices => new Notices( $this->log, new Queue(), new Pairs(), new Providers() );
+
+		$this->assertCount( 2, $notices()->progress_sentences( 'page' ), 'Precondition: both jobs are shown.' );
+		$this->assertSame( 1, Action_Scheduler_Stub::$checked, 'Once for both jobs.' );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued );
+
+		Action_Scheduler_Stub::$checked = 0;
+		$notices()->progress_sentences( 'page' );
+		$this->assertSame( 0, Action_Scheduler_Stub::$checked, 'With the watchdog scheduled, Action Scheduler is not asked.' );
+
+		foreach ( [ $this->ids['about'], $this->ids['team'] ] as $root ) {
+			$queue->delete( $root );
+		}
+		wp_unschedule_hook( Queue::WATCHDOG );
+	}
+
 	public function test_progress_is_shown_while_the_batch_runs_and_not_on_the_landing_load(): void {
 		$queue = new Queue();
 		$id    = $this->change( 'trash', [ $this->about( [ 'job' => true ] ) ] )['id'];

@@ -85,19 +85,23 @@ final class Processor {
 	 * Scheduler entry point: one time-boxed run through the queued roots,
 	 * oldest first, reading more roots once it has passed those it read. The
 	 * next run is scheduled before the first step, so a run that dies still
-	 * leaves one, and cleared at the end unless a root this run could step is
-	 * left. A root another process holds is passed over: that process
-	 * schedules its own next run. So is a root whose step failed, reported
-	 * under WP_DEBUG: the watchdog restarts it, and the roots behind it go on.
-	 * A root whose step killed the run, past what a catch can stop, is passed
-	 * over by the next run, once, for the same reason.
+	 * leaves one, and again when the run stops for time, in case a run beside
+	 * it cleared it. At the end the run is cleared, unless a root this run
+	 * could step is left, and the watchdog too once no root is left. A root
+	 * another process holds is passed over: that process schedules its own
+	 * next run. So is a root whose step failed, reported under WP_DEBUG: the
+	 * watchdog restarts it, and the roots behind it go on. A root whose step
+	 * killed the run, past what a catch can stop, is passed over by the next
+	 * run, once, for the same reason. A root with nothing to step is left to
+	 * the watchdog, which drops a row that does not decode.
 	 */
 	public function handle(): void {
-		$limit  = self::time_limit();
-		$start  = microtime( true );
-		$passed = [];
-		$skip   = [];
-		$died   = $this->queue->stepping();
+		$limit   = self::time_limit();
+		$start   = microtime( true );
+		$passed  = [];
+		$skip    = [];
+		$stepped = false;
+		$died    = $this->queue->stepping();
 		if ( $died > 0 ) {
 			$passed[] = $died;
 			$skip[]   = $died;
@@ -107,15 +111,19 @@ final class Processor {
 		do {
 			$roots = array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $passed ) ), $passed );
 			foreach ( $roots as $root_id ) {
-				$left = $limit - (int) floor( microtime( true ) - $start );
-				if ( $left < 1 || $this->out_of_time( $start, 0 ) ) {
+				// Whole seconds left; the first root always gets a step, as run() always takes one.
+				$left = (int) floor( $limit - ( microtime( true ) - $start ) );
+				if ( $this->out_of_time( $start, 0 ) || ( $stepped && $left < 1 ) ) {
 					$this->queue->mark_stepping( 0 );
+					$this->queue->forget_queued();
+					$this->queue->schedule();
 					return;
 				}
+				$stepped  = true;
 				$passed[] = $root_id;
 				$this->queue->mark_stepping( $root_id );
 				try {
-					if ( 'busy' === $this->run( $root_id, $left )['state'] ) {
+					if ( in_array( $this->run( $root_id, max( 1, $left ) )['state'], [ 'busy', 'idle' ], true ) ) {
 						$skip[] = $root_id;
 					}
 				} catch ( Throwable $e ) {
@@ -135,7 +143,10 @@ final class Processor {
 
 		$this->queue->mark_stepping( 0 );
 		$this->queue->unschedule();
-		if ( [] !== array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $skip ) ), $skip ) ) {
+		$waiting = $this->queue->roots( self::ROOTS_PER_READ + count( $skip ) );
+		if ( [] === $waiting ) {
+			wp_clear_scheduled_hook( Queue::WATCHDOG );
+		} elseif ( [] !== array_diff( $waiting, $skip ) ) {
 			$this->queue->schedule();
 		}
 	}
@@ -234,8 +245,9 @@ final class Processor {
 	}
 
 	/**
-	 * Restarts jobs whose run died and drops jobs that can no longer finish,
-	 * then checks again in an hour while any job waits.
+	 * Restarts jobs whose run died, drops jobs that can no longer finish and
+	 * rows that do not decode, then checks again in an hour while any job
+	 * waits.
 	 */
 	public function watchdog(): void {
 		$now = time();
@@ -244,6 +256,7 @@ final class Processor {
 			$offer = $this->queue->offered( $root_id );
 			$any   = $job ?? $offer;
 			if ( null === $any ) {
+				$this->queue->drop_unreadable( $root_id );
 				continue;
 			}
 
