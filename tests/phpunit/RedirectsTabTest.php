@@ -383,29 +383,35 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Nonces a bulk Delete never carries: none at all, another action's, and
-	 * the one of WordPress's own list tables.
+	 * Nonces a bulk Delete never carries: none at all, the action the list's
+	 * old name shared with any other plugin's "redirects" table, another
+	 * list's, the Edit view's save of the same record, and the right action
+	 * in the wrong case.
 	 *
-	 * @return array<string,array{0:string}>
+	 * @return array<string,array{0:string|null}> The nonce action, null for no nonce.
 	 */
 	public static function foreign_nonce_actions(): array {
 		return [
-			'core list tables' => [ 'bulk-redirects' ],
-			'another plugin'   => [ 'bulk-posts' ],
-			'the edit view'    => [ 'hierarchy_guard_redirect_save' ],
-			'wrong case'       => [ 'BULK-HIERARCHY_GUARD_REDIRECTS' ],
+			'none at all'           => [ null ],
+			'the old shared action' => [ 'bulk-redirects' ],
+			'another list'          => [ 'bulk-posts' ],
+			'the edit view’s save'  => [ Redirect_Edit::NONCE_SAVE ],
+			'wrong case'            => [ 'BULK-HIERARCHY_GUARD_REDIRECTS' ],
 		];
 	}
 
 	/**
 	 * @dataProvider foreign_nonce_actions
 	 *
-	 * @param string $action Nonce action the request was signed for.
+	 * @param string|null $action Nonce action the request was signed for, null for none; the Edit view's save gets the record's ID.
 	 */
-	public function test_a_bulk_delete_signed_for_another_action_deletes_nothing( string $action ): void {
+	public function test_a_bulk_delete_signed_for_another_action_deletes_nothing( ?string $action ): void {
+		$id                   = $this->recorded( $this->ids['about'], 'old-about' );
 		$_REQUEST['action']   = 'delete';
-		$_REQUEST['redirect'] = [ $this->recorded( $this->ids['about'], 'old-about' ) ];
-		$_REQUEST['_wpnonce'] = wp_create_nonce( $action );
+		$_REQUEST['redirect'] = [ $id ];
+		if ( null !== $action ) {
+			$_REQUEST['_wpnonce'] = wp_create_nonce( Redirect_Edit::NONCE_SAVE === $action ? $action . $id : $action );
+		}
 
 		try {
 			( new Redirect_Edit( $this->records ) )->handle();

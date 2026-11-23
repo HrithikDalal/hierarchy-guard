@@ -375,7 +375,7 @@ final class Tree_View {
 			return;
 		}
 		/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
-		do_action( 'hierarchy_guard_list_script' );
+		do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 
 		printf( '<input type="hidden" name="%1$s" value="%2$s">', esc_attr( self::QUERY_VAR ), esc_attr( self::VIEW ) );
 		if ( 'search' === $mode ) {

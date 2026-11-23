@@ -215,6 +215,21 @@ describe( 'the trash dialog', () => {
 		).toBe(
 			'2 of the selected pages have subpages, 1,000+ in all. The subpages go to the Trash too. Restoring their parent restores them with their original status. A page with more than 1,000 subpages has them moved up instead.'
 		);
+		// The cap is filterable, so its noun follows the number.
+		expect(
+			bulkSentence(
+				{
+					pages: [ team, { ...team, fallback: null } ],
+					total: { count: 1, capped: true },
+					more: 0,
+				},
+				'trash_children',
+				2,
+				1
+			)
+		).toContain(
+			'A page with more than 1 subpage has them moved up instead.'
+		);
 	} );
 
 	it( 'labels and describes each option like the settings', () => {

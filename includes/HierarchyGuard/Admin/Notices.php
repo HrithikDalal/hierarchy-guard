@@ -198,8 +198,9 @@ final class Notices {
 			/* translators: %s: number of URLs, such as 12 or 1,000+. */
 			$text  = sprintf( _n( '%s URL changed.', '%s URLs changed.', $n, 'hierarchy-guard' ), $shown ) . ' ';
 			$text .= '' !== $name
-				/* translators: %s: name of the redirect plugin. */
+				/* translators: %s: name of the redirect plugin; "its" and "their" are the changed URLs'. */
 				? sprintf( _n( 'Add its redirect in %s.', 'Add their redirects in %s.', $n, 'hierarchy-guard' ), $name )
+				/* translators: "its" and "their" are the changed URLs'. */
 				: _n( 'Add its redirect in your redirect plugin.', 'Add their redirects in your redirect plugin.', $n, 'hierarchy-guard' );
 			return [
 				'type'    => 'info',
@@ -542,7 +543,7 @@ final class Notices {
 		$stayed = $counts['kept'] - $counts['denied'];
 		if ( $stayed > 0 ) {
 			if ( null !== $single && Settings::POLICY_KEEP === $single['policy'] ) {
-				/* translators: %s: number of subpages. */
+				/* translators: %s: number of subpages; "Its" is the trashed page's. */
 				$out[] = sprintf( _n( 'Its %s subpage stayed where it is.', 'Its %s subpages stayed where they are.', $stayed, 'hierarchy-guard' ), number_format_i18n( $stayed ) );
 			} else {
 				/* translators: %s: number of subpages. */
@@ -589,7 +590,7 @@ final class Notices {
 
 		if ( $counts['restored'] > 0 ) {
 			$out[] = null !== $single
-				/* translators: %s: number of subpages. */
+				/* translators: %s: number of subpages; "it" is the restored page. */
 				? sprintf( _n( '%s subpage was restored with it.', '%s subpages were restored with it.', $counts['restored'], 'hierarchy-guard' ), number_format_i18n( $counts['restored'] ) )
 				/* translators: %s: number of subpages. */
 				: sprintf( _n( '%s subpage was restored too.', '%s subpages were restored too.', $counts['restored'], 'hierarchy-guard' ), number_format_i18n( $counts['restored'] ) );

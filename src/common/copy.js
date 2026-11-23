@@ -340,8 +340,10 @@ export function bulkSentence( preview, policy, withChildren, cap ) {
 			' ' +
 			sprintf(
 				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
-				__(
+				_n(
+					'A page with more than %s subpage has them moved up instead.',
 					'A page with more than %s subpages has them moved up instead.',
+					cap,
 					'hierarchy-guard'
 				),
 				formatCount( cap )
@@ -654,9 +656,12 @@ export function changedSentence( count, capped, serving, provider ) {
 			),
 			shown
 		);
-		const add = provider.name
-			? sprintf(
-					/* translators: %s: name of the redirect plugin. */
+		// Passed as an argument, as in trashSentence(), for the translator comments.
+		const parts = [ changed ];
+		if ( provider.name ) {
+			parts.push(
+				sprintf(
+					/* translators: %s: name of the redirect plugin; "its" and "their" are the changed URLs'. */
 					_n(
 						'Add its redirect in %s.',
 						'Add their redirects in %s.',
@@ -665,13 +670,19 @@ export function changedSentence( count, capped, serving, provider ) {
 					),
 					provider.name
 				)
-			: _n(
+			);
+		} else {
+			parts.push(
+				/* translators: "its" and "their" are the changed URLs'. */
+				_n(
 					'Add its redirect in your redirect plugin.',
 					'Add their redirects in your redirect plugin.',
 					count,
 					'hierarchy-guard'
-				);
-		return changed + ' ' + add;
+				)
+			);
+		}
+		return parts.join( ' ' );
 	}
 	return sprintf(
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */

@@ -156,7 +156,8 @@ final class Changes_Controller {
 	private function collected( string $change_id ) {
 		$change = $this->log->latest( get_current_user_id() );
 		if ( null === $change || $change_id !== $change['id'] ) {
-			$minutes  = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
+			$minutes = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
+			/* translators: "them" are the redirects the user asked for. */
 			$message  = null !== $change ? __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ' : '';
 			$message .= sprintf(
 				/* translators: %s: number of minutes. */

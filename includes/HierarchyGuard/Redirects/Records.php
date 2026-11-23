@@ -222,37 +222,54 @@ final class Records {
 	public function statuses( array $rows ): array {
 		$resolver = new Resolver( $this->ledger );
 		Batch_Resolver::prime_with_ancestors( array_values( array_filter( array_column( $rows, 'holder' ) ) ) );
+		$serving = Settings::serve_redirects();
+		$plain   = '' === (string) get_option( 'permalink_structure' );
 
 		$out = [];
 		foreach ( $rows as $row ) {
-			$type   = $row['post_type'];
-			$path   = $row['path'];
-			$holder = $row['holder'] > 0 ? get_post( $row['holder'] ) : null;
-			$url    = null !== $row['target'] ? $row['target']['url'] : '';
-			if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
-				// Its own page is why it is not served, whatever else is at its old URL.
-				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( Server::shows_post( self::full_old_url( $type, $path ) ) ) {
-				$status = self::STATUS_IN_USE;
-			} elseif ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
-				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 ) ) {
-				// A top-level root-list entry serves only the URLs one segment under it.
-				$status = self::STATUS_TOO_DEEP;
-			} elseif ( self::loops( $type, $path, $url ) ) {
-				$status = self::STATUS_LOOP;
-			} elseif ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) ) {
-				$status = self::STATUS_CHAINED;
-			} elseif ( ! Settings::serve_redirects() ) {
-				$status = self::STATUS_OFF;
-			} elseif ( '' === (string) get_option( 'permalink_structure' ) ) {
-				$status = self::STATUS_PLAIN;
-			} else {
-				$status = self::STATUS_ACTIVE;
-			}
-			$out[ $row['id'] ] = $status;
+			$out[ $row['id'] ] = $this->status_of( $row, $resolver, $serving, $plain );
 		}
 		return $out;
+	}
+
+	/**
+	 * One row's status: the first check of statuses() that applies.
+	 *
+	 * @param array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null} $row Row.
+	 * @param Resolver $resolver Resolver, shared by the page of rows.
+	 * @param bool     $serving  Whether built-in redirects are on.
+	 * @param bool     $plain    Whether the site has plain permalinks.
+	 * @return string One of the STATUS_ constants.
+	 */
+	private function status_of( array $row, Resolver $resolver, bool $serving, bool $plain ): string {
+		$type   = $row['post_type'];
+		$path   = $row['path'];
+		$holder = $row['holder'] > 0 ? get_post( $row['holder'] ) : null;
+		$url    = null !== $row['target'] ? $row['target']['url'] : '';
+		if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
+			// Its own page is why it is not served, whatever else is at its old URL.
+			return self::STATUS_UNPUBLISHED;
+		}
+		if ( Server::shows_post( self::full_old_url( $type, $path ) ) ) {
+			return self::STATUS_IN_USE;
+		}
+		if ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
+			return self::STATUS_UNPUBLISHED;
+		}
+		// A top-level root-list entry serves only the URLs one segment under it.
+		if ( self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 ) ) {
+			return self::STATUS_TOO_DEEP;
+		}
+		if ( self::loops( $type, $path, $url ) ) {
+			return self::STATUS_LOOP;
+		}
+		if ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) ) {
+			return self::STATUS_CHAINED;
+		}
+		if ( ! $serving ) {
+			return self::STATUS_OFF;
+		}
+		return $plain ? self::STATUS_PLAIN : self::STATUS_ACTIVE;
 	}
 
 	/**

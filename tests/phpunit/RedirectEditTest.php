@@ -329,6 +329,30 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertSame( 302, $this->ledger->target( 'page', 'archive', 0 )['code'] );
 	}
 
+	public function test_a_top_level_entry_of_a_type_with_a_prefix_gives_an_example_under_that_prefix(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'rewrite'      => [ 'slug' => 'docs' ],
+			]
+		);
+		Post_Types::reset();
+		try {
+			$this->ledger->record_root( 'hg_docs', 'archive' );
+			$this->id = Records::id( 0, 'hg_docs', 'archive' );
+			$this->follow( Redirect_Edit::edit_url( $this->id ) );
+
+			$html = $this->view();
+		} finally {
+			unregister_post_type( 'hg_docs' );
+			Post_Types::reset();
+		}
+
+		$this->assertStringContainsString( '<p id="hierarchy-guard-target-now">URLs under <code>/docs/archive/</code> now go to the same page at the top level, for example <code>/docs/archive/example/</code> to <code>/docs/example/</code>.</p>', $html );
+	}
+
 	public function test_the_edit_view_keeps_the_list_s_search_filter_and_page_through_save_cancel_and_delete(): void {
 		$list = [
 			's'                    => 'old about',

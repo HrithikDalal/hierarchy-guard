@@ -200,8 +200,10 @@ final class Redirect_Edit {
 		echo '<table class="form-table" role="presentation"><tbody>';
 		printf( '<tr><th scope="row">%1$s</th><td>%2$s</td></tr>', esc_html__( 'Old URL', 'hierarchy-guard' ), Redirects_Table::old_label( $record ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- old_label() escapes its parts.
 		$example = trailingslashit( $old ) . 'example/';
-		/* translators: 1: the old URL, such as /about/; 2: a URL under it, such as /about/example/; 3: where that one leads, /example/. */
-		$now = Records::is_top_level( $record ) ? '<p id="hierarchy-guard-target-now">' . sprintf( esc_html__( 'URLs under %1$s now go to the same page at the top level, for example %2$s to %3$s.', 'hierarchy-guard' ), $in_code, '<code>' . esc_html( $example ) . '</code>', '<code>/example/</code>' ) . '</p>' : '';
+		// The same page at the top level, under the type's own prefix, if it has one.
+		$top = Records::old_url( (string) $record['post_type'], 'example' );
+		/* translators: 1: the old URL, such as /about/; 2: a URL under it, such as /about/example/; 3: where that one leads, such as /example/. */
+		$now = Records::is_top_level( $record ) ? '<p id="hierarchy-guard-target-now">' . sprintf( esc_html__( 'URLs under %1$s now go to the same page at the top level, for example %2$s to %3$s.', 'hierarchy-guard' ), $in_code, '<code>' . esc_html( $example ) . '</code>', '<code>' . esc_html( $top ) . '</code>' ) . '</p>' : '';
 		printf(
 			'<tr><th scope="row"><label for="hierarchy-guard-target">%1$s</label></th><td>%2$s<input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="%3$s" dir="ltr" aria-describedby="%5$shierarchy-guard-target-description"><div id="hierarchy-guard-target-description"><p class="description">%4$s</p></div></td></tr>',
 			esc_html__( 'Redirect to', 'hierarchy-guard' ),
