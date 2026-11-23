@@ -371,7 +371,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 		$this->core_undo( $this->ids['about'] );
 
-		$this->assertSame( 'publish', get_post_status( $this->ids['about'] ), 'Core alone would restore it as a draft.' );
+		$this->assertSame( 'publish', get_post_status( $this->ids['about'] ), 'Core’s Undo gives it the status it had.' );
 		$this->assertSame( $this->ids['about'], (int) get_post( $this->ids['history'] )->post_parent );
 	}
 
