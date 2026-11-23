@@ -49,6 +49,7 @@ composer install
 npm install
 npm run env:start          # WordPress at http://localhost:8888 (admin / password)
 npm run test:php           # PHPUnit inside the tests container
+npm run test:php:multisite # the same suite as a multisite network
 npm run test:php -- --filter PathsTest
 composer lint              # PHPCS
 npm run build              # compile src/ into build/ (npm start watches)
