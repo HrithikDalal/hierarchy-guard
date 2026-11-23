@@ -30,13 +30,21 @@ final class Live_View implements Ledger_View {
 	private Ledger $ledger;
 
 	/**
-	 * What find_prefixes() answered in this request, by post type then prefix,
-	 * while the ledger is unchanged: the rules ask for each prefix of a path
-	 * in turn, longest first, and the first ask reads them all.
+	 * What find_prefixes() last answered, by prefix: the rules ask for each
+	 * prefix of a path in turn, longest first, and one ask reads the next
+	 * Ledger::PREFIXES_PER_READ. Only the last answer is kept, so memory
+	 * stays bounded however deep the path.
 	 *
-	 * @var array<string,array<string,int|null>>
+	 * @var array<string,int|null>
 	 */
 	private array $found = [];
+
+	/**
+	 * The post type $found is for.
+	 *
+	 * @var string
+	 */
+	private string $found_type = '';
 
 	/**
 	 * The ledger's last-changed key $found was read under.
@@ -62,14 +70,12 @@ final class Live_View implements Ledger_View {
 	 */
 	public function find( string $post_type, string $prefix ): ?int {
 		$changed = (string) wp_cache_get_last_changed( Ledger::CACHE_GROUP );
-		if ( $changed !== $this->found_under ) {
-			$this->found       = [];
+		if ( $changed !== $this->found_under || $post_type !== $this->found_type || ! array_key_exists( $prefix, $this->found ) ) {
+			$this->found       = $this->ledger->find_prefixes( $post_type, $prefix );
+			$this->found_type  = $post_type;
 			$this->found_under = $changed;
 		}
-		if ( ! array_key_exists( $prefix, $this->found[ $post_type ] ?? [] ) ) {
-			$this->found[ $post_type ] = $this->ledger->find_prefixes( $post_type, $prefix ) + ( $this->found[ $post_type ] ?? [] );
-		}
-		return $this->found[ $post_type ][ $prefix ] ?? null;
+		return $this->found[ $prefix ] ?? null;
 	}
 
 	/**

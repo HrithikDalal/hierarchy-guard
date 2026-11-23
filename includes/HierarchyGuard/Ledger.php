@@ -34,6 +34,12 @@ final class Ledger {
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
 
+	/**
+	 * Prefixes of a path find_prefixes() reads in one query and keeps in one
+	 * cache entry.
+	 */
+	public const PREFIXES_PER_READ = 50;
+
 	private const CACHE_TTL = 12 * HOUR_IN_SECONDS;
 
 	/**
@@ -412,9 +418,13 @@ final class Ledger {
 	}
 
 	/**
-	 * What a path and each shorter prefix of it used to lead to, as find()
-	 * answers each: one query for all of them, and one cache entry for the
-	 * path, so a 404 several segments deep costs what a one-segment one does.
+	 * What a path and the next shorter prefixes of it used to lead to, as
+	 * find() answers each: up to PREFIXES_PER_READ of them, read in one query
+	 * and cached under the path as one answer per prefix. So a 404 several
+	 * segments deep costs what a one-segment one does, and a path of any
+	 * depth costs a bounded query, cache entry and memory per call. A caller
+	 * that needs a shorter prefix than those answered asks again from it, so
+	 * every depth is looked up.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Path, any form; normalized here.
@@ -426,19 +436,21 @@ final class Ledger {
 			return [];
 		}
 		$segments = explode( '/', $path );
+		$longest  = count( $segments );
+		$shortest = max( 1, $longest - self::PREFIXES_PER_READ + 1 );
 		$prefixes = [];
-		for ( $length = count( $segments ); $length >= 1; $length-- ) {
+		for ( $length = $longest; $length >= $shortest; $length-- ) {
 			$prefixes[] = implode( '/', array_slice( $segments, 0, $length ) );
 		}
 
-		$cache_key = 'find:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
+		$cache_key = 'prefixes:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
 		$found     = wp_cache_get( $cache_key, self::CACHE_GROUP );
 		if ( ! is_array( $found ) ) {
 			$found = $this->seek( $post_type, $prefixes );
 			$roots = $this->roots()[ $post_type ] ?? [];
-			foreach ( $found as $prefix => $id ) {
-				if ( null === $id && in_array( (string) $prefix, $roots, true ) ) {
-					$found[ $prefix ] = 0;
+			foreach ( $found as $i => $id ) {
+				if ( null === $id && in_array( $prefixes[ $i ], $roots, true ) ) {
+					$found[ $i ] = 0;
 				}
 			}
 			// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
@@ -448,8 +460,8 @@ final class Ledger {
 		// The cache keeps the holder; its status is read on every call, because
 		// trashing, restoring or deleting the holder does not touch the ledger.
 		$out = [];
-		foreach ( $prefixes as $prefix ) {
-			$id = $found[ $prefix ] ?? null;
+		foreach ( $prefixes as $i => $prefix ) {
+			$id = $found[ $i ] ?? null;
 			if ( null !== $id && $id > 0 && in_array( get_post_status( $id ), [ false, 'trash' ], true ) ) {
 				$id = in_array( $prefix, $this->roots()[ $post_type ] ?? [], true ) ? 0 : null;
 			}
@@ -1076,25 +1088,25 @@ final class Ledger {
 	 * as if it held nothing. The rows are the holders of these paths.
 	 *
 	 * @param string   $post_type Post type name.
-	 * @param string[] $paths     Normalized paths.
-	 * @return array<string,int|null> By path.
+	 * @param string[] $paths     Normalized paths, as a list.
+	 * @return array<int,int|null> Holder or null, in the order of $paths.
 	 */
 	private function seek( string $post_type, array $paths ): array {
 		global $wpdb;
 
-		$by_key = [];
-		foreach ( $paths as $path ) {
-			$by_key[ self::key( $post_type, $path ) ] = $path;
+		$index = [];
+		foreach ( $paths as $i => $path ) {
+			$index[ self::key( $post_type, $path ) ] = $i;
 		}
-		$placeholders = implode( ',', array_fill( 0, count( $by_key ), '%s' ) );
+		$placeholders = implode( ',', array_fill( 0, count( $index ), '%s' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $placeholders holds only %s, one per path, and the values come as one array; seeks on the meta_key index, cached by the caller.
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC", array_merge( array_keys( $by_key ), [ $post_type ] ) ), ARRAY_A );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC", array_merge( array_keys( $index ), [ $post_type ] ) ), ARRAY_A );
 
-		$found = array_fill_keys( $paths, null );
+		$found = array_fill( 0, count( $paths ), null );
 		foreach ( (array) $rows as $row ) {
-			$path = $by_key[ (string) $row['meta_key'] ] ?? null;
-			if ( null !== $path && null === $found[ $path ] ) {
-				$found[ $path ] = (int) $row['post_id'];
+			$i = $index[ (string) $row['meta_key'] ] ?? null;
+			if ( null !== $i && null === $found[ $i ] ) {
+				$found[ $i ] = (int) $row['post_id'];
 			}
 		}
 		return $found;

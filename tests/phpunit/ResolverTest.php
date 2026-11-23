@@ -12,6 +12,7 @@ namespace HierarchyGuard\Tests;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Batch_Resolver;
+use HierarchyGuard\Redirects\Live_View;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Markers;
@@ -83,6 +84,42 @@ final class ResolverTest extends WP_UnitTestCase {
 		$queries = get_num_queries();
 		$this->assertNull( ( new Resolver( $this->ledger ) )->resolve( 'page', $path ) );
 		$this->assertSame( 0, get_num_queries() - $queries, 'The miss is cached for the whole path.' );
+	}
+
+	public function test_a_deep_unknown_path_is_read_fifty_prefixes_a_query_and_cached_as_a_short_list(): void {
+		$path = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 200 ) ) );
+		get_option( Ledger::ROOT_OPTION );
+
+		$queries = get_num_queries();
+		$this->assertNull( $this->resolver->resolve( 'page', $path ) );
+		$this->assertSame( 4, get_num_queries() - $queries, 'Fifty prefixes a query.' );
+
+		$this->assertCount( 50, $this->ledger->find_prefixes( 'page', $path ) );
+		$cached = wp_cache_get( 'prefixes:' . md5( 'page:' . $path ) . ':' . wp_cache_get_last_changed( Ledger::CACHE_GROUP ), Ledger::CACHE_GROUP );
+		$this->assertIsArray( $cached );
+		$this->assertLessThan( 500, strlen( maybe_serialize( $cached ) ), 'One answer per prefix, without the prefixes.' );
+
+		$queries = get_num_queries();
+		$this->assertNull( ( new Resolver( $this->ledger ) )->resolve( 'page', $path ) );
+		$this->assertSame( 0, get_num_queries() - $queries, 'The misses are cached.' );
+	}
+
+	public function test_an_entry_deeper_than_one_read_is_still_found(): void {
+		$deep = implode( '/', array_map( static fn( int $i ): string => "level-{$i}", range( 1, 120 ) ) );
+		$this->ledger->record( $this->about, $deep );
+		$view     = new Live_View( $this->ledger );
+		$segments = explode( '/', $deep . '/x/y' );
+
+		$hits = [];
+		for ( $length = count( $segments ); $length >= 1; $length-- ) {
+			$hit = $view->find( 'page', implode( '/', array_slice( $segments, 0, $length ) ) );
+			if ( null !== $hit ) {
+				$hits[ $length ] = $hit;
+			}
+		}
+
+		$this->assertSame( [ 120 => $this->about ], $hits, 'Asked longest first, as the rules ask.' );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', $deep ) );
 	}
 
 	public function test_each_prefix_of_a_path_answers_as_its_own_lookup_does(): void {
