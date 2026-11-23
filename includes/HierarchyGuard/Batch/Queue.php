@@ -214,7 +214,10 @@ final class Queue {
 	/**
 	 * Starts a run's stepping note: the roots the note says runs before
 	 * passed over, and the root a run died on, which the run passes over
-	 * too. The run takes the note over from there.
+	 * too. The run takes over whatever note it finds, so beside a live run
+	 * it also passes that run's root over, until a run ends or the watchdog
+	 * retries it. The watchdog retries only the roots it reads, the oldest
+	 * 100.
 	 *
 	 * @return int[] At most PASSED_CAP roots, the newest last.
 	 */
