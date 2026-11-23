@@ -156,6 +156,7 @@ function genericTail( policy ) {
 		trash_children:
 			__( 'The subpages go to the Trash too.', 'hierarchy-guard' ) +
 			' ' +
+			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
 			__(
 				'Restoring their parent restores them with their original status.',
 				'hierarchy-guard'
