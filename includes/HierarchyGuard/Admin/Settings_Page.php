@@ -255,8 +255,12 @@ final class Settings_Page {
 		$provider = $this->providers->detect();
 		if ( null !== $provider ) {
 			$name = trim( (string) ( $provider['name'] ?? '' ) );
-			/* translators: %s: name of the detected redirect plugin. */
-			$active = '' !== $name ? sprintf( __( '%s is active.', 'hierarchy-guard' ), $name ) : __( 'A redirect plugin is active.', 'hierarchy-guard' );
+			if ( '' !== $name ) {
+				/* translators: %s: name of the detected redirect plugin. */
+				$active = sprintf( __( '%s is active.', 'hierarchy-guard' ), $name );
+			} else {
+				$active = __( 'A redirect plugin is active.', 'hierarchy-guard' );
+			}
 			// The notices offer the redirects to add only while built-in redirects are off; with them on, they say the old URLs redirect.
 			if ( ! Settings::serve_redirects() ) {
 				$active .= ' ' . ( '' !== $name
