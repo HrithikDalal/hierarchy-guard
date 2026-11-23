@@ -477,7 +477,7 @@ final class Server {
 	}
 
 	/**
-	 * The raw request URI, empty when there is none (WP-CLI, cron).
+	 * The request URI, sanitized as a URL, empty when there is none (WP-CLI, cron).
 	 *
 	 * @return string
 	 */

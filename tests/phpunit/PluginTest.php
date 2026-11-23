@@ -24,7 +24,7 @@ final class PluginTest extends WP_UnitTestCase {
 		$this->assertSame( Plugin::instance(), Plugin::instance() );
 	}
 
-	public function test_every_shipped_php_file_stops_when_requested_directly(): void {
+	public function test_the_main_file_and_every_file_in_includes_stop_when_requested_directly(): void {
 		$root  = dirname( __DIR__, 2 );
 		$files = [ $root . '/hierarchy-guard.php' ];
 		foreach ( new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $root . '/includes', \FilesystemIterator::SKIP_DOTS ) ) as $file ) {
