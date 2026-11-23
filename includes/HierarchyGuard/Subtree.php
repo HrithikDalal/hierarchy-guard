@@ -303,9 +303,15 @@ final class Subtree {
 			$level  = array_map( 'intval', array_column( $read, 'ID' ) );
 		}
 
+		// A page read again, as a parent loop in the data brings the root back, is listed once.
 		$kids = [];
+		$seen = [ $root_id => true ];
 		foreach ( array_slice( $rows, 0, $cap ) as $row ) {
-			$kids[ (int) $row['post_parent'] ][] = (int) $row['ID'];
+			$id = (int) $row['ID'];
+			if ( ! isset( $seen[ $id ] ) ) {
+				$seen[ $id ]                         = true;
+				$kids[ (int) $row['post_parent'] ][] = $id;
+			}
 		}
 		$ids   = [];
 		$stack = array_reverse( $kids[ $root_id ] ?? [] );

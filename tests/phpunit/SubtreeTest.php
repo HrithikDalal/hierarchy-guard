@@ -139,6 +139,16 @@ final class SubtreeTest extends WP_UnitTestCase {
 		$this->assertFalse( $exact['capped'], 'Exactly the cap is not capped.' );
 	}
 
+	public function test_descendant_ids_lists_each_page_once_when_the_parents_loop(): void {
+		global $wpdb;
+		// About under its own grandchild: core refuses this, direct SQL or an import does not.
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->ids['leadership'] ], [ 'ID' => $this->ids['about'] ] );
+		clean_post_cache( $this->ids['about'] );
+
+		$this->assertSame( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], Subtree::descendant_ids( $this->ids['about'], 'page', 10 )['ids'] );
+		$this->assertSame( [ $this->ids['leadership'], $this->ids['about'], $this->ids['history'] ], Subtree::descendant_ids( $this->ids['team'], 'page', 10 )['ids'], 'From inside the loop, each page once, the root not again.' );
+	}
+
 	public function test_ordered_children_reads_up_to_the_limit_in_menu_order(): void {
 		$zed = $this->page( 'zed', $this->ids['about'] );
 		wp_update_post(
