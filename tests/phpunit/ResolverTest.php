@@ -73,6 +73,19 @@ final class ResolverTest extends WP_UnitTestCase {
 		parent::tear_down();
 	}
 
+	public function test_a_page_left_with_the_moved_row_of_a_root_deleted_for_good_is_redirected_to_for_good(): void {
+		$this->ledger->record( $this->team, 'old-team' );
+		Markers::add( $this->team, Markers::moved_key( 999999 ), '0|team|team|1' );
+
+		$temporary = null;
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'old-team', $temporary )->ID );
+		$this->assertFalse( $temporary, 'A 301: no restore can move it back.' );
+
+		Markers::add( $this->team, Markers::moved_key( $this->company ), '0|team|team|1' );
+		$this->resolver->resolve( 'page', 'old-team', $temporary );
+		$this->assertTrue( $temporary, 'A 302 while a page that moved it is still there.' );
+	}
+
 	public function test_an_unknown_path_twenty_segments_deep_costs_one_ledger_query_then_none(): void {
 		$path = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 20 ) ) );
 		get_option( Ledger::ROOT_OPTION );

@@ -284,18 +284,26 @@ final class Markers {
 	}
 
 	/**
-	 * Whether a post sits where the trash flow moved it, so a restore may still move it back.
+	 * Whether a post sits where the trash flow moved it, so a restore may
+	 * still move it back: it has a moved row whose root still exists. A root
+	 * deleted for good while the plugin was inactive leaves its rows behind,
+	 * and nothing can move the post back any more.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return bool
 	 */
 	public static function has_moved_row( int $post_id ): bool {
-		return [] !== self::keys_with_prefix( $post_id, self::MOVED_PREFIX );
+		foreach ( self::keys_with_prefix( $post_id, self::MOVED_PREFIX ) as $key ) {
+			if ( false !== get_post_status( (int) substr( $key, strlen( self::MOVED_PREFIX ) ) ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
 	 * Which of these posts sit where the trash flow moved them: has_moved_row()
-	 * for many posts in one query.
+	 * for many posts, in one query for the rows and one for their roots.
 	 *
 	 * @param int[] $post_ids Post IDs.
 	 * @return array<int,true> By post ID.
@@ -309,9 +317,20 @@ final class Markers {
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per post, at most a few per pair listed; seeks on the post_id index.
-		$found = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT post_id FROM {$wpdb->postmeta} WHERE post_id IN ( {$placeholders} ) AND meta_key LIKE %s", ...array_merge( $ids, [ $wpdb->esc_like( self::MOVED_PREFIX ) . '%' ] ) ) );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key FROM {$wpdb->postmeta} WHERE post_id IN ( {$placeholders} ) AND meta_key LIKE %s", ...array_merge( $ids, [ $wpdb->esc_like( self::MOVED_PREFIX ) . '%' ] ) ), ARRAY_A );
 
-		return array_fill_keys( array_map( 'intval', (array) $found ), true );
+		$roots = [];
+		foreach ( (array) $rows as $row ) {
+			$roots[ (int) substr( (string) $row['meta_key'], strlen( self::MOVED_PREFIX ) ) ] = true;
+		}
+		_prime_post_caches( array_keys( $roots ), false, false );
+		$found = [];
+		foreach ( (array) $rows as $row ) {
+			if ( false !== get_post_status( (int) substr( (string) $row['meta_key'], strlen( self::MOVED_PREFIX ) ) ) ) {
+				$found[ (int) $row['post_id'] ] = true;
+			}
+		}
+		return $found;
 	}
 
 	/**

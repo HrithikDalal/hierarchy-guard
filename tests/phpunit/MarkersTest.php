@@ -95,6 +95,20 @@ final class MarkersTest extends WP_UnitTestCase {
 		$this->assertCount( 1, Markers::rows( Markers::moved_key( 10 ), 10 ), 'Other roots are untouched.' );
 	}
 
+	public function test_a_moved_row_counts_only_while_its_root_exists(): void {
+		$root  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$moved = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$left  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		wp_trash_post( $root );
+		Markers::add( $moved, Markers::moved_key( $root ), '0|a|a|1' );
+		// A root deleted for good while the plugin was inactive leaves its row behind.
+		Markers::add( $left, Markers::moved_key( 999999 ), '0|b|b|1' );
+
+		$this->assertTrue( Markers::has_moved_row( $moved ), 'A restore of its root can still move it back.' );
+		$this->assertFalse( Markers::has_moved_row( $left ), 'Nothing can move it back any more.' );
+		$this->assertSame( [ $moved => true ], Markers::moved_among( [ $moved, $left ] ) );
+	}
+
 	public function test_count_covers_both_kinds_and_stops_at_the_cap(): void {
 		$a = self::factory()->post->create();
 		$b = self::factory()->post->create();
