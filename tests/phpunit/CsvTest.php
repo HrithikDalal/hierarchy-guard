@@ -89,6 +89,34 @@ final class CsvTest extends WP_UnitTestCase {
 		);
 	}
 
+	public function test_full_url_targets_take_the_home_url_s_scheme_whatever_the_request_s(): void {
+		$home  = static fn(): string => 'http://example.org';
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		add_filter( 'pre_option_home', $home );
+		$_SERVER['HTTPS'] = 'on';
+		$pairs            = [
+			[
+				'old' => '/about/team/',
+				'new' => '/company/team/',
+			],
+			[
+				'old' => '/cdn/',
+				'new' => '//cdn.example/new/',
+			],
+		];
+
+		$this->assertTrue( is_ssl(), 'Precondition: a request over HTTPS, as an admin forced to SSL.' );
+		$srm = Csv::build( 'srm', $pairs );
+		if ( null === $https ) {
+			unset( $_SERVER['HTTPS'] );
+		} else {
+			$_SERVER['HTTPS'] = $https;
+		}
+		remove_filter( 'pre_option_home', $home );
+
+		$this->assertSame( "source,target,regex,code\r\n/about/team/,http://example.org/company/team/,0,301\r\n/cdn/,http://cdn.example/new/,0,301\r\n", $srm );
+	}
+
 	public function test_the_generic_layout_has_source_target_and_code(): void {
 		$this->assertSame( "source,target,code\r\n/about/team/,/company/team/,301\r\n", Csv::build( 'generic', [ $this->pairs()[0] ] ) );
 	}

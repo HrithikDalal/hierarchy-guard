@@ -96,7 +96,9 @@ final class Csv {
 	 */
 	public static function build( string $layout, array $pairs ): string {
 		$layout = self::layout( $layout );
-		$home   = home_url( '/' );
+		// The home option's scheme, not the request's: home_url() follows is_ssl(), as in an admin forced to SSL.
+		$scheme = (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_SCHEME );
+		$home   = home_url( '/', $scheme );
 		$base   = in_array( $layout, self::FROM_ROOT, true ) ? untrailingslashit( (string) wp_parse_url( $home, PHP_URL_PATH ) ) : '';
 		$full   = in_array( $layout, self::FULL_TARGETS, true );
 		$lines  = [ self::line( array_keys( self::LAYOUTS[ $layout ] ) ) ];
@@ -104,9 +106,9 @@ final class Csv {
 			$old = $base . (string) $pair['old'];
 			$new = (string) $pair['new'];
 			if ( str_starts_with( $new, '//' ) ) {
-				$new = wp_parse_url( $home, PHP_URL_SCHEME ) . ':' . $new;
+				$new = $scheme . ':' . $new;
 			} elseif ( str_starts_with( $new, '/' ) ) {
-				$new = $full ? home_url( $new ) : $base . $new;
+				$new = $full ? home_url( $new, $scheme ) : $base . $new;
 			}
 			$lines[] = self::line( self::row( $layout, $old, $new, ! empty( $pair['temporary'] ) ) );
 		}
