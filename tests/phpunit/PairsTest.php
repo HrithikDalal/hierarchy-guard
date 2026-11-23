@@ -1368,9 +1368,11 @@ final class PairsTest extends WP_UnitTestCase {
 		$change = $this->rename( $this->ids['about'], 'about-us' );
 		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], home_url( '/careers/' ), 302 );
 
-		$csv = Csv::build( 'redirection', $this->pairs->all( $this->pairs->collect_change( $change ) ) );
+		$pairs = $this->pairs->all( $this->pairs->collect_change( $change ) );
 
-		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", $csv );
+		$this->assertSame( '/careers/', get_post_meta( $this->ids['about'], Ledger::target_key( 'page', 'company/about' ), true )['url'], 'Precondition: a URL on this site is stored as its path.' );
+		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", Csv::build( 'redirection', $pairs ) );
+		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", Csv::build( 'srm', $pairs ), 'Safe Redirect Manager gets a full URL.' );
 		$this->assertSame( home_url( '/careers/' ), $this->target_on_request( 'company/about' )['url'] );
 	}
 

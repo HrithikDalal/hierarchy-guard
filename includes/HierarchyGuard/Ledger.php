@@ -653,6 +653,10 @@ final class Ledger {
 			]
 		);
 
+		if ( null !== $target ) {
+			$target['url'] = self::stored_url( $target['url'] );
+		}
+
 		if ( $holder > 0 ) {
 			$key = self::target_key( $post_type, $path );
 			if ( null === $target ) {
@@ -675,8 +679,25 @@ final class Ledger {
 	}
 
 	/**
+	 * A URL target as it is stored: a URL on this site as its path from the
+	 * home URL, with its query and fragment, so it follows the site to a new
+	 * domain, as after a WordPress import there; any other URL as it is.
+	 *
+	 * @param string $url An http(s) URL, or ''.
+	 * @return string
+	 */
+	private static function stored_url( string $url ): string {
+		if ( '' === $url || ! Redirects\Server::is_here( $url ) ) {
+			return $url;
+		}
+		$fragment = (string) wp_parse_url( $url, PHP_URL_FRAGMENT );
+		return Paths::relative( $url ) . ( '' !== $fragment ? '#' . $fragment : '' );
+	}
+
+	/**
 	 * An override as stored, checked: an http(s) URL with a host or none,
-	 * and 301, 302 or 0. Null when nothing is left.
+	 * and 301, 302 or 0. Null when nothing is left. A target stored as a path
+	 * on this site is read against the home URL.
 	 *
 	 * @param mixed $value Stored value.
 	 * @return array{url:string,code:int}|null
@@ -685,7 +706,10 @@ final class Ledger {
 		if ( ! is_array( $value ) ) {
 			return null;
 		}
-		$url    = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
+		$url = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
+		if ( str_starts_with( $url, '/' ) && ! str_starts_with( $url, '//' ) ) {
+			$url = home_url( $url );
+		}
 		$code   = isset( $value['code'] ) && is_numeric( $value['code'] ) ? (int) $value['code'] : 0;
 		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
 		if ( '' !== $url && ( ! in_array( $scheme, [ 'http', 'https' ], true ) || '' === (string) wp_parse_url( $url, PHP_URL_HOST ) ) ) {

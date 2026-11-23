@@ -110,6 +110,77 @@ final class LedgerTest extends WP_UnitTestCase {
 		$purged->setValue( null, [] );
 	}
 
+	public function test_a_url_target_on_this_site_is_kept_as_a_path_and_follows_the_site_to_a_new_domain(): void {
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, home_url( '/news/?ref=old#latest' ), 302 );
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->ledger->set_target( 'page', 'archive', 0, home_url( '/blog/' ), 0 );
+		$this->ledger->record( $this->about, 'elsewhere' );
+		$this->ledger->set_target( 'page', 'elsewhere', $this->about, 'https://jobs.example.org/open/', 0 );
+
+		$this->assertSame( '/news/?ref=old#latest', get_post_meta( $this->about, Ledger::target_key( 'page', 'old-about' ), true )['url'], 'Stored as a path.' );
+		$this->assertSame( '/blog/', get_option( Ledger::ROOT_TARGETS )['page']['archive']['url'] );
+		$this->assertSame( 'https://jobs.example.org/open/', get_post_meta( $this->about, Ledger::target_key( 'page', 'elsewhere' ), true )['url'], 'Another site’s URL stays as it is.' );
+
+		$moved = static fn(): string => 'https://new.example.com';
+		add_filter( 'pre_option_home', $moved );
+		wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+		$target = $this->ledger->target( 'page', 'old-about', $this->about );
+		$root   = $this->ledger->target( 'page', 'archive', 0 );
+		remove_filter( 'pre_option_home', $moved );
+
+		$this->assertSame(
+			[
+				'url'  => 'https://new.example.com/news/?ref=old#latest',
+				'code' => 302,
+			],
+			$target,
+			'Read against the home URL, as after an import on a new domain.'
+		);
+		$this->assertSame( 'https://new.example.com/blog/', $root['url'] );
+	}
+
+	/**
+	 * URLs typed for a site at http://example.org/blog, and what is stored.
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public static function same_site_forms(): array {
+		return [
+			'the home URL without its slash' => [ 'http://example.org/blog', '/', 'http://example.org/blog/' ],
+			'the home URL with its slash'    => [ 'http://example.org/blog/', '/', 'http://example.org/blog/' ],
+			'the home URL with a query'      => [ 'http://example.org/blog?ref=1', '/?ref=1', 'http://example.org/blog/?ref=1' ],
+			'a page, query and fragment'     => [ 'http://example.org/blog/about/?a=1#team', '/about/?a=1#team', 'http://example.org/blog/about/?a=1#team' ],
+			'the other scheme'               => [ 'https://example.org/blog/about/', '/about/', 'http://example.org/blog/about/' ],
+			'an upper-case host'             => [ 'http://EXAMPLE.org/blog/about/', '/about/', 'http://example.org/blog/about/' ],
+			'an upper-case home path'        => [ 'http://example.org/BLOG/about/', '/about/', 'http://example.org/blog/about/' ],
+			'another port'                   => [ 'http://example.org:8080/blog/about/', 'http://example.org:8080/blog/about/', 'http://example.org:8080/blog/about/' ],
+			'the www host'                   => [ 'http://www.example.org/blog/about/', 'http://www.example.org/blog/about/', 'http://www.example.org/blog/about/' ],
+			'a path outside the home path'   => [ 'http://example.org/other/', 'http://example.org/other/', 'http://example.org/other/' ],
+			'a path starting like the home'  => [ 'http://example.org/blogroll/', 'http://example.org/blogroll/', 'http://example.org/blogroll/' ],
+		];
+	}
+
+	/**
+	 * @dataProvider same_site_forms
+	 *
+	 * @param string $typed  URL entered as the target.
+	 * @param string $stored What the record keeps.
+	 * @param string $read   What it is read back as.
+	 */
+	public function test_a_target_on_a_site_in_a_subdirectory_is_kept_as_a_path_only_when_it_is_under_the_home_url( string $typed, string $stored, string $read ): void {
+		$home = static fn(): string => 'http://example.org/blog';
+		add_filter( 'pre_option_home', $home );
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, $typed, 0 );
+		wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+		$target = $this->ledger->target( 'page', 'old-about', $this->about );
+		remove_filter( 'pre_option_home', $home );
+
+		$this->assertSame( $stored, get_post_meta( $this->about, Ledger::target_key( 'page', 'old-about' ), true )['url'] );
+		$this->assertSame( $read, $target['url'] );
+	}
+
 	public function test_record_is_idempotent(): void {
 		$this->assertTrue( $this->ledger->record( $this->about, 'about-us' ) );
 		$this->assertFalse( $this->ledger->record( $this->about, 'about-us' ) );

@@ -219,8 +219,11 @@ final class Paths {
 		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
 
-		// The home path in any case, as WP::parse_request() strips it.
-		if ( '' !== $home && '/' !== $home && 0 === stripos( $path, $home ) ) {
+		// The home path in any case, as WP::parse_request() strips it; typed without
+		// its trailing slash it is the home URL itself.
+		if ( '' !== $home && '/' !== $home && 0 === strcasecmp( untrailingslashit( $path ), untrailingslashit( $home ) ) ) {
+			$path = '/';
+		} elseif ( '' !== $home && '/' !== $home && 0 === stripos( $path, $home ) ) {
 			$path = '/' . substr( $path, strlen( $home ) );
 		}
 		if ( '' === $path ) {
