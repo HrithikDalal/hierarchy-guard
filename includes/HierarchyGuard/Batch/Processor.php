@@ -13,23 +13,31 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Operations;
+use Throwable;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
 /**
- * Each run holds the root's lock and steps its job until the job is done or
- * the run's time or memory runs low, then schedules the next run. An hourly
- * watchdog restarts a job whose run died, and gives up on one after a week.
- * A run writes its job's record in the user's change log only while it
- * holds the lock: after each step, and when an offer replaces the job.
+ * A scheduled run works through the queued roots, oldest first. For each it
+ * holds the root's lock and steps its job until the job is done or the run's
+ * time or memory runs low, then schedules the next run. A watchdog, scheduled
+ * only while jobs wait, restarts a job whose run died each hour, and gives up
+ * on one after a week. A run writes its job's record in the user's change log
+ * only while it holds the lock: after each step, and when an offer replaces
+ * the job.
  */
 final class Processor {
 
 	public const TIME_LIMIT    = 20;
 	public const STALE_AFTER   = 10 * MINUTE_IN_SECONDS;
 	public const GIVE_UP_AFTER = 7 * DAY_IN_SECONDS;
+
+	/**
+	 * Queued roots a run reads at a time.
+	 */
+	private const ROOTS_PER_READ = 100;
 
 	/**
 	 * Queue.
@@ -71,16 +79,45 @@ final class Processor {
 	public function register(): void {
 		add_action( Queue::HOOK, [ $this, 'handle' ] );
 		add_action( Queue::WATCHDOG, [ $this, 'watchdog' ] );
-		add_action( 'admin_init', [ self::class, 'schedule_watchdog' ] );
 	}
 
 	/**
-	 * Scheduler entry point: one time-boxed run for a root.
-	 *
-	 * @param mixed $root_id Root page, as the scheduler passes it.
+	 * Scheduler entry point: one time-boxed run through the queued roots,
+	 * oldest first, reading more roots once it has passed those it read. The
+	 * next run is scheduled before the first step, so a run that dies still
+	 * leaves one, and cleared at the end unless a root this run could step is
+	 * left. A root another process holds is passed over: that process
+	 * schedules its own next run. So is a root whose step failed: the
+	 * watchdog restarts it, and the roots behind it go on.
 	 */
-	public function handle( $root_id ): void {
-		$this->run( (int) $root_id, self::time_limit() );
+	public function handle(): void {
+		$limit  = self::time_limit();
+		$start  = microtime( true );
+		$passed = [];
+		$skip   = [];
+		$this->queue->schedule();
+		do {
+			$roots = array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $passed ) ), $passed );
+			foreach ( $roots as $root_id ) {
+				$left = $limit - (int) floor( microtime( true ) - $start );
+				if ( $left < 1 || $this->out_of_time( $start, 0 ) ) {
+					return;
+				}
+				$passed[] = $root_id;
+				try {
+					if ( 'busy' === $this->run( $root_id, $left )['state'] ) {
+						$skip[] = $root_id;
+					}
+				} catch ( Throwable $e ) {
+					$skip[] = $root_id;
+				}
+			}
+		} while ( [] !== $roots );
+
+		$this->queue->unschedule();
+		if ( [] !== array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $skip ) ), $skip ) ) {
+			$this->queue->schedule();
+		}
 	}
 
 	/**
@@ -161,7 +198,7 @@ final class Processor {
 
 		// Scheduled after the unlock, so the next run cannot find this one still holding it.
 		if ( null !== $job || null !== $this->queue->offered( $root_id ) ) {
-			$this->queue->schedule( $root_id );
+			$this->queue->schedule();
 		}
 
 		if ( null !== $job ) {
@@ -177,7 +214,8 @@ final class Processor {
 	}
 
 	/**
-	 * Restarts jobs whose run died and drops jobs that can no longer finish.
+	 * Restarts jobs whose run died and drops jobs that can no longer finish,
+	 * then checks again in an hour while any job waits.
 	 */
 	public function watchdog(): void {
 		$now = time();
@@ -203,31 +241,39 @@ final class Processor {
 			}
 
 			$touched = max( (int) ( $job['touched'] ?? 0 ), (int) ( $offer['touched'] ?? 0 ) );
-			if ( $touched < $now - self::STALE_AFTER && ! $this->queue->is_scheduled( $root_id ) ) {
-				$this->queue->schedule( $root_id );
+			if ( $touched < $now - self::STALE_AFTER && ! $this->queue->is_scheduled() ) {
+				$this->queue->schedule();
 			}
+		}
+		if ( [] !== $this->queue->roots( 1 ) ) {
+			self::schedule_watchdog();
 		}
 	}
 
 	/**
-	 * Schedules the hourly watchdog if it is missing.
+	 * Schedules the watchdog an hour ahead, unless it is scheduled already.
+	 * It is a single event, so on a site where the plugin is no longer active,
+	 * as after a network deactivation, it runs once more with nothing hooked
+	 * and is gone.
 	 */
 	public static function schedule_watchdog(): void {
 		if ( false === wp_next_scheduled( Queue::WATCHDOG ) ) {
-			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', Queue::WATCHDOG );
+			wp_schedule_single_event( time() + HOUR_IN_SECONDS, Queue::WATCHDOG );
 		}
 	}
 
 	/**
-	 * Activation: start the watchdog, which also restarts jobs left from before.
+	 * Activation: the watchdog restarts jobs left from before, when there are any.
 	 */
 	public static function activate(): void {
-		self::schedule_watchdog();
+		if ( [] !== ( new Queue() )->roots( 1 ) ) {
+			self::schedule_watchdog();
+		}
 	}
 
 	/**
-	 * Deactivation: stop scheduled runs. Stored jobs stay, and the watchdog
-	 * restarts them after reactivation.
+	 * Deactivation: stop scheduled runs. Stored jobs stay; activation
+	 * schedules the watchdog again while any wait.
 	 */
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( Queue::WATCHDOG );

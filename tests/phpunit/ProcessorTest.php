@@ -95,7 +95,79 @@ final class ProcessorTest extends WP_UnitTestCase {
 			}
 			$this->assertTrue( $found, $hook );
 		}
-		$this->assertSame( 10, has_action( 'admin_init', [ Processor::class, 'schedule_watchdog' ] ) );
+		$this->assertFalse( has_action( 'admin_init', [ Processor::class, 'schedule_watchdog' ] ), 'Nothing is scheduled on a site with no job.' );
+	}
+
+	public function test_one_run_works_through_every_queued_root_oldest_first(): void {
+		$other = $this->page( 'other' );
+		foreach ( [ 'x', 'y' ] as $slug ) {
+			$this->page( $slug, $other );
+		}
+		$this->trash_raw( $other );
+		$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, $other, 'page', 0, [ 'to' => 0 ] ) );
+		$order = [];
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function ( array $ids, int $from ) use ( &$order ): void {
+				$order[] = $from;
+			},
+			10,
+			2
+		);
+
+		$this->processor->handle();
+
+		$this->assertSame( [ $this->ids['about'], $this->ids['about'], $this->ids['about'], $other ], $order, 'About, queued first, moves its five subpages two at a time, then Other.' );
+		$this->assertSame( [], $this->queue->roots() );
+		$this->assertSame( 0, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
+		$this->assertSame( 0, Subtree::count_live_children( $other, 'page', 10 ) );
+		$this->assertFalse( $this->queue->is_scheduled(), 'Nothing is left for another run.' );
+	}
+
+	public function test_one_run_reads_more_roots_once_it_has_passed_the_first_hundred(): void {
+		$parents = [];
+		for ( $i = 1; $i <= 120; $i++ ) {
+			$parent = $this->page( "many-{$i}" );
+			$this->page( "many-{$i}-child", $parent );
+			$this->trash_raw( $parent );
+			$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, $parent, 'page', 0, [ 'to' => 0 ] ) );
+			$parents[] = $parent;
+		}
+
+		$this->processor->handle();
+
+		$this->assertSame( [], $this->queue->roots(), 'All 121 roots, About and the 120, in one run.' );
+		$this->assertSame( 0, Subtree::count_live_children( end( $parents ), 'page', 10 ) );
+		$this->assertFalse( $this->queue->is_scheduled() );
+	}
+
+	public function test_a_root_whose_step_fails_is_passed_over_and_left_to_the_watchdog(): void {
+		$other = $this->page( 'other' );
+		$this->page( 'x', $other );
+		$this->trash_raw( $other );
+		$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, $other, 'page', 0, [ 'to' => 0 ] ) );
+		$about     = $this->ids['about'];
+		$scheduled = null;
+		$queue     = $this->queue;
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function ( array $ids, int $from ) use ( $about, $queue, &$scheduled ): void {
+				if ( $about === $from ) {
+					$scheduled = $queue->is_scheduled();
+					throw new \RuntimeException( 'Another plugin failed.' );
+				}
+			},
+			10,
+			2
+		);
+
+		$this->processor->handle();
+
+		$this->assertTrue( $scheduled, 'A next run is scheduled while a step runs, so a run that dies leaves one.' );
+		$this->assertSame( [ $about ], $this->queue->roots(), 'Only the failed root is left.' );
+		$this->assertSame( 0, Subtree::count_live_children( $other, 'page', 10 ), 'The root behind it was stepped.' );
+		$this->assertFalse( $this->queue->is_scheduled(), 'The failed root waits for the watchdog, not the next page load.' );
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
 	}
 
 	public function test_a_run_finishes_the_job_and_removes_it(): void {
@@ -114,7 +186,7 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertNull( $this->queue->load( $this->ids['about'] ) );
 		$this->assertCount( 1, $finished );
 		$this->assertSame( 0, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
-		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertFalse( $this->queue->is_scheduled() );
 	}
 
 	public function test_a_run_that_stops_early_saves_progress_and_schedules_the_rest(): void {
@@ -122,7 +194,7 @@ final class ProcessorTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'queued', $result['state'] );
 		$this->assertSame( 2, $this->queue->load( $this->ids['about'] )['counts']['moved'] );
-		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 	}
 
 	public function test_a_run_backs_off_while_another_holds_the_lock(): void {
@@ -182,16 +254,16 @@ final class ProcessorTest extends WP_UnitTestCase {
 
 	public function test_the_watchdog_restarts_a_stalled_job(): void {
 		$this->age_job( time(), time() - HOUR_IN_SECONDS );
-		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ), 'Precondition: its run died.' );
+		$this->assertFalse( $this->queue->is_scheduled(), 'Precondition: its run died.' );
 
 		$this->processor->watchdog();
 
-		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 	}
 
 	public function test_the_watchdog_leaves_a_recent_job_alone(): void {
 		$this->processor->watchdog();
-		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertFalse( $this->queue->is_scheduled() );
 	}
 
 	public function test_the_watchdog_gives_up_after_a_week(): void {
@@ -213,21 +285,44 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertNotNull( $this->queue->load( 999999 ) );
 	}
 
-	public function test_the_watchdog_is_scheduled_hourly_once_and_cleared_on_deactivation(): void {
+	public function test_the_watchdog_is_one_single_event_an_hour_ahead_and_cleared_on_deactivation(): void {
 		Processor::schedule_watchdog();
 		$first = wp_next_scheduled( Queue::WATCHDOG );
 		Processor::schedule_watchdog();
 
 		$this->assertNotFalse( $first );
 		$this->assertSame( $first, wp_next_scheduled( Queue::WATCHDOG ) );
-		$this->assertSame( 'hourly', wp_get_schedule( Queue::WATCHDOG ) );
+		$this->assertGreaterThanOrEqual( time() + HOUR_IN_SECONDS - 5, $first );
+		$this->assertFalse( wp_get_schedule( Queue::WATCHDOG ), 'A single event: with the plugin gone it runs once more and is gone.' );
 
-		$this->queue->schedule( $this->ids['about'] );
+		$this->queue->schedule();
 		Processor::deactivate();
 
 		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ) );
-		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertFalse( $this->queue->is_scheduled() );
 		$this->assertNotNull( $this->queue->load( $this->ids['about'] ), 'Jobs survive deactivation.' );
+	}
+
+	public function test_the_watchdog_checks_again_only_while_a_job_waits(): void {
+		$this->processor->watchdog();
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ), 'A job waits.' );
+
+		wp_unschedule_hook( Queue::WATCHDOG );
+		$this->queue->delete( $this->ids['about'] );
+		$this->processor->watchdog();
+
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+	}
+
+	public function test_activation_schedules_the_watchdog_only_when_a_job_waits(): void {
+		Processor::activate();
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ), 'A job from before waits.' );
+
+		wp_unschedule_hook( Queue::WATCHDOG );
+		$this->queue->delete( $this->ids['about'] );
+		Processor::activate();
+
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ) );
 	}
 
 	public function test_a_run_whose_lock_was_taken_over_stops_without_writing(): void {
@@ -245,7 +340,7 @@ final class ProcessorTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'busy', $result['state'] );
 		$this->assertSame( 0, $this->queue->load( $root )['counts']['moved'], 'The slot keeps what the new holder will read.' );
-		$this->assertFalse( $this->queue->is_scheduled( $root ) );
+		$this->assertFalse( $this->queue->is_scheduled() );
 	}
 
 	public function test_the_watchdog_leaves_a_job_whose_run_holds_the_lock(): void {

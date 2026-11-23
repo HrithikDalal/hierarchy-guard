@@ -22,7 +22,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Slots, offers and locks are option rows read and written with direct
  * queries. They are not autoloaded, and get_option() would cache values that
  * another process changes underneath, or fill the notoptions cache with one
- * entry per page.
+ * entry per page. However many roots wait, a site has one scheduled run,
+ * which works through them, so a bulk trash writes the cron option once.
  */
 final class Queue {
 
@@ -33,6 +34,14 @@ final class Queue {
 	public const OFFER_SUFFIX = '_next';
 	public const LOCK_PREFIX  = 'hierarchy_guard_lock_';
 	public const LOCK_TTL     = 300;
+
+	/**
+	 * Whether this request has the run queued in Action Scheduler, so a bulk
+	 * trash asks Action Scheduler once rather than once per parent.
+	 *
+	 * @var bool
+	 */
+	private bool $queued_in_as = false;
 
 	/**
 	 * Option name of a root's job slot.
@@ -223,22 +232,25 @@ final class Queue {
 	}
 
 	/**
-	 * Schedules a run for a root through Action Scheduler when a site has it,
-	 * else WP-Cron. A run already in progress does not count: it may be the one
-	 * about to finish.
+	 * Schedules the site's run through Action Scheduler when a site has it,
+	 * else WP-Cron, unless one is scheduled already, and the watchdog with
+	 * it. A run already in progress does not count: it may be the one about
+	 * to finish.
 	 *
-	 * @param int $root_id Root page.
 	 * @return bool Whether a run is scheduled.
 	 */
-	public function schedule( int $root_id ): bool {
-		$args = [ $root_id ];
+	public function schedule(): bool {
+		Processor::schedule_watchdog();
 
 		if ( function_exists( 'as_enqueue_async_action' ) ) {
+			if ( $this->queued_in_as ) {
+				return true;
+			}
 			$pending = function_exists( 'as_get_scheduled_actions' )
 				? as_get_scheduled_actions(
 					[
 						'hook'     => self::HOOK,
-						'args'     => $args,
+						'args'     => [],
 						'group'    => self::GROUP,
 						'status'   => 'pending',
 						'per_page' => 1,
@@ -246,33 +258,40 @@ final class Queue {
 					'ids'
 				)
 				: [];
-			if ( [] !== $pending ) {
-				return true;
-			}
-			if ( as_enqueue_async_action( self::HOOK, $args, self::GROUP ) ) {
+			if ( [] !== $pending || as_enqueue_async_action( self::HOOK, [], self::GROUP ) ) {
+				$this->queued_in_as = true;
 				return true;
 			}
 			// Action Scheduler returns 0 before it has initialized; WP-Cron takes over.
 		}
 
-		if ( false !== wp_next_scheduled( self::HOOK, $args ) ) {
+		if ( false !== wp_next_scheduled( self::HOOK ) ) {
 			return true;
 		}
-		return true === wp_schedule_single_event( time(), self::HOOK, $args );
+		return true === wp_schedule_single_event( time(), self::HOOK );
 	}
 
 	/**
-	 * Whether a run is scheduled for a root.
+	 * Whether the site's run is scheduled.
 	 *
-	 * @param int $root_id Root page.
 	 * @return bool
 	 */
-	public function is_scheduled( int $root_id ): bool {
-		$args = [ $root_id ];
-		if ( false !== wp_next_scheduled( self::HOOK, $args ) ) {
+	public function is_scheduled(): bool {
+		if ( false !== wp_next_scheduled( self::HOOK ) ) {
 			return true;
 		}
-		return function_exists( 'as_has_scheduled_action' ) && as_has_scheduled_action( self::HOOK, $args, self::GROUP );
+		return function_exists( 'as_has_scheduled_action' ) && as_has_scheduled_action( self::HOOK, [], self::GROUP );
+	}
+
+	/**
+	 * Clears the site's scheduled run.
+	 */
+	public function unschedule(): void {
+		$this->queued_in_as = false;
+		wp_clear_scheduled_hook( self::HOOK );
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( self::HOOK, [], self::GROUP );
+		}
 	}
 
 	/**

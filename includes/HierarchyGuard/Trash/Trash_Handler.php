@@ -460,7 +460,7 @@ final class Trash_Handler {
 		if ( 0 === $token ) {
 			$job['change'] = $this->summarize( $action, $job, true );
 			$this->queue->offer( $job );
-			$this->queue->schedule( $root );
+			$this->queue->schedule();
 			$this->cli( 'cleanup' === $action ? [] : self::cli_lines( $action, $job, true ) );
 			return;
 		}
@@ -492,7 +492,7 @@ final class Trash_Handler {
 
 		// Scheduled after the unlock; an offer that arrived during the inline step needs a run too.
 		if ( $running || null !== $this->queue->offered( $root ) ) {
-			$this->queue->schedule( $root );
+			$this->queue->schedule();
 		}
 		$this->cli( 'cleanup' === $action ? [] : self::cli_lines( $action, $job, $running ) );
 	}

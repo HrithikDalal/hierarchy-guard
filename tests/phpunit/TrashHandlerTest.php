@@ -70,6 +70,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 	public function tear_down(): void {
 		$this->end_core_bulk();
 		wp_unschedule_hook( Queue::HOOK );
+		wp_unschedule_hook( Queue::WATCHDOG );
 		unregister_post_type( 'hg_private' );
 		$this->set_permalink_structure( '' );
 		parent::tear_down();
@@ -392,7 +393,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		wp_trash_post( $this->ids['about'] );
 
 		$this->assertSame( 3, Subtree::count_live_children( $this->ids['about'], 'page', 10 ), 'Only the first batch ran inline.' );
-		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
 
 		$this->processor()->run( $this->ids['about'] );
@@ -422,7 +423,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 	 */
 	private function assert_finished_inline( string $message ): void {
 		$this->assertNull( $this->queue->load( $this->ids['about'] ), $message );
-		$this->assertFalse( $this->queue->is_scheduled( $this->ids['about'] ), $message );
+		$this->assertFalse( $this->queue->is_scheduled(), $message );
 		$this->assertFalse( $this->change()['roots'][ $this->ids['about'] ]['job'], $message );
 	}
 
@@ -451,7 +452,7 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 
 		$this->assertSame( 'publish', get_post_status( $this->ids['leadership'] ), 'The last subpage is left for the queue.' );
 		$this->assertSame( Operations::DEFAULT_CORE_THRESHOLD, $this->queue->load( $this->ids['about'] )['counts']['trashed'] );
-		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
 	}
 
@@ -470,8 +471,39 @@ final class TrashHandlerTest extends WP_UnitTestCase {
 		wp_trash_post( $this->ids['about'] );
 
 		$this->assertSame( 1, Subtree::count_live_children( $this->ids['about'], 'page', 10 ) );
-		$this->assertTrue( $this->queue->is_scheduled( $this->ids['about'] ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 		$this->assertTrue( $this->change()['roots'][ $this->ids['about'] ]['job'] );
+	}
+
+	public function test_a_bulk_trash_past_the_budget_queues_every_parent_with_one_event(): void {
+		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 1 );
+		$parents = [];
+		for ( $i = 1; $i <= 5; $i++ ) {
+			$parents[] = $this->page( "parent-{$i}" );
+			$this->page( "child-{$i}-a", end( $parents ) );
+			$this->page( "child-{$i}-b", end( $parents ) );
+		}
+		$writes = 0;
+		$count  = static function () use ( &$writes ): void {
+			++$writes;
+		};
+		add_action( 'update_option_cron', $count );
+
+		foreach ( $parents as $parent ) {
+			wp_trash_post( $parent );
+		}
+		remove_action( 'update_option_cron', $count );
+
+		$this->assertSame( $parents, $this->queue->roots() );
+		$this->assertCount( 1, array_filter( _get_cron_array(), static fn( array $hooks ): bool => isset( $hooks[ Queue::HOOK ] ) ) );
+		$this->assertLessThanOrEqual( 2, $writes, 'The run and its watchdog, once each.' );
+
+		$this->processor()->handle();
+
+		$this->assertSame( [], $this->queue->roots() );
+		foreach ( $parents as $parent ) {
+			$this->assertSame( 0, Subtree::count_live_children( $parent, 'page', 10 ) );
+		}
 	}
 
 	public function test_a_bulk_trash_shares_one_budget_and_one_summary(): void {

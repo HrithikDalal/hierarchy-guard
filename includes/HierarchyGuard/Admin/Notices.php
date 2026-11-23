@@ -387,6 +387,7 @@ final class Notices {
 			if ( null === $job || $job['change'] !== $change['id'] ) {
 				continue;
 			}
+			$this->keep_going();
 			$counts = (array) $job['counts'];
 			$done   = (int) $counts['moved'] + (int) $counts['trashed'] + (int) $counts['restored'] + (int) $counts['kept'] + (int) $counts['left'];
 			$title  = Overview::title( (int) $root['root'] );
@@ -420,6 +421,16 @@ final class Notices {
 			$out[] = sprintf( _n( 'The subpages of %s more page are still being worked on in the background.', 'The subpages of %s more pages are still being worked on in the background.', $rest, 'hierarchy-guard' ), number_format_i18n( $rest ) );
 		}
 		return $out;
+	}
+
+	/**
+	 * A job is waiting: schedules the run when neither it nor the watchdog
+	 * is scheduled, as when the cron option lost both.
+	 */
+	private function keep_going(): void {
+		if ( ! $this->queue->is_scheduled() && false === wp_next_scheduled( Queue::WATCHDOG ) ) {
+			$this->queue->schedule();
+		}
 	}
 
 	/**

@@ -707,6 +707,33 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertStringStartsWith( '2 page moved to the Trash. 3 subpages moved up one level.', sprintf( $messages['page']['trashed'], '2' ) );
 	}
 
+	public function test_a_waiting_job_shown_with_neither_its_run_nor_the_watchdog_scheduled_schedules_them(): void {
+		$queue = new Queue();
+		$id    = $this->change( 'trash', [ $this->about( [ 'job' => true ] ) ] )['id'];
+		$queue->save(
+			[
+				'root'   => $this->ids['about'],
+				'change' => $id,
+				'total'  => 40,
+				'counts' => array_merge( Change_Log::empty_counts(), [ 'moved' => 25 ] ),
+			]
+		);
+		wp_unschedule_hook( Queue::HOOK );
+		wp_unschedule_hook( Queue::WATCHDOG );
+
+		$this->notice->progress_sentences( 'page' );
+
+		$this->assertTrue( $queue->is_scheduled() );
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+
+		wp_unschedule_hook( Queue::HOOK );
+		$this->notice->progress_sentences( 'page' );
+		$this->assertFalse( $queue->is_scheduled(), 'With the watchdog still scheduled, the job is not lost: nothing more is scheduled.' );
+
+		$queue->delete( $this->ids['about'] );
+		wp_unschedule_hook( Queue::WATCHDOG );
+	}
+
 	public function test_progress_is_shown_while_the_batch_runs_and_not_on_the_landing_load(): void {
 		$queue = new Queue();
 		$id    = $this->change( 'trash', [ $this->about( [ 'job' => true ] ) ] )['id'];

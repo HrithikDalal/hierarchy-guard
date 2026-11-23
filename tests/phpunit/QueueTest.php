@@ -26,8 +26,29 @@ final class QueueTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		Action_Scheduler_Stub::reset();
 		wp_unschedule_hook( Queue::HOOK );
+		wp_unschedule_hook( Queue::WATCHDOG );
 		parent::tear_down();
+	}
+
+	public function test_a_bulk_trash_asks_action_scheduler_once_until_the_run_is_cleared(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$queue                     = new Queue();
+
+		$this->assertTrue( $queue->schedule() );
+		$this->assertTrue( $queue->schedule() );
+		$this->assertTrue( $queue->schedule() );
+
+		$this->assertSame( 1, Action_Scheduler_Stub::$asked );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued );
+
+		$queue->unschedule();
+		$this->assertSame( [], Action_Scheduler_Stub::$queued );
+		$queue->schedule();
+		$this->assertSame( 2, Action_Scheduler_Stub::$asked );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued );
 	}
 
 	public function test_a_saved_job_round_trips_without_autoloading(): void {
@@ -99,14 +120,22 @@ final class QueueTest extends WP_UnitTestCase {
 	}
 
 	public function test_schedule_uses_wp_cron_without_action_scheduler(): void {
-		$this->assertFalse( function_exists( 'as_enqueue_async_action' ), 'Precondition: Action Scheduler is not loaded in the test site.' );
-		$this->assertFalse( $this->queue->is_scheduled( 10 ) );
+		$this->assertFalse( function_exists( 'as_enqueue_async_action' ) && Action_Scheduler_Stub::$on, 'Precondition: no Action Scheduler answers in the test site.' );
+		$this->assertFalse( $this->queue->is_scheduled() );
 
-		$this->assertTrue( $this->queue->schedule( 10 ) );
-		$this->assertTrue( $this->queue->schedule( 10 ), 'An existing event counts.' );
+		$this->assertTrue( $this->queue->schedule() );
+		$this->assertTrue( $this->queue->schedule(), 'An existing event counts.' );
 
-		$this->assertTrue( $this->queue->is_scheduled( 10 ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 		$this->assertCount( 1, array_filter( _get_cron_array(), static fn( array $hooks ): bool => isset( $hooks[ Queue::HOOK ] ) ) );
+	}
+
+	public function test_a_scheduled_run_brings_the_watchdog_with_it(): void {
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+
+		$this->queue->schedule();
+
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
 	}
 
 	public function test_extend_renews_only_the_owner_s_lock(): void {

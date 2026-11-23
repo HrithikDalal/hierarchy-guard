@@ -24,7 +24,7 @@ By default, trashing a page moves its subpages up one level, so they don't end u
 
 ## Background jobs
 
-One request moves at most 200 subpages and trashes or restores at most 25 through core (filters `hierarchy_guard_batch_threshold` and `hierarchy_guard_core_call_threshold`). Anything beyond that runs in background batches through WP-Cron, or Action Scheduler when it is installed, and until a job finishes some subpages are still under the trashed page. An hourly check restarts a job whose run stopped. On hosts where cron is disabled or only runs on traffic, finish queued jobs with:
+One request moves at most 200 subpages and trashes or restores at most 25 through core (filters `hierarchy_guard_batch_threshold` and `hierarchy_guard_core_call_threshold`). Anything beyond that runs in background batches through WP-Cron, or Action Scheduler when it is installed: one scheduled run per site works through every waiting job, and until a job finishes some subpages are still under the trashed page. While jobs wait, an hourly check restarts a job whose run stopped; with no job, nothing is scheduled. On hosts where cron is disabled or only runs on traffic, finish queued jobs with:
 
 ```bash
 wp hierarchy-guard process-jobs
