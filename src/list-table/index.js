@@ -1,13 +1,12 @@
 /**
  * The list screen: the trash dialog, the Quick Edit and Bulk Edit warnings, the redirects
- * modal behind the URLs notice, the filter subtitle, the nudge and the Tree
- * view.
+ * modal behind the URLs notice, the filter subtitle and the nudge. The Tree
+ * view has a bundle of its own.
  */
 import domReady from '@wordpress/dom-ready';
 import { dismissNudge } from '../common/api';
 import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
-import bindTree from '../tree';
 import bindBulkEdit from './bulk-edit';
 import bindQuickEdit from './quick-edit';
 import TrashDialog, { MAX_PREVIEW } from './trash-dialog';
@@ -185,5 +184,4 @@ domReady( () => {
 	bindNudge();
 	bindQuickEdit();
 	bindBulkEdit();
-	bindTree();
 } );

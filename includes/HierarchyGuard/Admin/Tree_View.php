@@ -36,6 +36,7 @@ final class Tree_View {
 	public const OPEN_VAR          = 'hierarchy_guard_open';
 	public const CHILDREN_PAGE_VAR = 'hierarchy_guard_children_page';
 	public const PER_PAGE          = 50;
+	public const SCRIPT            = 'hierarchy_guard_tree_script';
 
 	/**
 	 * What the screen knows about each tree row, by post ID: its level, its
@@ -368,6 +369,12 @@ final class Tree_View {
 		}
 		/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
 		do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
+		/**
+		 * Fires when the Tree view, or a search in it, needs the tree's script.
+		 *
+		 * @internal
+		 */
+		do_action( self::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_tree_script.
 
 		printf( '<input type="hidden" name="%1$s" value="%2$s">', esc_attr( self::QUERY_VAR ), esc_attr( self::VIEW ) );
 		if ( 'search' === $mode ) {

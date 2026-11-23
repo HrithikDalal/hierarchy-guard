@@ -1,7 +1,7 @@
 /**
- * The Tree view's script, part of the list-table bundle: the tree grid on
- * core's table, "Collapse all", and "Back to the tree" beside a search's
- * heading.
+ * The Tree view's script: the tree grid on core's table, "Collapse all", and
+ * "Back to the tree" beside a search's heading. A trash from a loaded row goes
+ * through the list screen's own trash dialog.
  */
 import { fetchHierarchy } from '../common/api';
 import config from '../common/config';

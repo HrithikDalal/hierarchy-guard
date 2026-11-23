@@ -58,6 +58,13 @@ final class Assets {
 	private bool $wanted = false;
 
 	/**
+	 * Whether the Tree view asked for the tree's script.
+	 *
+	 * @var bool
+	 */
+	private bool $tree = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Providers $providers Redirect plugin detection.
@@ -75,6 +82,7 @@ final class Assets {
 		add_action( 'enqueue_block_editor_assets', [ $this, 'enqueue_editor' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
 		add_action( List_Table::SCRIPT, [ $this, 'want_list_table' ] );
+		add_action( Tree_View::SCRIPT, [ $this, 'want_tree' ] );
 		add_action( 'admin_footer', [ $this, 'enqueue_list_table' ] );
 	}
 
@@ -86,7 +94,15 @@ final class Assets {
 	}
 
 	/**
-	 * Enqueues the list-screen script in the footer, if the screen asked for it.
+	 * Notes that the Tree view loads, which needs the tree's script too.
+	 */
+	public function want_tree(): void {
+		$this->tree = true;
+	}
+
+	/**
+	 * Enqueues the list-screen script in the footer, if the screen asked for
+	 * it, and in the Tree view the tree's after it, sharing its settings.
 	 * Footer scripts and late styles enqueued here still print.
 	 */
 	public function enqueue_list_table(): void {
@@ -96,6 +112,9 @@ final class Assets {
 		}
 		// Quick Edit's script defines the object the list-table script wraps.
 		$this->enqueue( 'list-table', [ 'jquery', 'inline-edit-post' ] );
+		if ( $this->tree && $this->enqueue( 'tree', [ self::HANDLE_PREFIX . 'list-table' ], false ) ) {
+			wp_set_script_translations( self::HANDLE_PREFIX . 'tree', 'hierarchy-guard' );
+		}
 	}
 
 	/**
