@@ -246,6 +246,43 @@ final class Markers {
 	}
 
 	/**
+	 * How many marker rows point at each of several roots, each count
+	 * stopping at a cap: one statement of capped seeks on the meta_key index,
+	 * for a screen of pages in the Trash.
+	 *
+	 * @param int[] $root_ids Root pages.
+	 * @param int   $cap      Stop counting each at this number.
+	 * @return array<int,int> Count by root; a root with no rows is 0.
+	 */
+	public static function counts( array $root_ids, int $cap ): array {
+		global $wpdb;
+
+		$root_ids = array_values( array_unique( array_filter( array_map( 'intval', $root_ids ) ) ) );
+		$counts   = array_fill_keys( $root_ids, 0 );
+		$parts    = [];
+		foreach ( $root_ids as $root_id ) {
+			$parts[] = $wpdb->prepare(
+				"( SELECT %d AS root_id, COUNT(*) AS markers FROM ( SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key IN ( %s, %s ) LIMIT %d ) AS m%d )",
+				$root_id,
+				self::moved_key( $root_id ),
+				self::trashed_key( $root_id ),
+				max( 1, $cap ),
+				$root_id
+			);
+		}
+		if ( [] === $parts ) {
+			return $counts;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Every part was prepared above; each is a seek on the meta_key index bounded by LIMIT.
+		$rows = $wpdb->get_results( implode( ' UNION ALL ', $parts ), ARRAY_A );
+		foreach ( (array) $rows as $row ) {
+			$counts[ (int) $row['root_id'] ] = (int) $row['markers'];
+		}
+		return $counts;
+	}
+
+	/**
 	 * Whether a post was trashed together with some root page. Reads the meta
 	 * cache, which core has already loaded whenever a post is being untrashed.
 	 *

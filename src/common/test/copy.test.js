@@ -4,6 +4,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import config from '../config';
 import {
+	bulkEditWarning,
 	bulkSentence,
 	classicConfirm,
 	changedSentence,
@@ -261,6 +262,15 @@ describe( 'warnings and outcomes', () => {
 		);
 		expect( quickEditWarning( 5, false ) ).toBe(
 			'Saving changes this page’s URL and the URLs of 5 subpages.'
+		);
+	} );
+
+	it( 'warns in Bulk Edit with the same next step', () => {
+		expect( bulkEditWarning( 2, false ) ).toBe(
+			'Saving will change the URLs of the selected pages and of the subpages under 2 of them. You’ll get the redirects to add after saving.'
+		);
+		expect( bulkEditWarning( 1, true ) ).toBe(
+			'Saving will change the URLs of the selected pages and of the subpages under 1 of them. The old URLs will redirect to the new ones.'
 		);
 	} );
 

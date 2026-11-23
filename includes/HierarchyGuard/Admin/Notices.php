@@ -603,6 +603,12 @@ final class Notices {
 			$out[] = sprintf( _n( '%s subpage couldn’t get its old URL back.', '%s subpages couldn’t get their old URLs back.', $counts['renamed'], 'hierarchy-guard' ), number_format_i18n( $counts['renamed'] ) );
 		}
 
+		// Core's Restore, unlike Undo, brings a page back as a draft: its subpages' URLs work, its own doesn't until it is published.
+		if ( null !== $single && $counts['moved'] + $counts['restored'] > 0 && 'draft' === get_post_status( (int) $single['root'] ) ) {
+			/* translators: "It" is the page just restored from the Trash. */
+			$out[] = __( 'It’s a draft now, so visitors can’t see it until you publish it.', 'hierarchy-guard' );
+		}
+
 		return $out;
 	}
 

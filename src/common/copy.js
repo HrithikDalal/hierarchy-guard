@@ -474,19 +474,22 @@ export function previewError( policy ) {
  * @return {string} Sentence.
  */
 export function saveWarning( count, capped, serving ) {
-	return (
-		quickEditWarning( count, capped ) +
-		' ' +
-		( serving
-			? __(
-					'The old URLs will redirect to the new ones.',
-					'hierarchy-guard'
-				)
-			: __(
-					'You’ll get the redirects to add after saving.',
-					'hierarchy-guard'
-				) )
-	);
+	return quickEditWarning( count, capped ) + ' ' + afterSave( serving );
+}
+
+/**
+ * What happens to the old URLs once a save that changes them is made.
+ *
+ * @param {boolean} serving Whether built-in redirects are on.
+ * @return {string} Sentence.
+ */
+export function afterSave( serving ) {
+	return serving
+		? __( 'The old URLs will redirect to the new ones.', 'hierarchy-guard' )
+		: __(
+				'You’ll get the redirects to add after saving.',
+				'hierarchy-guard'
+			);
 }
 
 /**
@@ -523,6 +526,28 @@ export function quickEditWarning( count, capped ) {
 		),
 		formatCount( count, capped )
 	);
+}
+
+/**
+ * The Bulk Edit warning, when a new parent is chosen for selected pages of
+ * which some have subpages.
+ *
+ * @param {number}  pages   Selected published pages that have subpages.
+ * @param {boolean} serving Whether built-in redirects are on.
+ * @return {string} Two sentences.
+ */
+export function bulkEditWarning( pages, serving ) {
+	const change = sprintf(
+		/* translators: %s: number of selected pages that have subpages. */
+		_n(
+			'Saving will change the URLs of the selected pages and of the subpages under %s of them.',
+			'Saving will change the URLs of the selected pages and of the subpages under %s of them.',
+			pages,
+			'hierarchy-guard'
+		),
+		formatCount( pages )
+	);
+	return change + ' ' + afterSave( serving );
 }
 
 /**

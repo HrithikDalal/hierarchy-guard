@@ -1,5 +1,5 @@
 /**
- * The list screen: the trash dialog, the Quick Edit warning, the redirects
+ * The list screen: the trash dialog, the Quick Edit and Bulk Edit warnings, the redirects
  * modal behind the URLs notice, the filter subtitle, the nudge and the Tree
  * view.
  */
@@ -8,6 +8,7 @@ import { dismissNudge } from '../common/api';
 import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
 import bindTree from '../tree';
+import bindBulkEdit from './bulk-edit';
 import bindQuickEdit from './quick-edit';
 import TrashDialog, { MAX_PREVIEW } from './trash-dialog';
 import { rowTitle } from './trash-choice';
@@ -183,5 +184,6 @@ domReady( () => {
 	bindViewRedirects();
 	bindNudge();
 	bindQuickEdit();
+	bindBulkEdit();
 	bindTree();
 } );

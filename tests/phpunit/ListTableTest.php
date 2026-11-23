@@ -89,6 +89,44 @@ final class ListTableTest extends WP_UnitTestCase {
 		$GLOBALS['wp_query'] = $query;
 	}
 
+	public function test_the_trash_view_says_how_many_subpages_a_restore_brings_back(): void {
+		wp_trash_post( $this->ids['about'] );
+		$this->screen_rows( [ $this->ids['about'] ], 'id=>parent' );
+		$GLOBALS['wp_query']->set( 'post_status', 'trash' );
+
+		$cell = $this->cell( $this->ids['about'] );
+
+		$this->assertStringContainsString( 'Restoring it brings back 2 subpages.', $cell );
+		$this->assertStringNotContainsString( 'Top level, no subpages', $cell );
+	}
+
+	public function test_the_trash_view_reads_the_screen_s_markers_in_one_query(): void {
+		wp_trash_post( $this->ids['about'] );
+		$other = $this->page( 'other' );
+		$this->page( 'other-child', $other );
+		wp_trash_post( $other );
+		$third = $this->page( 'third' );
+		$this->page( 'third-child', $third );
+		wp_trash_post( $third );
+		$this->screen_rows( [ $this->ids['about'], $other, $third ], 'id=>parent' );
+		$GLOBALS['wp_query']->set( 'post_status', 'trash' );
+		$reads = 0;
+		$count = static function ( string $query ) use ( &$reads ): string {
+			if ( str_contains( $query, '_hierarchy_guard_moved_' ) && str_starts_with( ltrim( $query ), '(' ) ) {
+				++$reads;
+			}
+			return $query;
+		};
+		add_filter( 'query', $count );
+
+		$this->cell( $this->ids['about'] );
+		$this->assertStringContainsString( 'Restoring it brings back 1 subpage.', $this->cell( $other ) );
+		$this->assertStringContainsString( 'Restoring it brings back 1 subpage.', $this->cell( $third ) );
+		remove_filter( 'query', $count );
+
+		$this->assertSame( 1, $reads, 'One query for the three trashed rows of the screen.' );
+	}
+
 	public function test_the_column_comes_after_the_title(): void {
 		$this->assertSame(
 			[ 'cb', 'title', List_Table::COLUMN, 'author', 'date' ],

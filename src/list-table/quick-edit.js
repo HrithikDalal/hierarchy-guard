@@ -7,9 +7,9 @@ import { __ } from '@wordpress/i18n';
 import { fetchHierarchy, fetchPairs } from '../common/api';
 import { changeNotice, newChange } from '../common/change-notice';
 import config from '../common/config';
-import { quickEditWarning } from '../common/copy';
 import { open } from '../common/mount';
 import RedirectsModal from '../common/redirects-modal';
+import { speakAfterSave, warningText } from './quick-edit-words';
 import { retireUrlsNotices } from './urls-notices';
 
 /**
@@ -52,8 +52,9 @@ function siteRedirects() {
  * @param {{status: string, sentence: string, view: string, setup: boolean}} notice    What to say, the button's label (none when empty) and whether to offer setting up redirects.
  * @param {Object|null}                                                      source    The change the button opens, or null.
  * @param {Object}                                                           redirects The page's redirects, for the modal.
+ * @param {number}                                                           postId    The row Quick Edit saved.
  */
-function printNotice( notice, source, redirects ) {
+function printNotice( notice, source, redirects, postId ) {
 	const end = window.document.querySelector( '.wp-header-end' );
 	if ( ! end ) {
 		return;
@@ -95,16 +96,17 @@ function printNotice( notice, source, redirects ) {
 	retireUrlsNotices( window.document );
 	end.parentNode.insertBefore( box, end.nextSibling );
 	makeDismissible();
-	speak( notice.sentence, 'polite' );
+	speakAfterSave( postId, notice.sentence );
 }
 
 /**
  * Says the save changed URLs but their redirects could not be loaded.
  *
+ * @param {number}      postId    The row Quick Edit saved.
  * @param {Object|null} source    The change, or null when it is not known.
  * @param {Object}      redirects The page's redirects, or the site's when the page's failed to load.
  */
-function printFailure( source, redirects = siteRedirects() ) {
+function printFailure( postId, source, redirects = siteRedirects() ) {
 	printNotice(
 		{
 			status: 'warning',
@@ -120,7 +122,8 @@ function printFailure( source, redirects = siteRedirects() ) {
 				!! config.settingsUrl,
 		},
 		source,
-		redirects
+		redirects,
+		postId
 	);
 }
 
@@ -128,19 +131,20 @@ function printFailure( source, redirects = siteRedirects() ) {
  * Prints and speaks a notice under the heading with the redirects of the
  * change a save recorded.
  *
+ * @param {number} postId    The row Quick Edit saved.
  * @param {string} change    The change.
  * @param {Object} redirects The page's redirects, from its hierarchy.
  */
-function announce( change, redirects ) {
+function announce( postId, change, redirects ) {
 	const source = { change };
 	fetchPairs( source, 1, 1 )
 		.then( ( pairs ) => {
 			const notice = changeNotice( pairs, redirects );
 			if ( notice ) {
-				printNotice( notice, source, redirects );
+				printNotice( notice, source, redirects, postId );
 			}
 		} )
-		.catch( () => printFailure( source, redirects ) );
+		.catch( () => printFailure( postId, source, redirects ) );
 }
 
 /**
@@ -211,10 +215,7 @@ function attach( postId ) {
 				: field.removeAttribute( 'aria-describedby' )
 		);
 		if ( show ) {
-			box.firstChild.textContent = quickEditWarning(
-				descendants.count,
-				descendants.capped
-			);
+			box.firstChild.textContent = warningText( descendants );
 			if ( ! spoken ) {
 				spoken = true;
 				speak( box.firstChild.textContent, 'polite' );
@@ -270,9 +271,13 @@ export default function bindQuickEdit() {
 			.then( ( data ) => {
 				const change = newChange( before.latest, data.latest_change );
 				if ( change ) {
-					announce( change, data.redirects || siteRedirects() );
+					announce(
+						postId,
+						change,
+						data.redirects || siteRedirects()
+					);
 				}
 			} )
-			.catch( () => printFailure( null ) );
+			.catch( () => printFailure( postId, null ) );
 	} );
 }

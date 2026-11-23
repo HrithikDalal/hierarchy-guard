@@ -11,6 +11,7 @@ namespace HierarchyGuard\Admin;
 
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Subtree;
+use HierarchyGuard\Trash\Markers;
 use WP_Post;
 use WP_Query;
 
@@ -44,6 +45,14 @@ final class List_Table {
 	 * @var bool
 	 */
 	private bool $counted = false;
+
+	/**
+	 * In the Trash view, how many subpages a restore of each row brings back,
+	 * from the trash's markers, read with the screen's counts.
+	 *
+	 * @var array<int,int>
+	 */
+	private array $restorable = [];
 
 	/**
 	 * Whether the list-table script was asked for.
@@ -194,6 +203,11 @@ final class List_Table {
 			/* translators: 1: number of subpages, such as 3 or 1,000+, 2: page title. */
 			$aria    = sprintf( _n( 'View the %1$s subpage of “%2$s”', 'View the %1$s subpages of “%2$s”', min( $count, $cap ), 'hierarchy-guard' ), $shown, _draft_or_post_title( $post ) );
 			$parts[] = sprintf( '<a href="%1$s" aria-label="%2$s">%3$s</a>', esc_url( self::filter_url( $type, (int) $post->ID ) ), esc_attr( $aria ), esc_html( $label ) );
+		}
+		$back = 'trash' === $post->post_status ? ( $this->restorable[ (int) $post->ID ] ?? 0 ) : 0;
+		if ( $back > 0 ) {
+			/* translators: %s: number of subpages, such as 3 or 1,000+; "it" is the trashed page of this row. */
+			$parts[] = esc_html( sprintf( _n( 'Restoring it brings back %s subpage.', 'Restoring it brings back %s subpages.', min( $back, $cap ), 'hierarchy-guard' ), Subtree::format_count( min( $back, $cap ), $back > $cap ) ) );
 		}
 
 		if ( 'tree' === $mode ) {
@@ -506,6 +520,10 @@ final class List_Table {
 				$parents = array_values( array_unique( array_filter( $above ) ) );
 				_prime_post_caches( $parents, false, false );
 			}
+		}
+
+		if ( 'trash' === (string) $wp_query->get( 'post_status' ) ) {
+			$this->restorable = Markers::counts( $ids, Subtree::count_cap() + 1 );
 		}
 
 		return Subtree::child_counts( $ids, $post_type, Subtree::count_cap() + 1 );

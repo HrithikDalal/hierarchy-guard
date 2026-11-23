@@ -382,14 +382,26 @@ final class Settings_Page {
 			Settings::POLICY_KEEP           => __( 'Leave subpages where they are', 'hierarchy-guard' ),
 		];
 
+		// The trash dialog's own descriptions.
+		$descriptions = [
+			/* translators: "Their" are the subpages of the page being trashed. */
+			Settings::POLICY_REPARENT       => __( 'Their URLs change.', 'hierarchy-guard' ),
+			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
+			Settings::POLICY_TRASH_CHILDREN => __( 'Restoring their parent restores them with their original status.', 'hierarchy-guard' ),
+			/* translators: "Their" are the subpages of the page being trashed. */
+			Settings::POLICY_KEEP           => __( 'Their URLs will contain “__trashed” until you move them.', 'hierarchy-guard' ),
+		];
+
 		echo '<fieldset id="hierarchy-guard-trash-policy"><legend class="screen-reader-text"><span>' . esc_html__( 'Trashing a page with subpages', 'hierarchy-guard' ) . '</span></legend>';
+		// Each description sits under its own label's text, with space after it, so it reads as that option's.
 		foreach ( $options as $value => $label ) {
 			printf(
-				'<label><input type="radio" name="%1$s[trash_policy]" value="%2$s" %3$s> %4$s</label><br>',
+				'<div style="margin-bottom:12px"><label><input type="radio" name="%1$s[trash_policy]" value="%2$s" %3$s aria-describedby="hierarchy-guard-policy-%2$s"> %4$s</label><p class="description" id="hierarchy-guard-policy-%2$s" style="margin-top:0;margin-inline-start:24px">%5$s</p></div>',
 				esc_attr( Settings::OPTION ),
 				esc_attr( $value ),
 				checked( $current, $value, false ),
-				esc_html( $label )
+				esc_html( $label ),
+				esc_html( $descriptions[ $value ] )
 			);
 		}
 
@@ -420,6 +432,8 @@ final class Settings_Page {
 			$help = sprintf( __( '%s is active and can handle these.', 'hierarchy-guard' ), $name );
 		} elseif ( null !== $provider ) {
 			$help = __( 'A redirect plugin is active and can handle these.', 'hierarchy-guard' );
+		} elseif ( Settings::serve_redirects() ) {
+			$help = __( 'No redirect plugin was found.', 'hierarchy-guard' );
 		} else {
 			$help = __( 'No redirect plugin was found.', 'hierarchy-guard' ) . ' ' . __( 'Turn this on so old URLs reach their new pages.', 'hierarchy-guard' );
 		}

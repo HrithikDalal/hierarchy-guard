@@ -239,6 +239,40 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'The Trash is turned off', $html, 'This test site keeps its Trash.' );
 	}
 
+	public function test_each_trash_policy_says_what_it_does_to_the_subpages(): void {
+		ob_start();
+		$this->page->render_trash_policy();
+		$html = (string) ob_get_clean();
+
+		foreach (
+			[
+				Settings::POLICY_REPARENT       => 'Their URLs change.',
+				Settings::POLICY_TRASH_CHILDREN => 'Restoring their parent restores them with their original status.',
+				Settings::POLICY_KEEP           => 'Their URLs will contain “__trashed” until you move them.',
+			] as $policy => $description
+		) {
+			$this->assertStringContainsString( 'value="' . $policy . '"', $html );
+			$this->assertMatchesRegularExpression( '/value="' . $policy . '"[^>]*aria-describedby="hierarchy-guard-policy-' . $policy . '"/', $html );
+			// Each description sits with its own option, under the label's text.
+			$this->assertMatchesRegularExpression( '#<div style="margin-bottom:12px"><label><input [^>]*value="' . $policy . '"[^>]*>[^<]*</label><p class="description" id="hierarchy-guard-policy-' . $policy . '" style="margin-top:0;margin-inline-start:24px">' . preg_quote( esc_html( $description ), '#' ) . '</p></div>#', $html );
+		}
+		$this->assertMatchesRegularExpression( '#</div><p class="description">[^<]+</p></fieldset>$#', $html, 'The help for the whole field comes after the last option\'s space.' );
+	}
+
+	public function test_the_redirects_help_asks_to_turn_them_on_only_while_they_are_off(): void {
+		ob_start();
+		$this->page->render_serve_redirects();
+		$off = (string) ob_get_clean();
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		ob_start();
+		$this->page->render_serve_redirects();
+		$on = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'Turn this on so old URLs reach their new pages.', $off );
+		$this->assertStringNotContainsString( 'Turn this on', $on );
+		$this->assertStringContainsString( 'No redirect plugin was found. URL changes are recorded either way.', $on );
+	}
+
 	public function test_a_provider_without_a_name_gets_a_generic_sentence(): void {
 		$filter = static fn(): array => [
 			'custom' => [

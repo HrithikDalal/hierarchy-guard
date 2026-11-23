@@ -571,6 +571,24 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertSame( [ '1 subpage moved back under its parent.', '2 subpages were restored too.' ], Notices::sentences( $change ) );
 	}
 
+	public function test_a_restore_that_leaves_the_parent_a_draft_says_visitors_can_t_see_it_until_it_is_published(): void {
+		$restored = $this->change( 'restore', [ $this->about( [ 'counts' => [ 'moved' => 2 ] ] ) ] );
+		$this->assertSame( [ '2 subpages moved back under “About”.' ], Notices::sentences( $restored ), 'Undo brings it back published.' );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['about'],
+				'post_status' => 'draft',
+			]
+		);
+
+		$this->assertSame(
+			[ '2 subpages moved back under “About”.', 'It’s a draft now, so visitors can’t see it until you publish it.' ],
+			Notices::sentences( $restored ),
+			'Core’s Restore brings it back as a draft.'
+		);
+	}
+
 	public function test_the_fallback_sentence_agrees_with_the_cap(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
 
