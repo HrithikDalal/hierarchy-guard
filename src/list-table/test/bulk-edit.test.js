@@ -11,9 +11,10 @@ const { default: bindBulkEdit, updateBulkWarning } =
 	await import( '../bulk-edit' );
 
 /**
- * Core's list rows, each with its Hierarchy cell, and its Bulk Edit form.
+ * Core's list rows, each with its inline data (its current parent) and its
+ * Hierarchy cell, and its Bulk Edit form.
  *
- * @param {Array<{id: number, children: number, status: string, checked: boolean}>} rows Rows.
+ * @param {Array<{id: number, children: number, status: string, checked: boolean, parent: number}>} rows Rows.
  */
 function render( rows ) {
 	window.document.body.innerHTML = `
@@ -32,7 +33,7 @@ function render( rows ) {
 			${ rows
 				.map(
 					( row ) =>
-						`<tr id="post-${ row.id }"><th><input type="checkbox" name="post[]" value="${ row.id }"${ row.checked ? ' checked' : '' }></th><td><span class="hierarchy-guard-cell" data-id="${ row.id }" data-children="${ row.children }" data-status="${ row.status }"></span></td></tr>`
+						`<tr id="post-${ row.id }"><th><input type="checkbox" name="post[]" value="${ row.id }"${ row.checked ? ' checked' : '' }></th><td><div class="hidden" id="inline_${ row.id }"><div class="post_parent">${ row.parent }</div></div><span class="hierarchy-guard-cell" data-id="${ row.id }" data-children="${ row.children }" data-status="${ row.status }"></span></td></tr>`
 				)
 				.join( '' ) }
 		</tbody></table>`;
@@ -54,11 +55,35 @@ describe( 'the Bulk Edit warning', () => {
 	beforeEach( () => {
 		speak.mockClear();
 		render( [
-			{ id: 1, children: 3, status: 'publish', checked: true },
-			{ id: 2, children: 0, status: 'publish', checked: true },
-			{ id: 3, children: 5, status: 'draft', checked: true },
-			{ id: 4, children: 2, status: 'publish', checked: false },
-			{ id: 5, children: 1, status: 'publish', checked: true },
+			{
+				id: 1,
+				children: 3,
+				status: 'publish',
+				checked: true,
+				parent: 12,
+			},
+			{
+				id: 2,
+				children: 0,
+				status: 'publish',
+				checked: true,
+				parent: 12,
+			},
+			{ id: 3, children: 5, status: 'draft', checked: true, parent: 12 },
+			{
+				id: 4,
+				children: 2,
+				status: 'publish',
+				checked: false,
+				parent: 12,
+			},
+			{
+				id: 5,
+				children: 1,
+				status: 'publish',
+				checked: true,
+				parent: 12,
+			},
 		] );
 	} );
 
@@ -95,6 +120,32 @@ describe( 'the Bulk Edit warning', () => {
 			} );
 		choose( '0' );
 		expect( box().hidden ).toBe( true );
+	} );
+
+	it( 'says nothing when every selected page already has the chosen parent', () => {
+		render( [
+			{ id: 1, children: 3, status: 'publish', checked: true, parent: 7 },
+			{ id: 5, children: 1, status: 'publish', checked: true, parent: 7 },
+		] );
+
+		choose( '7' );
+
+		expect( box() ).toBeNull();
+		expect( speak ).not.toHaveBeenCalled();
+	} );
+
+	it( 'counts only the selected pages whose parent changes', () => {
+		render( [
+			{ id: 1, children: 3, status: 'publish', checked: true, parent: 0 },
+			{ id: 5, children: 1, status: 'publish', checked: true, parent: 7 },
+			{ id: 6, children: 4, status: 'publish', checked: true, parent: 7 },
+		] );
+
+		choose( '0' );
+		expect( box().textContent ).toContain( 'under 2 of them' );
+
+		choose( '7' );
+		expect( box().textContent ).toContain( 'under 1 of them' );
 	} );
 
 	it( 'counts again when core removes a page from the selection with its × button', async () => {

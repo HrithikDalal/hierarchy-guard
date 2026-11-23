@@ -9,23 +9,29 @@ import { bulkEditWarning } from '../common/copy';
 const BOX = 'hierarchy-guard-bulk-edit';
 
 /**
- * How many selected rows are published pages with subpages, from their
- * Hierarchy cells.
+ * How many selected rows are published pages with subpages that the chosen
+ * parent moves, from their Hierarchy cells and core's inline data, which
+ * holds each row's current parent.
  *
- * @param {Document} doc The list screen.
+ * @param {Document} doc    The list screen.
+ * @param {string}   chosen The parent chosen in the form.
  * @return {number} Count.
  */
-function parentsSelected( doc ) {
+function parentsSelected( doc, chosen ) {
 	let count = 0;
 	doc.querySelectorAll( '#the-list input[name="post[]"]:checked' ).forEach(
 		( box ) => {
 			const cell = doc.querySelector(
 				`#post-${ box.value } .hierarchy-guard-cell`
 			);
+			const current = doc.querySelector(
+				`#inline_${ box.value } .post_parent`
+			);
 			if (
 				cell &&
 				Number( cell.dataset.children || 0 ) > 0 &&
-				'publish' === cell.dataset.status
+				'publish' === cell.dataset.status &&
+				! ( current && current.textContent.trim() === chosen )
 			) {
 				count++;
 			}
@@ -47,7 +53,8 @@ export function updateBulkWarning( doc = window.document ) {
 	if ( ! parent || ! bar ) {
 		return;
 	}
-	const pages = '-1' !== parent.value ? parentsSelected( doc ) : 0;
+	const pages =
+		'-1' !== parent.value ? parentsSelected( doc, parent.value ) : 0;
 	let box = doc.getElementById( BOX );
 	if ( ! pages ) {
 		if ( box ) {
