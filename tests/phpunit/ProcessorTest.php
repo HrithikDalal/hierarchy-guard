@@ -170,6 +170,59 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
 	}
 
+	/**
+	 * Queues a trashed top-level page with subpages behind About.
+	 *
+	 * @param string $slug     Slug.
+	 * @param int    $children Subpages.
+	 * @return int Page ID.
+	 */
+	private function queue_behind( string $slug, int $children ): int {
+		$root = $this->page( $slug );
+		for ( $i = 1; $i <= $children; $i++ ) {
+			$this->page( "{$slug}-{$i}", $root );
+		}
+		$this->trash_raw( $root );
+		$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, $root, 'page', 0, [ 'to' => 0 ] ) );
+		return $root;
+	}
+
+	/**
+	 * Makes each step take longer than a second, so that with
+	 * max_execution_time at 2 a run's one-second budget ends after one step.
+	 */
+	private function slow_steps(): void {
+		set_time_limit( 2 );
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function (): void {
+				usleep( 1100000 );
+			}
+		);
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_each_run_of_a_long_lived_action_scheduler_process_queues_its_successor(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$this->queue_behind( 'other', 1 );
+		$this->slow_steps();
+		$this->assertSame( 1, Processor::time_limit(), 'Precondition: a one-second run.' );
+
+		$this->processor->handle();
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'The first run stopped early and queued its successor.' );
+
+		// Action Scheduler runs that successor in the same process: it is no longer pending.
+		Action_Scheduler_Stub::$queued = [];
+		$this->processor->handle();
+
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'The second run queued its own successor too.' );
+		$this->assertCount( 2, $this->queue->roots(), 'Both roots still wait.' );
+	}
+
 	public function test_a_run_finishes_the_job_and_removes_it(): void {
 		$finished = [];
 		add_action(

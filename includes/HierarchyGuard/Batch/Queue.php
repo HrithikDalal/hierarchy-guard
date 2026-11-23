@@ -284,6 +284,16 @@ final class Queue {
 	}
 
 	/**
+	 * Forgets that this request queued the run in Action Scheduler. A run
+	 * that starts is that action, no longer pending, so the next schedule()
+	 * asks Action Scheduler again, even in a process that runs action after
+	 * action.
+	 */
+	public function forget_queued(): void {
+		$this->queued_in_as = false;
+	}
+
+	/**
 	 * Clears the site's scheduled run.
 	 */
 	public function unschedule(): void {

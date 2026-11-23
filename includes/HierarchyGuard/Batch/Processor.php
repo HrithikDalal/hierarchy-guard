@@ -95,6 +95,7 @@ final class Processor {
 		$start  = microtime( true );
 		$passed = [];
 		$skip   = [];
+		$this->queue->forget_queued();
 		$this->queue->schedule();
 		do {
 			$roots = array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $passed ) ), $passed );
