@@ -11,6 +11,7 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Markers;
 use OutOfBoundsException;
 use UnexpectedValueException;
@@ -660,7 +661,7 @@ final class Batch_Resolver {
 	 * @param int[] $ids Post IDs.
 	 */
 	public static function prime_with_ancestors( array $ids ): void {
-		for ( $depth = 0; [] !== $ids && $depth < 50; $depth++ ) {
+		for ( $depth = 0; [] !== $ids && $depth < Subtree::WALK_DEPTH; $depth++ ) {
 			_prime_post_caches( $ids, false, false );
 			$parents = [];
 			foreach ( $ids as $id ) {

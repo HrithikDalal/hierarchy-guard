@@ -514,7 +514,7 @@ final class List_Table {
 		_prime_post_caches( $parents, false, false );
 		if ( null !== $this->tree && 'search' === $this->tree->mode( $post_type ) ) {
 			// A search shows each row's whole parent path: one query per level, whatever the rows.
-			for ( $depth = 0; [] !== $parents && $depth < 50; ++$depth ) {
+			for ( $depth = 0; [] !== $parents && $depth < Subtree::WALK_DEPTH; ++$depth ) {
 				$above = [];
 				foreach ( $parents as $parent_id ) {
 					$above[] = (int) get_post_field( 'post_parent', $parent_id );

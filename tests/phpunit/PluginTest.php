@@ -14,6 +14,7 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Meta_Guard;
 use HierarchyGuard\Plugin;
 use HierarchyGuard\Redirects\Server;
+use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Operations;
 use WP_UnitTestCase;
 
@@ -191,6 +192,17 @@ final class PluginTest extends WP_UnitTestCase {
 			$code = (string) file_get_contents( $root . '/HierarchyGuard/' . $declares ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local source file.
 			$this->assertSame( 1, preg_match( '#@internal\s*\*/\s*do_action\( self::SCRIPT \)#', $code ), $declares . ' marks its signal internal.' );
 		}
+	}
+
+	public function test_every_level_by_level_walk_stops_at_the_one_named_depth_limit(): void {
+		$named = 0;
+		foreach ( new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( dirname( __DIR__, 2 ) . '/includes', \FilesystemIterator::SKIP_DOTS ) ) as $file ) {
+			$code = (string) file_get_contents( $file->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local source file.
+			$this->assertSame( 0, preg_match( '/\$depth\s*<=?\s*\d/', $code ), $file->getFilename() . ' bounds a walk with a bare number.' );
+			$named += preg_match_all( '/\$depth < (?:Subtree|self)::WALK_DEPTH\b/', $code );
+		}
+		$this->assertSame( 5, $named, 'The subtree counts and walks, the search\'s parent paths, the batch resolver\'s ancestors and the pairs\' levels.' );
+		$this->assertSame( 50, Subtree::WALK_DEPTH );
 	}
 
 	public function test_the_main_file_and_every_file_in_includes_stop_when_requested_directly(): void {

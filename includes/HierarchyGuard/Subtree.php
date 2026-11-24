@@ -26,6 +26,12 @@ final class Subtree {
 	public const COUNT_CAP = 1000;
 
 	/**
+	 * The most levels a level-by-level walk reads, one query each, so a loop
+	 * in the parent data or a very deep tree can't make it run on.
+	 */
+	public const WALK_DEPTH = 50;
+
+	/**
 	 * The most a subtree count reports exactly.
 	 *
 	 * @return int
@@ -156,7 +162,7 @@ final class Subtree {
 		$level = [ $root_id ];
 		$depth = 0;
 
-		while ( [] !== $level && $count <= $cap && $depth < 50 ) {
+		while ( [] !== $level && $count <= $cap && $depth < self::WALK_DEPTH ) {
 			++$depth;
 			$in = implode( ',', array_fill( 0, count( $level ), '%d' ) );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $in holds only %d, one per post of the level, and the values come as one array; LIMIT bounds each level by the remaining cap.
@@ -297,7 +303,7 @@ final class Subtree {
 		$level = [ $root_id ];
 		$depth = 0;
 
-		while ( [] !== $level && $found <= $cap && $depth < 50 ) {
+		while ( [] !== $level && $found <= $cap && $depth < self::WALK_DEPTH ) {
 			++$depth;
 			$read   = self::ordered_children( $level, $post_type, $cap + 1 - $found );
 			$rows   = array_merge( $rows, $read );
