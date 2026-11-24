@@ -161,7 +161,7 @@ final class Assets {
 	}
 
 	/**
-	 * Enqueues one bundle with its styles and, unless it needs them not, its
+	 * Enqueues one bundle with its styles and, unless told otherwise, its
 	 * translations and settings.
 	 *
 	 * @param string   $name     Bundle name, as in build/{name}.js.

@@ -96,11 +96,11 @@ final class SettingsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Trash policies the form never sends, and what is saved for each.
+	 * Trash policies as they may arrive, the form's and others, and what is saved for each.
 	 *
 	 * @return array<string,array{0:mixed,1:string}>
 	 */
-	public static function crafted_policies(): array {
+	public static function trash_policy_inputs(): array {
 		return [
 			'an array'       => [ [ 'keep' ], 'reparent' ],
 			'a nested array' => [ [ [ 'keep' ] ], 'reparent' ],
@@ -115,12 +115,12 @@ final class SettingsTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * @dataProvider crafted_policies
+	 * @dataProvider trash_policy_inputs
 	 *
 	 * @param mixed  $policy What arrives.
 	 * @param string $saved  What is saved.
 	 */
-	public function test_a_trash_policy_the_form_never_sends_is_replaced_by_the_default_without_a_warning( $policy, string $saved ): void {
+	public function test_a_trash_policy_is_read_as_the_key_it_spells_or_replaced_by_the_default_without_a_warning( $policy, string $saved ): void {
 		$this->assertSame( $saved, Settings::sanitize( [ 'trash_policy' => $policy ] )['trash_policy'], 'Read as the key it spells, else replaced by the default; a PHP warning fails the test.' );
 	}
 
