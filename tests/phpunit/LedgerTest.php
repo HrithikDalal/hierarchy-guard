@@ -63,27 +63,110 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( 'about-us', get_post_meta( $this->about, Ledger::key( 'page', 'about-us' ), true ) );
 	}
 
-	public function test_every_change_to_an_old_url_s_redirect_purges_it_from_a_vip_edge_cache_once(): void {
+	/**
+	 * Each method that changes an old URL's record, and the URL it purges.
+	 *
+	 * @return array<string,array{0:string}>
+	 */
+	public static function purge_sites(): array {
+		return [
+			'record'      => [ '/old-about/' ],
+			'record_root' => [ '/section/' ],
+			'set_target'  => [ '/old-about/' ],
+			'forget'      => [ '/old-about/' ],
+			'forget_root' => [ '/section/' ],
+			'claim'       => [ '/spot/' ],
+			'prune'       => [ '/about-us/' ],
+		];
+	}
+
+	/**
+	 * Each method alone, after this request's purges are forgotten, so the
+	 * URL it purges is its own. In a process of its own, so VIP's functions
+	 * exist for this test only.
+	 *
+	 * @dataProvider purge_sites
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @param string $url The URL the method purges.
+	 */
+	public function test_each_change_to_an_old_url_s_record_purges_it_from_a_vip_edge_cache( string $url ): void {
+		global $wpdb;
+		require_once __DIR__ . '/stubs/vip.php';
+		$site = $this->dataName();
+		switch ( $site ) {
+			case 'set_target':
+			case 'forget':
+				$this->ledger->record( $this->about, 'old-about' );
+				break;
+			case 'forget_root':
+				$this->ledger->record_root( 'page', 'section' );
+				break;
+			case 'claim':
+				$this->ledger->record( $this->about, 'spot' );
+				$spot = self::factory()->post->create(
+					[
+						'post_type' => 'page',
+						'post_name' => 'spot-new',
+					]
+				);
+				// Takes the path without a save, so only claim() acts on it.
+				$wpdb->update( $wpdb->posts, [ 'post_name' => 'spot' ], [ 'ID' => $spot ] );
+				clean_post_cache( $spot );
+				break;
+			case 'prune':
+				$this->ledger->record( $this->about, 'about-us' );
+				// Back at the recorded path without a save, so only prune() acts on it.
+				$wpdb->update( $wpdb->posts, [ 'post_name' => 'about-us' ], [ 'ID' => $this->about ] );
+				clean_post_cache( $this->about );
+				break;
+		}
+		$this->forget_purges();
+
+		switch ( $site ) {
+			case 'record':
+				$this->ledger->record( $this->about, 'old-about' );
+				break;
+			case 'record_root':
+				$this->ledger->record_root( 'page', 'section' );
+				break;
+			case 'set_target':
+				$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 302 );
+				break;
+			case 'forget':
+				$this->ledger->forget( $this->about, 'old-about' );
+				break;
+			case 'forget_root':
+				$this->ledger->forget_root( 'page', 'section' );
+				break;
+			case 'claim':
+				$this->ledger->claim( get_post( $spot ) );
+				break;
+			case 'prune':
+				$this->ledger->prune( $this->about );
+				break;
+		}
+
+		$this->assertSame( [ home_url( $url ) ], $GLOBALS['hierarchy_guard_purged'], 'VIP\'s current function, for the URL this method changed.' );
+		$this->assertSame( [], $GLOBALS['hierarchy_guard_purged_deprecated'] );
+	}
+
+	/**
+	 * In a process of its own, so VIP's functions exist for this test only.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_request_purges_an_old_url_once(): void {
 		require_once __DIR__ . '/stubs/vip.php';
 		$this->forget_purges();
-		$other = self::factory()->post->create(
-			[
-				'post_type' => 'page',
-				'post_name' => 'other',
-			]
-		);
 
 		$this->ledger->record( $this->about, 'old-about' );
 		$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 302 );
 		$this->ledger->forget( $this->about, 'old-about' );
-		$this->ledger->record_root( 'page', 'section' );
-		$this->ledger->forget_root( 'page', 'section' );
-		$this->ledger->record( $other, 'about' );
-		$this->ledger->claim( get_post( $this->about ) );
 
-		$this->assertSame( [ home_url( '/old-about/' ), home_url( '/section/' ), home_url( '/about/' ) ], $GLOBALS['hierarchy_guard_purged'], 'VIP\'s current function, each URL once a request.' );
-		$this->assertSame( [], $GLOBALS['hierarchy_guard_purged_deprecated'] );
-		$this->forget_purges();
+		$this->assertSame( [ home_url( '/old-about/' ) ], $GLOBALS['hierarchy_guard_purged'] );
 	}
 
 	/**
@@ -112,6 +195,12 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( [ home_url( '/about-us/' ), home_url( '/about/' ) ], $GLOBALS['hierarchy_guard_purged'], 'The edge forgets the redirect it keeps for /about/, which now leads to the page itself.' );
 	}
 
+	/**
+	 * In a process of its own, so VIP's functions exist for this test only.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_a_request_purges_at_most_fifty_old_urls_so_vip_keeps_its_own(): void {
 		require_once __DIR__ . '/stubs/vip.php';
 		$this->forget_purges();
@@ -122,7 +211,6 @@ final class LedgerTest extends WP_UnitTestCase {
 
 		$this->assertCount( 50, $GLOBALS['hierarchy_guard_purged'] );
 		$this->assertSame( home_url( '/old-50/' ), end( $GLOBALS['hierarchy_guard_purged'] ) );
-		$this->forget_purges();
 	}
 
 	/**
