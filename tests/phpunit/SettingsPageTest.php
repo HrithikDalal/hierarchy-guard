@@ -252,7 +252,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'Move subpages up one level', $html );
 		$this->assertStringContainsString( 'Trash subpages too', $html );
 		$this->assertStringContainsString( 'Leave subpages where they are', $html );
-		$this->assertStringContainsString( 'Applies when a page is trashed from the editor, the REST API or WP-CLI. Trashing from the Pages list asks each time.', $html );
+		$this->assertStringContainsString( 'Applies whenever there’s no chance to ask, for example in the editor, the REST API or WP-CLI. With JavaScript on, the Pages list asks each time.', $html );
 		$this->assertStringNotContainsString( 'The Trash is turned off', $html, 'This test site keeps its Trash.' );
 	}
 

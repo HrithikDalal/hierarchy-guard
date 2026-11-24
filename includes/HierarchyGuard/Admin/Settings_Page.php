@@ -285,7 +285,7 @@ final class Settings_Page {
 		$table->search_box( __( 'Search Redirects', 'hierarchy-guard' ), 'hierarchy-guard-search' );
 		$table->display();
 		echo '</form>';
-		$checks = __( 'The Status column only checks whether a post or page now uses each old URL.', 'hierarchy-guard' );
+		$checks = __( 'At each old URL, the Status column checks only for a post or page.', 'hierarchy-guard' );
 		/* translators: "It" is the Status column. */
 		$others = __( 'It doesn’t check archives or other plugins’ redirect rules.', 'hierarchy-guard' );
 		$shared = __( 'If two recorded redirects have the same old URL, only one is served, though both may show Active.', 'hierarchy-guard' );
@@ -416,7 +416,7 @@ final class Settings_Page {
 			);
 		}
 
-		$help = __( 'Applies when a page is trashed from the editor, the REST API or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'Trashing from the Pages list asks each time.', 'hierarchy-guard' );
+		$help = __( 'Applies whenever there’s no chance to ask, for example in the editor, the REST API or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'With JavaScript on, the Pages list asks each time.', 'hierarchy-guard' );
 		if ( ! EMPTY_TRASH_DAYS ) {
 			$help .= ' ' . __( 'The Trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
 		}

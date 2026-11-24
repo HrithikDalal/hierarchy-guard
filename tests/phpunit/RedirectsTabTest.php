@@ -686,7 +686,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->recorded( $this->ids['about'], 'old-about' );
 
 		$this->assertStringContainsString( '</table>', $this->rendered() );
-		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">The Status column only checks whether a post or page now uses each old URL. It doesn’t check archives or other plugins’ redirect rules. If two recorded redirects have the same old URL, only one is served, though both may show Active.</p>#s', $this->rendered() );
+		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">At each old URL, the Status column checks only for a post or page. It doesn’t check archives or other plugins’ redirect rules. If two recorded redirects have the same old URL, only one is served, though both may show Active.</p>#s', $this->rendered() );
 	}
 
 	public function test_while_the_newest_list_is_built_the_tab_says_so(): void {
