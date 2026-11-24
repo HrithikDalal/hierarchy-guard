@@ -599,8 +599,8 @@ export function bulkEditWarning( pages, serving ) {
 	const change = sprintf(
 		/* translators: %s: number of selected pages that have subpages. */
 		_n(
-			'Saving will change the URLs of the selected pages and of the subpages under %s of them.',
-			'Saving will change the URLs of the selected pages and of the subpages under %s of them.',
+			'Saving will change the URLs of the pages it moves, and of the subpages under %s of them.',
+			'Saving will change the URLs of the pages it moves, and of the subpages under %s of them.',
 			pages,
 			'hierarchy-guard'
 		),

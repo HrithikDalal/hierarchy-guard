@@ -306,10 +306,10 @@ describe( 'warnings and outcomes', () => {
 
 	it( 'warns in Bulk Edit with the same next step', () => {
 		expect( bulkEditWarning( 2, false ) ).toBe(
-			'Saving will change the URLs of the selected pages and of the subpages under 2 of them. After you save, you’ll see the redirects to add.'
+			'Saving will change the URLs of the pages it moves, and of the subpages under 2 of them. After you save, you’ll see the redirects to add.'
 		);
 		expect( bulkEditWarning( 1, true ) ).toBe(
-			'Saving will change the URLs of the selected pages and of the subpages under 1 of them. The old URLs will redirect to the new ones.'
+			'Saving will change the URLs of the pages it moves, and of the subpages under 1 of them. The old URLs will redirect to the new ones.'
 		);
 	} );
 
