@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Tests;
 
+use HierarchyGuard\Batch\Processor;
 use HierarchyGuard\Compat\Yoast;
 use WP_UnitTestCase;
 use Yoast\WP\SEO\Integrations\Watchers\Indexable_Post_Watcher;
@@ -47,7 +48,7 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$watcher->built      = [];
 		$watcher->broken     = false;
 		$watcher->broken_for = [];
-		$watcher->delay      = 0.0;
+		$watcher->after      = null;
 	}
 
 	public function tear_down(): void {
@@ -175,6 +176,24 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->assertContains( $this->ids['history'], $this->watcher()->built );
 	}
 
+	/**
+	 * A run whose clock each build moves 12 seconds on, so the second build
+	 * ends past a run's 20.
+	 *
+	 * @return Yoast
+	 */
+	private function slow_builds(): Yoast {
+		$now                    = 1000.0;
+		$this->watcher()->after = static function () use ( &$now ): void {
+			$now += 12;
+		};
+		return new Yoast(
+			static function () use ( &$now ): float {
+				return $now;
+			}
+		);
+	}
+
 	public function test_a_run_stops_when_its_time_is_up_and_leaves_the_next_run_scheduled(): void {
 		$this->page( 'jobs', $this->page( 'careers', $this->ids['about'] ) );
 		$this->page( 'news', $this->page( 'press', $this->ids['about'] ) );
@@ -182,14 +201,11 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		// As when cron runs the event: it is no longer scheduled.
 		wp_clear_scheduled_hook( Yoast::HOOK );
 		$this->watcher()->built = [];
-		$this->watcher()->delay = 0.6;
-		$max                    = (string) ini_get( 'max_execution_time' );
-		set_time_limit( 2 ); // Half of it, 1 second, is the run's limit.
+		$this->assertSame( Processor::TIME_LIMIT, Processor::time_limit(), 'Precondition: a 20-second run.' );
 
-		( new Yoast() )->rebuild_pending();
-		set_time_limit( (int) $max );
+		$this->slow_builds()->rebuild_pending();
 
-		$this->assertCount( 2, $this->watcher()->built, 'The second page ends past the 1-second limit, so the third waits.' );
+		$this->assertCount( 2, $this->watcher()->built, 'The second page ends past the 20-second limit, so the third waits.' );
 		$this->assertCount(
 			1,
 			get_posts(
@@ -208,11 +224,9 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->watcher()->built = [];
 		$keep                   = static fn( $check, $object_id, $meta_key ) => Yoast::PENDING === $meta_key ? false : $check;
 		add_filter( 'delete_post_metadata', $keep, 10, 3 );
-		$max                    = (string) ini_get( 'max_execution_time' );
-		set_time_limit( 2 ); // Bounds the run to 1 second, should it loop.
 
-		( new Yoast() )->rebuild_pending();
-		set_time_limit( (int) $max );
+		// Its clock bounds the run to two builds, should it loop.
+		$this->slow_builds()->rebuild_pending();
 		remove_filter( 'delete_post_metadata', $keep, 10 );
 
 		$this->assertSame( [ $this->ids['team'] ], $this->watcher()->built );

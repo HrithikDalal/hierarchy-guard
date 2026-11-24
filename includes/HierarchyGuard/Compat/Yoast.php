@@ -38,6 +38,22 @@ final class Yoast {
 	private const BATCH = 20;
 
 	/**
+	 * The time in seconds, or null for microtime( true ).
+	 *
+	 * @var (callable(): float)|null
+	 */
+	private $clock;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param (callable(): float)|null $clock The time in seconds, microtime( true ) when null.
+	 */
+	public function __construct( ?callable $clock = null ) {
+		$this->clock = $clock;
+	}
+
+	/**
 	 * Hooks into the plugin's re-parent action, its own run and the export.
 	 */
 	public function register(): void {
@@ -83,7 +99,7 @@ final class Yoast {
 			return;
 		}
 		$limit = Processor::time_limit();
-		$start = microtime( true );
+		$start = $this->now();
 		$after = 0;
 		// Scheduled first, so a run that dies part way still leaves the next one.
 		self::schedule();
@@ -93,7 +109,7 @@ final class Yoast {
 				break;
 			}
 			foreach ( $flags as $meta_id => $id ) {
-				if ( microtime( true ) - $start >= $limit ) {
+				if ( $this->now() - $start >= $limit ) {
 					return;
 				}
 				// Read past each flag, so one that can't be taken off is tried once a run.
@@ -230,6 +246,15 @@ final class Yoast {
 			$flags[ (int) $row->meta_id ] = (int) $row->post_id;
 		}
 		return $flags;
+	}
+
+	/**
+	 * The time in seconds.
+	 *
+	 * @return float
+	 */
+	private function now(): float {
+		return null === $this->clock ? microtime( true ) : (float) ( $this->clock )();
 	}
 
 	/**
