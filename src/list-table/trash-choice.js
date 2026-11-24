@@ -8,6 +8,16 @@ import { decodeReferences } from '../common/entities';
 import { bulkSentence, initialSentence, trashSentence } from '../common/copy';
 
 /**
+ * The policies the dialog offers, in order: the ones the setting accepts,
+ * as the server prints them.
+ *
+ * @return {string[]} Policies.
+ */
+export function policyOptions() {
+	return config.policies;
+}
+
+/**
  * The only page with subpages, when one page was selected and previewed.
  *
  * @param {Object|null} preview  The trash preview, or null.

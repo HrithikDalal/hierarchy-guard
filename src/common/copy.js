@@ -5,8 +5,6 @@
 import { __, _n, _x, sprintf } from '@wordpress/i18n';
 import config from './config';
 
-export const POLICIES = [ 'reparent', 'trash_children', 'keep' ];
-
 /**
  * A number in the user's locale, as PHP's number_format_i18n() writes it:
  * thousands always grouped, even where the locale's own rule leaves 1000

@@ -135,6 +135,8 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ), $config['settingsUrl'] );
 		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-trash-policy' ), $config['policyUrl'] );
 		$this->assertSame( Settings::POLICY_REPARENT, $config['policy'] );
+		$this->assertSame( [ 'reparent', 'trash_children', 'keep' ], $config['policies'], 'The trash dialog’s options, in order.' );
+		$this->assertSame( Settings::POLICIES, $config['policies'], 'Every policy the setting accepts.' );
 		$this->assertContains( 'page', $config['postTypes'] );
 		$this->assertSame( 1000, $config['cap'] );
 		$this->assertSame( 'en-US', $config['locale'] );

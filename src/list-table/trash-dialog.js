@@ -14,7 +14,6 @@ import { chevronDown, chevronUp } from '@wordpress/icons';
 import { trashPreview } from '../common/api';
 import config from '../common/config';
 import {
-	POLICIES,
 	deniedSentence,
 	dialogTitle,
 	keptUrl,
@@ -27,6 +26,7 @@ import {
 	confirmedPolicy,
 	dialogSentence,
 	openingPolicy,
+	policyOptions,
 	showsDenied,
 	singlePage,
 } from './trash-choice';
@@ -212,7 +212,7 @@ export default function TrashDialog( {
 								'hierarchy-guard'
 							) }
 						</legend>
-						{ POLICIES.map( ( value ) => {
+						{ policyOptions().map( ( value ) => {
 							const id = `hierarchy-guard-policy-${ value }`;
 							const disabled =
 								'trash_children' === value &&

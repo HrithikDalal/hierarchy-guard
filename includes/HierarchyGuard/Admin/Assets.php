@@ -265,6 +265,7 @@ final class Assets {
 			'settingsUrl' => current_user_can( 'manage_options' ) ? Settings_Page::redirects_url() : '',
 			'policyUrl'   => current_user_can( 'manage_options' ) ? Settings_Page::policy_url() : '',
 			'policy'      => Settings::trash_policy(),
+			'policies'    => Settings::POLICIES,
 			'postTypes'   => Post_Types::supported(),
 			'cap'         => Subtree::count_cap(),
 			'locale'      => str_replace( '_', '-', get_user_locale() ),
