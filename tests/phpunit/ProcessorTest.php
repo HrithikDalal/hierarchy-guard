@@ -222,7 +222,8 @@ final class ProcessorTest extends WP_UnitTestCase {
 				$now += 25;
 			}
 		);
-		return new Processor( $this->queue, new Operations( new Ledger(), new Mover() ), $this->log, $clock );
+		// No time limit, as in WP-CLI, whatever PHPUnit runs with: each run has a box of its own.
+		return new Processor( $this->queue, new Operations( new Ledger(), new Mover() ), $this->log, $clock, static fn(): int => 0 );
 	}
 
 	/**

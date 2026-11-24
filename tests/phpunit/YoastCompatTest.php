@@ -187,10 +187,12 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->watcher()->after = static function () use ( &$now ): void {
 			$now += 12;
 		};
+		// No time limit, as in WP-CLI, whatever PHPUnit runs with: the run has a box of its own.
 		return new Yoast(
 			static function () use ( &$now ): float {
 				return $now;
-			}
+			},
+			static fn(): int => 0
 		);
 	}
 
