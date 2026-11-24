@@ -171,8 +171,8 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '>The URLs under <a class="row-title"', $html, 'A top-level entry never redirects its old URL itself.' );
 		$this->assertStringContainsString( '<span class="code">/archive/</span></a>', $html );
 		$this->assertStringNotContainsString( '<span class="code">/archive/</span></a> and the URLs under it', $html );
-		$this->assertStringContainsString( '<span class="code">/archive/</span></a><p class="description">This redirect stays until you delete it, even after the pages under it are gone.</p>', $html );
-		$this->assertSame( 1, substr_count( $html, 'This redirect stays until you delete it' ), 'Only the root-list record says so: the others go when their page does.' );
+		$this->assertStringContainsString( '<span class="code">/archive/</span></a><p class="description">This redirect stays even after the pages under it are gone, so delete it once you no longer need it.</p>', $html );
+		$this->assertSame( 1, substr_count( $html, 'This redirect stays even after the pages under it are gone' ), 'Only the root-list record says so: the others go when their page does.' );
 		$this->assertStringContainsString( '<a href="' . esc_url( get_edit_post_link( $this->ids['about'] ) ) . '">About</a><br><span dir="ltr">/company/about/</span>', $html );
 		$this->assertStringContainsString( '">Whats-on</a> &mdash; <span class=\'post-state\'>Draft</span><br><span dir="ltr">/?page_id=' . $draft . '</span>', $html );
 		$this->assertStringContainsString( '<span dir="ltr">https://jobs.example.org/</span>', $html );

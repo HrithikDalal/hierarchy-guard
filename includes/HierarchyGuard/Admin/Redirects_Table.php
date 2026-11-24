@@ -317,8 +317,8 @@ final class Redirects_Table extends WP_List_Table {
 	protected function column_old( $item ): string {
 		$label = self::old_label( $item, Redirect_Edit::edit_url( (string) $item['id'], $this->list ) );
 		if ( 0 === (int) $item['holder'] ) {
-			// A root-list record stands for every page that once sat under it, and nothing records which, so only a Delete removes it.
-			$label .= '<p class="description">' . esc_html__( 'This redirect stays until you delete it, even after the pages under it are gone.', 'hierarchy-guard' ) . '</p>';
+			// A root-list record stands for every page that once sat under it, and nothing records which, so it outlives them.
+			$label .= '<p class="description">' . esc_html__( 'This redirect stays even after the pages under it are gone, so delete it once you no longer need it.', 'hierarchy-guard' ) . '</p>';
 		}
 		return $label;
 	}

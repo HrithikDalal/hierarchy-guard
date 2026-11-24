@@ -190,7 +190,7 @@ final class Redirect_Edit {
 		/* translators: %s: the old URL, such as /about/team/. */
 		$help[] = sprintf( esc_html__( 'If you enter a page on this site, the redirect follows that page when it moves, and URLs under %s go to the matching URLs under that page.', 'hierarchy-guard' ), $in_code );
 		/* translators: %s: the old URL, such as /about/team/. */
-		$help[] = sprintf( esc_html__( 'If you enter any other URL, only %s itself redirects there, and URLs under it are no longer redirected.', 'hierarchy-guard' ), $in_code );
+		$help[] = sprintf( esc_html__( 'If you enter any other URL, only %s itself redirects there, and this redirect no longer covers the URLs under it.', 'hierarchy-guard' ), $in_code );
 		/* translators: %s: an example path, /about/team/. */
 		$help[] = sprintf( esc_html__( 'You can enter a path on this site, such as %s, instead of a full URL.', 'hierarchy-guard' ), '<code>/about/team/</code>' );
 
