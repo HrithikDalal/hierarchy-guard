@@ -219,6 +219,44 @@ final class YoastCompatTest extends WP_UnitTestCase {
 		$this->assertNotFalse( wp_next_scheduled( Yoast::HOOK ), 'Scheduled before the work, so the page left waits for the next run.' );
 	}
 
+	/**
+	 * A run 21 seconds into a request that started at 1000 seconds, so an
+	 * earlier run of the request has spent a 20-second box, under PHP's
+	 * time limit in seconds.
+	 *
+	 * @param int $max PHP's time limit, 0 for none.
+	 * @return Yoast
+	 */
+	private function late_in_request( int $max ): Yoast {
+		$_SERVER['REQUEST_TIME_FLOAT'] = 1000.0;
+		return new Yoast(
+			static fn(): float => 1021.0,
+			static fn(): int => $max
+		);
+	}
+
+	public function test_under_a_time_limit_a_run_starts_no_build_once_the_request_budget_is_spent(): void {
+		wp_trash_post( $this->ids['about'] );
+		wp_clear_scheduled_hook( Yoast::HOOK );
+		$this->watcher()->built = [];
+
+		$this->late_in_request( 40 )->rebuild_pending();
+
+		$this->assertSame( [], $this->watcher()->built, 'An earlier run spent the 20 seconds of a 40-second request.' );
+		$this->assertSame( '1', get_post_meta( $this->ids['team'], Yoast::PENDING, true ) );
+		$this->assertNotFalse( wp_next_scheduled( Yoast::HOOK ), 'The next run is left to build it.' );
+	}
+
+	public function test_with_no_time_limit_a_run_keeps_its_own_time_box(): void {
+		wp_trash_post( $this->ids['about'] );
+		wp_clear_scheduled_hook( Yoast::HOOK );
+		$this->watcher()->built = [];
+
+		$this->late_in_request( 0 )->rebuild_pending();
+
+		$this->assertSame( [ $this->ids['team'] ], $this->watcher()->built, 'Nothing can stop the process for time, so the run builds whenever the process started.' );
+	}
+
 	public function test_a_flag_that_cannot_be_taken_off_is_tried_once_and_brings_no_run_back(): void {
 		wp_trash_post( $this->ids['about'] );
 		$this->watcher()->built = [];

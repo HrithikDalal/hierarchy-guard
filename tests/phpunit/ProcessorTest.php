@@ -46,8 +46,16 @@ final class ProcessorTest extends WP_UnitTestCase {
 	 */
 	private array $job;
 
+	/**
+	 * The request's start as PHP set it, put back after each test.
+	 *
+	 * @var float|null
+	 */
+	private ?float $request_time;
+
 	public function set_up(): void {
 		parent::set_up();
+		$this->request_time = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : null;
 		Change_Log::reset_request();
 		add_filter( 'hierarchy_guard_batch_threshold', static fn(): int => 2 );
 		$this->queue     = new Queue();
@@ -63,6 +71,11 @@ final class ProcessorTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		if ( null === $this->request_time ) {
+			unset( $_SERVER['REQUEST_TIME_FLOAT'] );
+		} else {
+			$_SERVER['REQUEST_TIME_FLOAT'] = $this->request_time;
+		}
 		wp_unschedule_hook( Queue::HOOK );
 		wp_unschedule_hook( Queue::WATCHDOG );
 		parent::tear_down();
@@ -210,6 +223,61 @@ final class ProcessorTest extends WP_UnitTestCase {
 			}
 		);
 		return new Processor( $this->queue, new Operations( new Ledger(), new Mover() ), $this->log, $clock );
+	}
+
+	/**
+	 * Processors of one request that started at 1000 seconds, whose clock
+	 * each step moves 25 seconds on, under PHP's time limit in seconds.
+	 *
+	 * @param int $max     PHP's time limit, 0 for none.
+	 * @param int $stepped Steps taken so far, counted.
+	 * @return Processor
+	 */
+	private function in_request( int $max, int &$stepped ): Processor {
+		$now                           = 1000.0;
+		$_SERVER['REQUEST_TIME_FLOAT'] = 1000.0;
+		add_action(
+			'hierarchy_guard_children_reparented',
+			static function () use ( &$now, &$stepped ): void {
+				$now += 25;
+				++$stepped;
+			}
+		);
+		return new Processor(
+			$this->queue,
+			new Operations( new Ledger(), new Mover() ),
+			$this->log,
+			static function () use ( &$now ): float {
+				return $now;
+			},
+			static fn(): int => $max
+		);
+	}
+
+	public function test_under_a_time_limit_a_run_after_one_that_spent_the_request_budget_starts_no_step(): void {
+		$this->queue_behind( 'other', 1 );
+		$stepped   = 0;
+		$processor = $this->in_request( 40, $stepped );
+
+		$processor->handle();
+		$this->assertSame( 1, $stepped, 'Precondition: the first run spent the 20 seconds of a 40-second request.' );
+
+		$processor->handle();
+
+		$this->assertSame( 1, $stepped, 'The request has no time left, so the second run starts no step.' );
+		$this->assertTrue( $this->queue->is_scheduled(), 'The next run is left to step them.' );
+		$this->assertCount( 2, $this->queue->roots(), 'Both roots still wait.' );
+	}
+
+	public function test_with_no_time_limit_each_run_keeps_its_own_time_box(): void {
+		$this->queue_behind( 'other', 1 );
+		$stepped   = 0;
+		$processor = $this->in_request( 0, $stepped );
+
+		$processor->handle();
+		$processor->handle();
+
+		$this->assertSame( 2, $stepped, 'Nothing can stop the process for time, so each run takes its step whenever the process started.' );
 	}
 
 	/**

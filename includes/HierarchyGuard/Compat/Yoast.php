@@ -45,12 +45,21 @@ final class Yoast {
 	private $clock;
 
 	/**
+	 * PHP's time limit in seconds, or null for Processor::max_execution_time().
+	 *
+	 * @var (callable(): int)|null
+	 */
+	private $limit;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param (callable(): float)|null $clock The time in seconds, microtime( true ) when null.
+	 * @param (callable(): int)|null   $limit PHP's time limit in seconds, Processor::max_execution_time() when null.
 	 */
-	public function __construct( ?callable $clock = null ) {
+	public function __construct( ?callable $clock = null, ?callable $limit = null ) {
 		$this->clock = $clock;
+		$this->limit = $limit;
 	}
 
 	/**
@@ -91,15 +100,18 @@ final class Yoast {
 	/**
 	 * The run: rebuilds pending pages, oldest first, until none is left or
 	 * the time is up. Each page is one call into Yoast, as when it is saved
-	 * in the editor; the time is checked between pages.
+	 * in the editor; the time is checked before each page, so a run that
+	 * finds the request's shared box spent builds none.
 	 */
 	public function rebuild_pending(): void {
 		$watcher = self::watcher();
 		if ( null === $watcher ) {
 			return;
 		}
-		$limit = Processor::time_limit();
-		$start = $this->now();
+		// The same box as the background run's: under PHP's time limit, one for the whole request.
+		$max   = null === $this->limit ? Processor::max_execution_time() : (int) ( $this->limit )();
+		$limit = Processor::time_limit( $max );
+		$start = Processor::box_start( $max, $this->now() );
 		$after = 0;
 		// Scheduled first, so a run that dies part way still leaves the next one.
 		self::schedule();

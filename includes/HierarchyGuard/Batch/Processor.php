@@ -68,18 +68,27 @@ final class Processor {
 	private $clock;
 
 	/**
+	 * PHP's time limit in seconds, or null for max_execution_time().
+	 *
+	 * @var (callable(): int)|null
+	 */
+	private $limit;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Queue                 $queue      Queue.
 	 * @param Operations            $operations Operations.
 	 * @param Change_Log            $log        Change log.
 	 * @param (callable(): float)|null $clock   The time in seconds, microtime( true ) when null.
+	 * @param (callable(): int)|null   $limit   PHP's time limit in seconds, max_execution_time() when null.
 	 */
-	public function __construct( Queue $queue, Operations $operations, Change_Log $log, ?callable $clock = null ) {
+	public function __construct( Queue $queue, Operations $operations, Change_Log $log, ?callable $clock = null, ?callable $limit = null ) {
 		$this->queue      = $queue;
 		$this->operations = $operations;
 		$this->log        = $log;
 		$this->clock      = $clock;
+		$this->limit      = $limit;
 	}
 
 	/**
@@ -107,8 +116,10 @@ final class Processor {
 	 * the watchdog, which drops a row that does not decode.
 	 */
 	public function handle(): void {
-		$limit   = self::time_limit();
-		$start   = $this->now();
+		$max     = null === $this->limit ? self::max_execution_time() : (int) ( $this->limit )();
+		$limit   = self::time_limit( $max );
+		$shared  = $max > 0;
+		$start   = self::box_start( $max, $this->now() );
 		$stepped = false;
 		$carried = $this->queue->passed_over();
 		$passed  = $carried;
@@ -118,9 +129,10 @@ final class Processor {
 		do {
 			$roots = array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $passed ) ), $passed );
 			foreach ( $roots as $root_id ) {
-				// Whole seconds left; the first root always gets a step, as run() always takes one.
+				// Whole seconds left. In a box of its own the first root always gets a step, as run()
+				// always takes one; once a shared box is spent, no run of the request starts a step.
 				$left = (int) floor( $limit - ( $this->now() - $start ) );
-				if ( $this->out_of_time( $start, 0 ) || ( $stepped && $left < 1 ) ) {
+				if ( $this->out_of_time( $start, 0 ) || ( ( $stepped || $shared ) && $left < 1 ) ) {
 					$this->queue->mark_stepping( 0, $carried );
 					$this->queue->forget_queued();
 					$this->queue->schedule();
@@ -356,17 +368,46 @@ final class Processor {
 	}
 
 	/**
-	 * Seconds a scheduled run may take: 20, or half of max_execution_time when that is lower.
+	 * Seconds a scheduled run may take: 20, or half of PHP's time limit when that is lower.
 	 *
+	 * @param int|null $max PHP's time limit in seconds, max_execution_time() when null.
 	 * @return int
 	 */
-	public static function time_limit(): int {
-		$max   = (int) ini_get( 'max_execution_time' );
+	public static function time_limit( ?int $max = null ): int {
+		$max   = $max ?? self::max_execution_time();
 		$limit = self::TIME_LIMIT;
 		if ( $max > 0 ) {
 			$limit = min( $limit, intdiv( $max, 2 ) );
 		}
 		return max( 1, $limit );
+	}
+
+	/**
+	 * PHP's time limit in seconds, 0 for none, as in WP-CLI.
+	 *
+	 * @return int
+	 */
+	public static function max_execution_time(): int {
+		return (int) ini_get( 'max_execution_time' );
+	}
+
+	/**
+	 * When a scheduled run's time box starts. Under PHP's time limit it is
+	 * the request's start, so the runs of one cron request share one box and
+	 * can't take the whole limit between them. With no limit, as in WP-CLI or
+	 * a long-lived Action Scheduler runner, nothing stops the process for
+	 * time, and each run's box starts with the run: counted from the
+	 * process's start, a run late in it would never step.
+	 *
+	 * @param int   $max PHP's time limit in seconds, 0 for none.
+	 * @param float $now The run's start, from its clock.
+	 * @return float
+	 */
+	public static function box_start( int $max, float $now ): float {
+		if ( $max > 0 && isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ) {
+			return (float) $_SERVER['REQUEST_TIME_FLOAT'];
+		}
+		return $now;
 	}
 
 	/**
