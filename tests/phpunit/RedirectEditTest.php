@@ -202,6 +202,26 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ) );
 	}
 
+	public function test_a_save_that_fails_to_store_says_why_without_calling_the_field_invalid(): void {
+		set_current_screen( 'settings_page_hierarchy-guard' );
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		$page = new Settings_Page( new Providers(), $this->records );
+		$this->submit( get_permalink( $this->ids['history'] ), '301' );
+		add_filter( 'hierarchy_guard_should_record', '__return_false' );
+
+		$page->load();
+		ob_start();
+		$page->render();
+		$html = (string) ob_get_clean();
+		remove_filter( 'hierarchy_guard_should_record', '__return_false' );
+		set_current_screen( 'front' );
+
+		$this->assertSame( [ 'The redirect could not be saved.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
+		$this->assertStringContainsString( '<span class="screen-reader-text" id="hierarchy-guard-target-error">The redirect could not be saved.</span><input', $html );
+		$this->assertStringContainsString( 'dir="ltr" aria-describedby="hierarchy-guard-target-error hierarchy-guard-target-description" autofocus>', $html, 'What was entered is not at fault: described by why and focused, not marked invalid.' );
+		$this->assertStringNotContainsString( 'aria-invalid', $html );
+	}
+
 	public function test_a_code_sent_as_an_array_is_read_as_automatic(): void {
 		$this->submit( 'https://example.org/', '302' );
 		$_POST['code']    = [ '302' ];

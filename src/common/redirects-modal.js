@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from '@wordpress/element';
 import { __, _x, sprintf } from '@wordpress/i18n';
 import { csvUrl, fetchPairs } from './api';
 import config from './config';
+import { loadingText, speakLoading } from './loading';
 import {
 	copiedSentence,
 	csvLabel,
@@ -123,6 +124,14 @@ export default function RedirectsModal( {
 		setPage( data.page + ( 'next' === direction ? 1 : -1 ) );
 	};
 
+	// The spinner shows until the first page of pairs or an error does.
+	const waiting = ! data && loading;
+	useEffect( () => {
+		if ( waiting ) {
+			speakLoading();
+		}
+	}, [ waiting ] );
+
 	useEffect( () => {
 		if ( copy.text ) {
 			fallback.current?.focus();
@@ -219,7 +228,7 @@ export default function RedirectsModal( {
 				<>
 					<Spinner />
 					<span className="screen-reader-text">
-						{ __( 'Loading…', 'hierarchy-guard' ) }
+						{ loadingText() }
 					</span>
 				</>
 			) }

@@ -39,9 +39,10 @@ final class Redirect_Edit {
 	private Records $records;
 
 	/**
-	 * A save the records refused: the record and what was entered.
+	 * A save the records refused: the record, what was entered, why, and
+	 * whether what was entered is at fault.
 	 *
-	 * @var array{record:array<string,mixed>,url:string,code:int}|null
+	 * @var array{record:array<string,mixed>,url:string,code:int,message:string,invalid:bool}|null
 	 */
 	private ?array $refused = null;
 
@@ -175,9 +176,10 @@ final class Redirect_Edit {
 		$old     = (string) $record['old'];
 		$in_code = '<code>' . esc_html( $old ) . '</code>';
 		$help    = [];
-		// A refused URL: the field is marked invalid, described by why, and focused. Core's notice says it
-		// too, but describing the field by the notice would read its Dismiss button as well.
-		$invalid = null !== $this->refused ? ' aria-invalid="true" autofocus' : '';
+		// A refused save: the field is described by why and focused, and marked invalid when what was
+		// entered is at fault. Core's notice says it too, but describing the field by the notice would
+		// read its Dismiss button as well.
+		$invalid = null !== $this->refused ? ( $this->refused['invalid'] ? ' aria-invalid="true"' : '' ) . ' autofocus' : '';
 		$why     = null !== $this->refused ? '<span class="screen-reader-text" id="hierarchy-guard-target-error">' . esc_html( $this->refused['message'] ) . '</span>' : '';
 		if ( Records::is_top_level( $record ) ) {
 			/* translators: "them" are the URLs under the old URL, which go to the same pages at the top level. */
@@ -275,8 +277,9 @@ final class Redirect_Edit {
 				'record'  => $record,
 				'url'     => $url,
 				'code'    => in_array( $code, [ 301, 302 ], true ) ? $code : 0,
-				'error'   => (string) $result->get_error_code(),
 				'message' => (string) $result->get_error_message(),
+				// A storage failure isn't a fault in what was typed.
+				'invalid' => 'hierarchy_guard_not_saved' !== $result->get_error_code(),
 			];
 			return null;
 		}
