@@ -394,7 +394,8 @@ final class Processor {
 	/**
 	 * When a scheduled run's time box starts. Under PHP's time limit it is
 	 * the request's start, so the runs of one cron request share one box and
-	 * can't take the whole limit between them. With no limit, as in WP-CLI or
+	 * can't take the whole limit between them; without a start above 0 and
+	 * not after now, it is the run's own. With no limit, as in WP-CLI or
 	 * a long-lived Action Scheduler runner, nothing stops the process for
 	 * time, and each run's box starts with the run: counted from the
 	 * process's start, a run late in it would never step.
@@ -404,8 +405,9 @@ final class Processor {
 	 * @return float
 	 */
 	public static function box_start( int $max, float $now ): float {
-		if ( $max > 0 && isset( $_SERVER['REQUEST_TIME_FLOAT'] ) ) {
-			return (float) $_SERVER['REQUEST_TIME_FLOAT'];
+		$request = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) && is_numeric( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : 0.0;
+		if ( $max > 0 && $request > 0 && $request <= $now ) {
+			return $request;
 		}
 		return $now;
 	}

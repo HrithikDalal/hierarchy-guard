@@ -270,6 +270,26 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertCount( 2, $this->queue->roots(), 'Both roots still wait.' );
 	}
 
+	public function test_under_a_time_limit_a_missing_request_start_gives_the_run_a_box_of_its_own(): void {
+		$stepped   = 0;
+		$processor = $this->in_request( 40, $stepped );
+		unset( $_SERVER['REQUEST_TIME_FLOAT'] );
+
+		$processor->handle();
+
+		$this->assertSame( 1, $stepped, 'The box starts with the run, so it has time for a step.' );
+	}
+
+	public function test_under_a_time_limit_a_zero_request_start_gives_the_run_a_box_of_its_own(): void {
+		$stepped                       = 0;
+		$processor                     = $this->in_request( 40, $stepped );
+		$_SERVER['REQUEST_TIME_FLOAT'] = 0;
+
+		$processor->handle();
+
+		$this->assertSame( 1, $stepped, 'A start of 0 would leave the box always spent, and nothing would ever step.' );
+	}
+
 	public function test_with_no_time_limit_each_run_keeps_its_own_time_box(): void {
 		$this->queue_behind( 'other', 1 );
 		$stepped   = 0;
