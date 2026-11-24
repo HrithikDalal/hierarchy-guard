@@ -128,6 +128,10 @@ final class Server {
 			$url = $this->reapply_suffixes( $url, $post, $request );
 		} else {
 			$url = (string) $target;
+			// On this site, the scheme core gives a permalink: https in an SSL request, else the home URL's, which the target already has.
+			if ( is_ssl() && self::is_here( $url ) ) {
+				$url = set_url_scheme( $url, 'https' );
+			}
 		}
 		$url = $this->append_query_string( $url );
 

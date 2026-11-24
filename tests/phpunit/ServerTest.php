@@ -628,6 +628,32 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( get_permalink( $this->team ), $this->server->target_for_current_request()['url'], 'A longer path goes past the URL target to the shorter prefix.' );
 	}
 
+	public function test_a_same_site_url_target_is_sent_with_the_scheme_core_gives_permalinks(): void {
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		$home  = static fn(): string => 'http://example.org';
+		add_filter( 'pre_option_home', $home );
+		try {
+			$ledger = new Ledger();
+			$ledger->record( $this->about, 'old-about' );
+			$ledger->set_target( 'page', 'old-about', $this->about, 'http://example.org/careers/', 0 );
+			$this->assertSame( '/careers/', get_post_meta( $this->about, Ledger::target_key( 'page', 'old-about' ), true )['url'], 'Precondition: stored as its path.' );
+
+			$this->go_to( '/old-about/' );
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertSame( 'https://example.org/careers/', $this->server->target_for_current_request()['url'], 'An https visitor stays on https, as a page target does.' );
+
+			unset( $_SERVER['HTTPS'] );
+			$this->assertSame( 'http://example.org/careers/', $this->server->target_for_current_request()['url'], 'Otherwise the home URL\'s scheme.' );
+		} finally {
+			remove_filter( 'pre_option_home', $home );
+			if ( null === $https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $https;
+			}
+		}
+	}
+
 	public function test_a_chosen_code_is_sent_as_chosen(): void {
 		$ledger = new Ledger();
 		$ledger->record( $this->about, 'old-about' );
