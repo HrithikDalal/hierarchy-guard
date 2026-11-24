@@ -291,6 +291,26 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertLessThanOrEqual( time() + 5, Action_Scheduler_Stub::$due[0], 'Due about 5 seconds later.' );
 	}
 
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_under_a_time_limit_a_run_that_finds_the_request_budget_spent_and_no_root_left_clears_the_run_and_the_watchdog(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$this->queue->delete( $this->ids['about'] );
+		Processor::schedule_watchdog();
+		$stepped                       = 0;
+		$processor                     = $this->in_request( 40, $stepped, 1021.0 );
+		Action_Scheduler_Stub::$queued = [];
+		Action_Scheduler_Stub::$due    = [];
+
+		$processor->handle();
+
+		$this->assertSame( [], Action_Scheduler_Stub::$queued, 'No job waits, so no run is queued.' );
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ), 'Nor does the watchdog stay.' );
+	}
+
 	public function test_under_a_time_limit_a_run_that_finds_the_request_budget_spent_schedules_its_wp_cron_successor_seconds_ahead(): void {
 		$stepped   = 0;
 		$processor = $this->in_request( 40, $stepped, 1021.0 );

@@ -129,6 +129,12 @@ final class Processor {
 		$start   = self::box_start( $max, $this->now() );
 		$stepped = false;
 		if ( $shared && (int) floor( $limit - ( $this->now() - $start ) ) < 1 ) {
+			if ( [] === $this->queue->roots( 1 ) ) {
+				// No job waits: end as a run that found no root does.
+				$this->queue->unschedule();
+				wp_clear_scheduled_hook( Queue::WATCHDOG );
+				return;
+			}
 			// The request's box is spent before the run starts. Its successor is due a few seconds
 			// ahead, so a runner that claims due actions again in this request doesn't spin on it.
 			$this->queue->forget_queued();
