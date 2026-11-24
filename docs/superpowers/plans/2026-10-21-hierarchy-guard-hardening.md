@@ -14332,3 +14332,35 @@ Removed:
 - `hierarchy_guard_job_finished` passes the internal job array: document the keys that are stable, or mark the rest internal.
 - Version 1.0.0, the Author header, the release zip and its CI job (10.3), and the readme note for 3.6.
 - The comment rewrite (2.12).
+
+---
+
+## Errata
+
+Corrections found while building this plan. Where they differ from the tasks above, the branch and the spec are the record.
+
+- **Task 2, Step 2:** the mutant run uses `--filter test_a_job_on_another_site_keeps_its_record_on_that_site`.
+- **Task 4, Step 2:** the named mutant line exists only after Task 8. On Task 4's own code, the mutant is `return self::allowed( … ) ? $check : false;` → `return $check;`.
+- **Task 8:** the multisite-only skip message follows Task 2's rule (the multisite run fails on any skip). It doesn't print the old "Multisite only: run with WP_MULTISITE=1." text.
+- **Task 13, Step 2:** the mutant's "Received" line quotes the string as Task 14 rewords it.
+- **Task 14:** the summary assertion counts 7, not 6. The summary bullet uses the new built-in redirects wording, not "Automatic".
+- **Task 5:** Safe Redirect Manager's CSV writes absolute targets with the scheme of the `home` option. The spec states this.
+- **Strings table, rows 26–27:** "%s is active and can redirect old URLs to their new pages instead." and "A redirect plugin is active and can redirect old URLs to their new pages instead." They replace "…can serve these redirects instead."
+- **Strings reworded after review:**
+  - "This redirect stays even after the pages under it are gone, so delete it once you no longer need it."
+  - "If you enter any other URL, only %s itself redirects there, and this redirect no longer covers the URLs under it."
+  - "Applies whenever there’s no chance to ask, for example in the editor, the REST API or WP-CLI." and "With JavaScript on, the Pages list asks each time."
+  - "At each old URL, the Status column checks only for a post or page."
+  - "Subpages of %1$s (%2$s of them, the levels nearest the top first)"
+  - "Saving will change the URLs of the pages it moves, and of the subpages under %s of them." Its translator comment is "%s: number of the pages it moves that have subpages."
+  - Developer notice: "Hierarchy Guard keeps no object of the class %s."
+- **Behaviour settled in review:**
+  - The built-in server sends a same-site URL target as `https` in an SSL request and with the home scheme otherwise. Lists and CSV files always use the home scheme.
+  - Under PHP's time limit, the background and Yoast runs of one request share half of it. A background run that finds the time spent queues the next run 5 seconds ahead, or clears itself when no job is left.
+  - The dialog's trash policies come from `Settings::POLICIES`.
+  - One walk-depth constant, `Subtree::WALK_DEPTH`.
+- **Task 24 expected counts at the branch head:**
+  - PHPUnit: 1138 tests on WordPress 7.1.5 and 6.6.10, with 6 multisite-only skips in single site and none in multisite.
+  - Vitest: 198.
+  - make-pot: 287 strings.
+  - The Yoast background run over 50 moved pages takes about 0.5–1.1 s. The work inside each step is about 0.01 s.
