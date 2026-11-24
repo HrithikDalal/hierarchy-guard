@@ -24,6 +24,8 @@ use WP_UnitTestCase;
  */
 final class ResolverTest extends WP_UnitTestCase {
 
+	use Inactive_Plugin;
+
 	private Ledger $ledger;
 
 	private Resolver $resolver;
@@ -74,8 +76,10 @@ final class ResolverTest extends WP_UnitTestCase {
 	}
 
 	public function test_a_page_left_with_the_moved_row_of_a_root_deleted_for_good_is_redirected_to_for_good(): void {
+		$gone = self::factory()->post->create( [ 'post_type' => 'page' ] );
 		$this->ledger->record( $this->team, 'old-team' );
-		Markers::add( $this->team, Markers::moved_key( 999999 ), '0|team|team|1' );
+		Markers::add( $this->team, Markers::moved_key( $gone ), '0|team|team|1' );
+		$this->delete_for_good_while_inactive( $gone );
 
 		$temporary = null;
 		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'old-team', $temporary )->ID );
