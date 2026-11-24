@@ -589,13 +589,13 @@ export function quickEditWarning( count, capped ) {
  * The Bulk Edit warning, when a new parent is chosen for selected pages of
  * which some have subpages.
  *
- * @param {number}  pages   Selected published pages that have subpages.
+ * @param {number}  pages   Number of the pages it moves that have subpages.
  * @param {boolean} serving Whether built-in redirects are on.
  * @return {string} Two sentences.
  */
 export function bulkEditWarning( pages, serving ) {
 	const change = sprintf(
-		/* translators: %s: number of selected pages that have subpages. */
+		/* translators: %s: number of the pages it moves that have subpages. */
 		_n(
 			'Saving will change the URLs of the pages it moves, and of the subpages under %s of them.',
 			'Saving will change the URLs of the pages it moves, and of the subpages under %s of them.',
