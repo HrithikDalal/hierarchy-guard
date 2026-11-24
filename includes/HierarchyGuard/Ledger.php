@@ -695,7 +695,8 @@ final class Ledger {
 			return $url;
 		}
 		$fragment = (string) wp_parse_url( $url, PHP_URL_FRAGMENT );
-		return Paths::relative( $url ) . ( '' !== $fragment ? '#' . $fragment : '' );
+		// One leading slash: "//about/" would read back as a protocol-relative URL, and WordPress trims the extra slashes from a request anyway.
+		return '/' . ltrim( Paths::relative( $url ), '/' ) . ( '' !== $fragment ? '#' . $fragment : '' );
 	}
 
 	/**

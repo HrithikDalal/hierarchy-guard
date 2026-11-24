@@ -293,6 +293,8 @@ final class LedgerTest extends WP_UnitTestCase {
 			'the www host'                   => [ 'http://www.example.org/blog/about/', 'http://www.example.org/blog/about/', 'http://www.example.org/blog/about/' ],
 			'a path outside the home path'   => [ 'http://example.org/other/', 'http://example.org/other/', 'http://example.org/other/' ],
 			'a path starting like the home'  => [ 'http://example.org/blogroll/', 'http://example.org/blogroll/', 'http://example.org/blogroll/' ],
+			'a doubled slash after the home' => [ 'http://example.org/blog//about/?a=1', '/about/?a=1', 'http://example.org/blog/about/?a=1' ],
+			'slashes that look like a host'  => [ 'http://example.org/blog///evil.example/x', '/evil.example/x', 'http://example.org/blog/evil.example/x' ],
 		];
 	}
 
