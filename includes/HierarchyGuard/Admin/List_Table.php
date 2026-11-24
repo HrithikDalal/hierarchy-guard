@@ -183,7 +183,7 @@ final class List_Table {
 
 		if ( 'search' === $mode && $above instanceof WP_Post ) {
 			$ancestors = get_post_ancestors( $post );
-			// The type's own label names one parent; a trail of several takes the plural.
+			// The type's own label names one parent; core has no plural label, so a trail of several takes the plugin's plural.
 			$label   = count( $ancestors ) > 1 ? _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) : Post_Types::label( $type, 'parent_item_colon', __( 'Parent page:', 'hierarchy-guard' ) );
 			$parts[] = '<span class="screen-reader-text">' . esc_html( $label ) . ' </span>' . $this->trail( $type, $ancestors );
 		} elseif ( '' === $mode && $above instanceof WP_Post ) {
