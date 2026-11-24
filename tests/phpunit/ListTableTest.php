@@ -495,7 +495,7 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		ob_start();
 		$this->table->filter_controls( 'page', 'top' );
-		$this->assertStringContainsString( '(the first 2)', (string) ob_get_clean() );
+		$this->assertStringContainsString( '(2 of them, the levels nearest the top first)', (string) ob_get_clean() );
 	}
 
 	public function test_the_filter_controls_keep_the_filter_and_show_the_ancestors(): void {

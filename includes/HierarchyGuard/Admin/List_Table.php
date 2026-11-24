@@ -431,7 +431,7 @@ final class List_Table {
 		if ( $walk['capped'] ) {
 			printf(
 				/* translators: 1: the filtered page, after its ancestors, such as "Company › About", 2: the most subpages the filter lists, such as 1,000. */
-				esc_html__( 'Subpages of %1$s (the first %2$s)', 'hierarchy-guard' ),
+				esc_html__( 'Subpages of %1$s (%2$s of them, the levels nearest the top first)', 'hierarchy-guard' ),
 				$trail, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
 				esc_html( Subtree::format_count( count( $walk['ids'] ) ) )
 			);
