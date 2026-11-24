@@ -16,6 +16,10 @@ use OutOfBoundsException;
 use UnexpectedValueException;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Answers the rules from facts a batch read for every path at once. A fact
  * not read yet is noted and stops the rules with an OutOfBoundsException:

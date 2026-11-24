@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Post meta that lets a restore undo exactly what the trash flow did.
  *
@@ -130,6 +134,7 @@ final class Markers {
 			$wpdb->postmeta,
 			[
 				'post_id'    => $post_id,
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- An insert, not a query on the key.
 				'meta_key'   => $key,
 				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- An insert, not a query on the value.
 				'meta_value' => $value,
@@ -188,9 +193,10 @@ final class Markers {
 			return;
 		}
 
-		$meta_ids = implode( ',', array_map( static fn( array $row ): int => (int) $row['meta_id'], $rows ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $meta_ids holds integers only; the meta caches are cleared next.
-		$wpdb->query( "DELETE FROM {$wpdb->postmeta} WHERE meta_id IN ( {$meta_ids} )" );
+		$meta_ids     = array_map( static fn( array $row ): int => (int) $row['meta_id'], $rows );
+		$placeholders = implode( ',', array_fill( 0, count( $meta_ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per row handled; the meta caches are cleared next.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->postmeta} WHERE meta_id IN ( {$placeholders} )", $meta_ids ) );
 
 		$post_ids = array_values( array_unique( array_map( static fn( array $row ): int => (int) $row['post_id'], $rows ) ) );
 		wp_cache_delete_multiple( $post_ids, 'post_meta' );
@@ -210,6 +216,7 @@ final class Markers {
 			$wpdb->postmeta,
 			[
 				'post_id'  => $post_id,
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- One post's rows, found by post_id first.
 				'meta_key' => $key,
 			],
 			[ '%d', '%s' ]
@@ -225,17 +232,44 @@ final class Markers {
 	 * @return int
 	 */
 	public static function count( int $root_id, int $cap ): int {
+		return self::counts( [ $root_id ], $cap )[ $root_id ] ?? 0;
+	}
+
+	/**
+	 * How many marker rows point at each of several roots, each count
+	 * stopping at a cap: one statement of capped seeks on the meta_key index,
+	 * for a screen of pages in the Trash.
+	 *
+	 * @param int[] $root_ids Root pages.
+	 * @param int   $cap      Stop counting each at this number.
+	 * @return array<int,int> Count by root; a root with no rows is 0.
+	 */
+	public static function counts( array $root_ids, int $cap ): array {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Two seeks on the meta_key index, bounded by LIMIT.
-		return (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT(*) FROM ( SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key IN ( %s, %s ) LIMIT %d ) AS markers",
+		$root_ids = array_values( array_unique( array_filter( array_map( 'intval', $root_ids ) ) ) );
+		$counts   = array_fill_keys( $root_ids, 0 );
+		$parts    = [];
+		foreach ( $root_ids as $root_id ) {
+			$parts[] = $wpdb->prepare(
+				"( SELECT %d AS root_id, COUNT(*) AS markers FROM ( SELECT meta_id FROM {$wpdb->postmeta} WHERE meta_key IN ( %s, %s ) LIMIT %d ) AS m%d )",
+				$root_id,
 				self::moved_key( $root_id ),
 				self::trashed_key( $root_id ),
-				max( 1, $cap )
-			)
-		);
+				max( 1, $cap ),
+				$root_id
+			);
+		}
+		if ( [] === $parts ) {
+			return $counts;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared -- Every part was prepared above; each is a seek on the meta_key index bounded by LIMIT.
+		$rows = $wpdb->get_results( implode( ' UNION ALL ', $parts ), ARRAY_A );
+		foreach ( (array) $rows as $row ) {
+			$counts[ (int) $row['root_id'] ] = (int) $row['markers'];
+		}
+		return $counts;
 	}
 
 	/**
@@ -250,18 +284,26 @@ final class Markers {
 	}
 
 	/**
-	 * Whether a post sits where the trash flow moved it, so a restore may still move it back.
+	 * Whether a post sits where the trash flow moved it, so a restore may
+	 * still move it back: it has a moved row whose root still exists. A root
+	 * deleted for good while the plugin was inactive leaves its rows behind,
+	 * and nothing can move the post back any more.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return bool
 	 */
 	public static function has_moved_row( int $post_id ): bool {
-		return [] !== self::keys_with_prefix( $post_id, self::MOVED_PREFIX );
+		foreach ( self::keys_with_prefix( $post_id, self::MOVED_PREFIX ) as $key ) {
+			if ( false !== get_post_status( (int) substr( $key, strlen( self::MOVED_PREFIX ) ) ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
 	 * Which of these posts sit where the trash flow moved them: has_moved_row()
-	 * for many posts in one query.
+	 * for many posts, in one query for the rows and one for their roots.
 	 *
 	 * @param int[] $post_ids Post IDs.
 	 * @return array<int,true> By post ID.
@@ -275,9 +317,20 @@ final class Markers {
 		}
 		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %d, one per post, at most a few per pair listed; seeks on the post_id index.
-		$found = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT post_id FROM {$wpdb->postmeta} WHERE post_id IN ( {$placeholders} ) AND meta_key LIKE %s", ...array_merge( $ids, [ $wpdb->esc_like( self::MOVED_PREFIX ) . '%' ] ) ) );
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key FROM {$wpdb->postmeta} WHERE post_id IN ( {$placeholders} ) AND meta_key LIKE %s", ...array_merge( $ids, [ $wpdb->esc_like( self::MOVED_PREFIX ) . '%' ] ) ), ARRAY_A );
 
-		return array_fill_keys( array_map( 'intval', (array) $found ), true );
+		$roots = [];
+		foreach ( (array) $rows as $row ) {
+			$roots[ (int) substr( (string) $row['meta_key'], strlen( self::MOVED_PREFIX ) ) ] = true;
+		}
+		_prime_post_caches( array_keys( $roots ), false, false );
+		$found = [];
+		foreach ( (array) $rows as $row ) {
+			if ( false !== get_post_status( (int) substr( (string) $row['meta_key'], strlen( self::MOVED_PREFIX ) ) ) ) {
+				$found[ (int) $row['post_id'] ] = true;
+			}
+		}
+		return $found;
 	}
 
 	/**

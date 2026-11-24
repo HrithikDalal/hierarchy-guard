@@ -10,13 +10,16 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Admin;
 
-use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\REST\Hierarchy_Controller;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use WP_Screen;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * Enqueues the compiled bundles from build/ for the editor panel, the list
@@ -55,11 +58,11 @@ final class Assets {
 	private bool $wanted = false;
 
 	/**
-	 * Whether the Tree view asked for its stylesheet in the head.
+	 * Whether the Tree view asked for the tree's script.
 	 *
 	 * @var bool
 	 */
-	private bool $styled = false;
+	private bool $tree = false;
 
 	/**
 	 * Constructor.
@@ -79,7 +82,7 @@ final class Assets {
 		add_action( 'enqueue_block_editor_assets', [ $this, 'enqueue_editor' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin' ] );
 		add_action( List_Table::SCRIPT, [ $this, 'want_list_table' ] );
-		add_action( Tree_View::STYLE, [ $this, 'want_list_style' ] );
+		add_action( Tree_View::SCRIPT, [ $this, 'want_tree' ] );
 		add_action( 'admin_footer', [ $this, 'enqueue_list_table' ] );
 	}
 
@@ -91,15 +94,15 @@ final class Assets {
 	}
 
 	/**
-	 * Notes that the Tree view loads, so the list screen's stylesheet goes in
-	 * the head: the indents are in it.
+	 * Notes that the Tree view loads, which needs the tree's script too.
 	 */
-	public function want_list_style(): void {
-		$this->styled = true;
+	public function want_tree(): void {
+		$this->tree = true;
 	}
 
 	/**
-	 * Enqueues the list-screen script in the footer, if the screen asked for it.
+	 * Enqueues the list-screen script in the footer, if the screen asked for
+	 * it, and in the Tree view the tree's after it, sharing its settings.
 	 * Footer scripts and late styles enqueued here still print.
 	 */
 	public function enqueue_list_table(): void {
@@ -109,14 +112,23 @@ final class Assets {
 		}
 		// Quick Edit's script defines the object the list-table script wraps.
 		$this->enqueue( 'list-table', [ 'jquery', 'inline-edit-post' ] );
+		if ( $this->tree ) {
+			// Its strings are its own; the settings it reads print once, with the list's bundle.
+			$this->enqueue( 'tree', [ self::HANDLE_PREFIX . 'list-table' ], false );
+		}
 	}
 
 	/**
-	 * The editor panel, for supported types.
+	 * The editor panel, for supported types, and in the Site Editor, whose
+	 * Pages screen edits pages too: there the screen names no post type, and
+	 * the panel acts only while the page it edits is of a supported type.
 	 */
 	public function enqueue_editor(): void {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
+		if ( ! $screen instanceof WP_Screen ) {
+			return;
+		}
+		if ( 'site-editor' !== $screen->base && ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
 		}
 		$this->enqueue( 'editor' );
@@ -131,15 +143,15 @@ final class Assets {
 	public function enqueue_admin( $hook_suffix ): void {
 		if ( 'settings_page_' . Settings_Page::SLUG === $hook_suffix && 'redirects' === Settings_Page::current_tab() ) {
 			// It reads only the questions the page prints: no settings, no strings.
-			$this->enqueue( 'redirects', [], false );
+			$this->enqueue( 'redirects', [], false, false );
 			return;
 		}
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 		if ( ! $screen instanceof WP_Screen || ! Post_Types::is_supported( (string) $screen->post_type ) ) {
 			return;
 		}
-		if ( $this->styled && 'edit.php' === $hook_suffix ) {
-			// The Tree view's indents print with the head; its script follows in the footer.
+		if ( 'edit.php' === $hook_suffix ) {
+			// In the head, so the Hierarchy column's width and the Tree view's indents are there as the rows paint; the script follows in the footer when the screen asks for it.
 			$this->enqueue_style( 'list-table' );
 		}
 		if ( in_array( $hook_suffix, [ 'post.php', 'post-new.php' ], true ) && ! $screen->is_block_editor() ) {
@@ -149,15 +161,16 @@ final class Assets {
 	}
 
 	/**
-	 * Enqueues one bundle with its styles and, unless it needs neither, its
+	 * Enqueues one bundle with its styles and, unless told otherwise, its
 	 * translations and settings.
 	 *
 	 * @param string   $name     Bundle name, as in build/{name}.js.
 	 * @param string[] $extra    Script handles the bundle uses without importing them.
-	 * @param bool     $settings Whether the bundle has strings and reads window.hierarchyGuard.
+	 * @param bool     $settings Whether the bundle reads window.hierarchyGuard printed before it.
+	 * @param bool     $strings  Whether the bundle has strings to translate.
 	 * @return bool Whether the bundle was built and enqueued.
 	 */
-	public function enqueue( string $name, array $extra = [], bool $settings = true ): bool {
+	public function enqueue( string $name, array $extra = [], bool $settings = true, bool $strings = true ): bool {
 		$asset = $this->asset( $name );
 		if ( null === $asset ) {
 			return false;
@@ -168,8 +181,10 @@ final class Assets {
 		$url    = plugins_url( 'build/' . $name . '.js', $this->dir . '/hierarchy-guard.php' );
 
 		wp_enqueue_script( $handle, $url, $deps, $asset['version'], true );
-		if ( $settings ) {
+		if ( $strings ) {
 			wp_set_script_translations( $handle, 'hierarchy-guard' );
+		}
+		if ( $settings ) {
 			wp_add_inline_script( $handle, 'window.hierarchyGuard = ' . wp_json_encode( $this->config() ) . ';', 'before' );
 		}
 		$this->style( $name, $deps, $asset['version'] );
@@ -246,14 +261,11 @@ final class Assets {
 		return [
 			'namespace'   => Hierarchy_Controller::NAMESPACE,
 			'serving'     => Settings::serve_redirects(),
-			'provider'    => null === $provider ? null : [
-				'name' => (string) ( $provider['name'] ?? '' ),
-				'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
-				'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
-			],
+			'provider'    => Providers::described( $provider ),
 			'settingsUrl' => current_user_can( 'manage_options' ) ? Settings_Page::redirects_url() : '',
 			'policyUrl'   => current_user_can( 'manage_options' ) ? Settings_Page::policy_url() : '',
 			'policy'      => Settings::trash_policy(),
+			'policies'    => Settings::POLICIES,
 			'postTypes'   => Post_Types::supported(),
 			'cap'         => Subtree::count_cap(),
 			'locale'      => str_replace( '_', '-', get_user_locale() ),

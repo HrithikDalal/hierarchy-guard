@@ -11,6 +11,10 @@ namespace HierarchyGuard\Batch;
 
 use HierarchyGuard\Trash\Operations;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Manages Hierarchy Guard background jobs.
  */
@@ -68,12 +72,14 @@ final class CLI_Command {
 		$pause     = max( 0, (int) ( $assoc_args['sleep'] ?? 250 ) );
 		$processed = 0;
 		$skipped   = [];
+		$idle      = [];
 
 		for ( $pass = 0; $pass < 100; $pass++ ) {
-			$roots = array_diff( $this->queue->roots(), $skipped );
+			$roots = array_diff( $this->queue->roots(), $skipped, $idle );
 			if ( [] === $roots ) {
 				break;
 			}
+			$before = $processed;
 			foreach ( $roots as $root_id ) {
 				$result = $this->drain( (int) $root_id, $pause );
 				if ( 'busy' === $result['state'] ) {
@@ -81,10 +87,18 @@ final class CLI_Command {
 					$skipped[] = $root_id;
 					continue;
 				}
+				// Nothing to step, such as a row that did not decode: not a job.
+				if ( 'idle' === $result['state'] ) {
+					$idle[] = $root_id;
+					continue;
+				}
 				if ( null !== $result['job'] ) {
 					\WP_CLI::log( self::describe( $result['job'] ) );
 				}
 				++$processed;
+			}
+			if ( $processed === $before ) {
+				break;
 			}
 		}
 
@@ -136,13 +150,15 @@ final class CLI_Command {
 	}
 
 	/**
-	 * Runs a root's job until it is done or another process holds it.
+	 * Runs a root's job until it is done or another process holds it, after
+	 * dropping a row of it that does not decode.
 	 *
 	 * @param int $root_id Root page.
 	 * @param int $pause   Pause between steps, in milliseconds.
 	 * @return array{state:string,job:array<string,mixed>|null}
 	 */
 	private function drain( int $root_id, int $pause ): array {
+		$this->queue->drop_unreadable( $root_id );
 		$result = $this->processor->run( $root_id, 0, $pause );
 		for ( $i = 0; $i < 1000 && 'queued' === $result['state']; $i++ ) {
 			$result = $this->processor->run( $root_id, 0, $pause );

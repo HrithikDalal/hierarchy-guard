@@ -14,12 +14,14 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Resolves an old path through the shared rules, on the live ledger.
  */
 final class Resolver {
-
-	public const MAX_ROUNDS = Rules::MAX_ROUNDS;
 
 	/**
 	 * The ledger and core, read live.

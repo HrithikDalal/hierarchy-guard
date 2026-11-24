@@ -162,6 +162,23 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertMatchesRegularExpression( '/value="page"[^>]*checked/', $html );
 		$this->assertStringNotContainsString( 'value="post"', $html );
 		$this->assertStringContainsString( 'Public hierarchical post types appear here automatically.', $html );
+		$this->assertStringNotContainsString( 'messages say', $html, 'Pages is the only type listed: nothing to explain.' );
+	}
+
+	public function test_with_another_type_listed_the_field_says_messages_speak_of_pages(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+			]
+		);
+		ob_start();
+		$this->page->render_post_types();
+		$html = (string) ob_get_clean();
+		unregister_post_type( 'hg_docs' );
+
+		$this->assertStringContainsString( '<p class="description">Public hierarchical post types appear here automatically. Hierarchy Guard’s messages say “page” and “subpage” for every post type.</p>', $html );
 	}
 
 	public function test_post_types_field_always_submits_the_key(): void {
@@ -219,7 +236,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
-		$this->assertStringContainsString( 'Custom Redirects is active and can handle these.', $html );
+		$this->assertStringContainsString( 'Custom Redirects is active and can redirect old URLs to their new pages instead.', $html );
 	}
 
 	public function test_trash_policy_field_renders_three_radios_with_the_stored_choice(): void {
@@ -233,10 +250,44 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<fieldset id="hierarchy-guard-trash-policy">', $html, 'The target of the editor panel’s Settings link.' );
 		$this->assertMatchesRegularExpression( '/value="keep"\s+checked/', $html );
 		$this->assertStringContainsString( 'Move subpages up one level', $html );
-		$this->assertStringContainsString( 'Trash the subpages too', $html );
+		$this->assertStringContainsString( 'Trash subpages too', $html );
 		$this->assertStringContainsString( 'Leave subpages where they are', $html );
-		$this->assertStringContainsString( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI. The Pages list asks each time.', $html );
+		$this->assertStringContainsString( 'Applies whenever there’s no chance to ask, for example in the editor, the REST API or WP-CLI. With JavaScript on, the Pages list asks each time.', $html );
 		$this->assertStringNotContainsString( 'The Trash is turned off', $html, 'This test site keeps its Trash.' );
+	}
+
+	public function test_each_trash_policy_says_what_it_does_to_the_subpages(): void {
+		ob_start();
+		$this->page->render_trash_policy();
+		$html = (string) ob_get_clean();
+
+		foreach (
+			[
+				Settings::POLICY_REPARENT       => 'Their URLs change.',
+				Settings::POLICY_TRASH_CHILDREN => 'Restoring their parent restores them with their original status.',
+				Settings::POLICY_KEEP           => 'Their URLs will contain “__trashed” until you move them.',
+			] as $policy => $description
+		) {
+			$this->assertStringContainsString( 'value="' . $policy . '"', $html );
+			$this->assertMatchesRegularExpression( '/value="' . $policy . '"[^>]*aria-describedby="hierarchy-guard-policy-' . $policy . '"/', $html );
+			// Each description sits with its own option, under the label's text.
+			$this->assertMatchesRegularExpression( '#<div style="margin-bottom:12px"><label><input [^>]*value="' . $policy . '"[^>]*>[^<]*</label><p class="description" id="hierarchy-guard-policy-' . $policy . '" style="margin-top:0;margin-inline-start:24px">' . preg_quote( esc_html( $description ), '#' ) . '</p></div>#', $html );
+		}
+		$this->assertMatchesRegularExpression( '#</div><p class="description">[^<]+</p></fieldset>$#', $html, 'The help for the whole field comes after the last option\'s space.' );
+	}
+
+	public function test_the_redirects_help_asks_to_turn_them_on_only_while_they_are_off(): void {
+		ob_start();
+		$this->page->render_serve_redirects();
+		$off = (string) ob_get_clean();
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		ob_start();
+		$this->page->render_serve_redirects();
+		$on = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'Turn this on so old URLs reach their new pages.', $off );
+		$this->assertStringNotContainsString( 'Turn this on', $on );
+		$this->assertStringContainsString( 'No redirect plugin was found. URL changes are recorded either way.', $on );
 	}
 
 	public function test_a_provider_without_a_name_gets_a_generic_sentence(): void {
@@ -253,7 +304,7 @@ final class SettingsPageTest extends WP_UnitTestCase {
 		$html = (string) ob_get_clean();
 		remove_filter( 'hierarchy_guard_redirect_providers', $filter );
 
-		$this->assertStringContainsString( 'A redirect plugin is active and can handle these.', $html );
+		$this->assertStringContainsString( 'A redirect plugin is active and can redirect old URLs to their new pages instead.', $html );
 	}
 
 	public function test_settings_links_open_the_page_at_their_field(): void {

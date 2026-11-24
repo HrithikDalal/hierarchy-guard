@@ -12,6 +12,7 @@ namespace HierarchyGuard\Tests;
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Redirects\Batch_Resolver;
+use HierarchyGuard\Redirects\Live_View;
 use HierarchyGuard\Redirects\Resolver;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Trash\Markers;
@@ -22,6 +23,8 @@ use WP_UnitTestCase;
  * @covers \HierarchyGuard\Redirects\Rules
  */
 final class ResolverTest extends WP_UnitTestCase {
+
+	use Inactive_Plugin;
 
 	private Ledger $ledger;
 
@@ -70,6 +73,154 @@ final class ResolverTest extends WP_UnitTestCase {
 	public function tear_down(): void {
 		$this->set_permalink_structure( '' );
 		parent::tear_down();
+	}
+
+	public function test_a_page_left_with_the_moved_row_of_a_root_deleted_for_good_is_redirected_to_for_good(): void {
+		$gone = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$this->ledger->record( $this->team, 'old-team' );
+		Markers::add( $this->team, Markers::moved_key( $gone ), '0|team|team|1' );
+		$this->delete_for_good_while_inactive( $gone );
+
+		$temporary = null;
+		$this->assertSame( $this->team, $this->resolver->resolve( 'page', 'old-team', $temporary )->ID );
+		$this->assertFalse( $temporary, 'A 301: no restore can move it back.' );
+
+		Markers::add( $this->team, Markers::moved_key( $this->company ), '0|team|team|1' );
+		$this->resolver->resolve( 'page', 'old-team', $temporary );
+		$this->assertTrue( $temporary, 'A 302 while a page that moved it is still there.' );
+	}
+
+	public function test_an_unknown_path_twenty_segments_deep_costs_one_ledger_query_then_none(): void {
+		$path = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 20 ) ) );
+		get_option( Ledger::ROOT_OPTION );
+
+		$queries = get_num_queries();
+		$this->assertNull( $this->resolver->resolve( 'page', $path ) );
+		$this->assertSame( 1, get_num_queries() - $queries, 'Every prefix in one query.' );
+
+		$queries = get_num_queries();
+		$this->assertNull( ( new Resolver( $this->ledger ) )->resolve( 'page', $path ) );
+		$this->assertSame( 0, get_num_queries() - $queries, 'The miss is cached for the whole path.' );
+	}
+
+	public function test_a_deep_unknown_path_is_read_fifty_prefixes_a_query_and_cached_as_a_short_list(): void {
+		$path = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 200 ) ) );
+		get_option( Ledger::ROOT_OPTION );
+
+		$queries = get_num_queries();
+		$this->assertNull( $this->resolver->resolve( 'page', $path ) );
+		$this->assertSame( 4, get_num_queries() - $queries, 'Fifty prefixes a query.' );
+
+		$this->assertCount( 50, $this->ledger->find_prefixes( 'page', $path ) );
+		$cached = wp_cache_get( 'prefixes:' . md5( 'page:' . $path ) . ':' . wp_cache_get_last_changed( Ledger::CACHE_GROUP ), Ledger::CACHE_GROUP );
+		$this->assertIsArray( $cached );
+		$this->assertLessThan( 500, strlen( maybe_serialize( $cached ) ), 'One answer per prefix, without the prefixes.' );
+
+		$queries = get_num_queries();
+		$this->assertNull( ( new Resolver( $this->ledger ) )->resolve( 'page', $path ) );
+		$this->assertSame( 0, get_num_queries() - $queries, 'The misses are cached.' );
+	}
+
+	public function test_an_entry_deeper_than_one_read_is_still_found(): void {
+		$deep = implode( '/', array_map( static fn( int $i ): string => "level-{$i}", range( 1, 120 ) ) );
+		$this->ledger->record( $this->about, $deep );
+		$view     = new Live_View( $this->ledger );
+		$segments = explode( '/', $deep . '/x/y' );
+
+		$hits = [];
+		for ( $length = count( $segments ); $length >= 1; $length-- ) {
+			$hit = $view->find( 'page', implode( '/', array_slice( $segments, 0, $length ) ) );
+			if ( null !== $hit ) {
+				$hits[ $length ] = $hit;
+			}
+		}
+
+		$this->assertSame( [ 120 => $this->about ], $hits, 'Asked longest first, as the rules ask.' );
+		$this->assertSame( $this->about, $this->ledger->find( 'page', $deep ) );
+	}
+
+	/**
+	 * Request paths the site's own links never produce. A segment is cut to
+	 * 200 bytes, as core's sanitize_title() cuts it.
+	 *
+	 * @return array<string,array{0:string,1:string|null,2:int,3:array<string,string>,4:string|null}> Path, first prefix, prefixes read, hits by prefix, page it resolves to.
+	 */
+	public static function crafted_paths(): array {
+		$deep = implode( '/', array_map( static fn( int $i ): string => "seg-{$i}", range( 1, 60 ) ) );
+		return [
+			'all-digit segments'             => [ '2024/05/old', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'an all-digit prefix'            => [ '2024/05/old/7', '2024/05/old/7', 4, [ '2024/05/old' => 'about' ], null ],
+			'percent-encoded'                => [ '/caf%E2%80%99/', 'caf%e2%80%99', 1, [ 'caf%e2%80%99' => 'about' ], 'about' ],
+			'raw curly apostrophe'           => [ "caf\u{2019}", 'caf%e2%80%99', 1, [ 'caf%e2%80%99' => 'about' ], 'about' ],
+			'a plus sign'                    => [ 'A+B', 'a-b', 1, [ 'a-b' => 'team' ], 'team' ],
+			'upper case'                     => [ '2024/05/OLD', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'an empty segment'               => [ '2024//05/old', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'dot segments'                   => [ '../2024/05/old/.', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'encoded slashes'                => [ '%2F%2F2024%2F05/old', '2024/05/old', 3, [ '2024/05/old' => 'about' ], 'about' ],
+			'empty'                          => [ '', null, 0, [], null ],
+			'slashes only'                   => [ '///', null, 0, [], null ],
+			'sixty segments'                 => [ $deep, $deep, 50, [], null ],
+			'one five-thousand-byte segment' => [ str_repeat( 'z', 5000 ), str_repeat( 'z', 200 ), 1, [], null ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_paths
+	 *
+	 * @param string                $path     Request path.
+	 * @param string|null           $first    The first prefix read.
+	 * @param int                   $count    Prefixes read.
+	 * @param array<string,string>  $hits     Prefixes with an entry, and whose.
+	 * @param string|null           $resolves The page the path resolves to.
+	 */
+	public function test_a_crafted_path_is_looked_up_by_its_normalized_prefixes( string $path, ?string $first, int $count, array $hits, ?string $resolves ): void {
+		$this->ledger->record( $this->about, '2024/05/old' );
+		$this->ledger->record( $this->about, "caf\u{2019}" );
+		$this->ledger->record( $this->team, 'a-b' );
+		$ids = [
+			'about' => $this->about,
+			'team'  => $this->team,
+		];
+
+		$found = $this->ledger->find_prefixes( 'page', $path );
+
+		$this->assertCount( $count, $found );
+		$this->assertSame( $first, [] === $found ? null : (string) array_key_first( $found ) );
+		$this->assertSame( array_map( static fn( string $name ): int => $ids[ $name ], $hits ), array_filter( $found, static fn( ?int $id ): bool => null !== $id ) );
+		$result = $this->resolver->resolve( 'page', $path );
+		$this->assertSame( null === $resolves ? null : $ids[ $resolves ], $result instanceof \WP_Post ? $result->ID : $result );
+	}
+
+	public function test_a_holder_trashed_after_its_prefix_was_read_is_checked_again_on_the_next_ask(): void {
+		global $wpdb;
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->record_root( 'page', 'old-about' );
+		$view = new Live_View( $this->ledger );
+		$this->assertNull( $view->find( 'page', 'old-about/x' ) );
+		$this->assertSame( $this->about, $view->find( 'page', 'old-about' ) );
+
+		// Trashing the holder does not touch the ledger.
+		$wpdb->update( $wpdb->posts, [ 'post_status' => 'trash' ], [ 'ID' => $this->about ] );
+		clean_post_cache( $this->about );
+
+		$this->assertSame( 0, $view->find( 'page', 'old-about' ), 'The root list answers, as find() does.' );
+		$this->assertSame( 0, $this->ledger->find( 'page', 'old-about' ) );
+	}
+
+	public function test_each_prefix_of_a_path_answers_as_its_own_lookup_does(): void {
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->record_root( 'page', 'archive' );
+
+		$this->assertSame(
+			[
+				'old-about/x/y' => null,
+				'old-about/x'   => null,
+				'old-about'     => $this->about,
+			],
+			$this->ledger->find_prefixes( 'page', '/Old-About/x/y/' )
+		);
+		$this->assertSame( [ 'archive' => 0 ], $this->ledger->find_prefixes( 'page', 'archive' ) );
+		$this->assertSame( [], $this->ledger->find_prefixes( 'page', '/' ) );
 	}
 
 	public function test_resolves_a_subpage_after_its_parent_was_renamed(): void {

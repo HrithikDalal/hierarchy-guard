@@ -11,10 +11,15 @@ namespace HierarchyGuard\Redirects;
 
 use HierarchyGuard\Ledger;
 use HierarchyGuard\Paths;
+use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Markers;
 use OutOfBoundsException;
 use UnexpectedValueException;
 use WP_Post;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * Runs Rules for every path of a list of pairs on facts read ahead: the
@@ -478,9 +483,10 @@ final class Batch_Resolver {
 
 		$names        = array_map( 'strval', array_keys( $names ) );
 		$placeholders = implode( ',', array_fill( 0, count( $names ), '%s' ) );
-		$types        = [] !== $paths ? ( isset( $asked['post'] ) ? "%s, 'attachment', 'post'" : "%s, 'attachment'" ) : '%s';
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders holds only %s, one per segment of the paths and slug a rule asks for; $types is a fixed placeholder list; core's get_page_by_path() query for every path at once, on the post_name index.
-		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name, post_parent, post_type FROM {$wpdb->posts} WHERE post_name IN ( {$placeholders} ) AND post_type IN ( {$types} )", ...array_merge( $names, [ $post_type ] ) ), OBJECT_K );
+		$types        = [] !== $paths ? ( isset( $asked['post'] ) ? [ $post_type, 'attachment', 'post' ] : [ $post_type, 'attachment' ] ) : [ $post_type ];
+		$type_list    = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $placeholders and $type_list hold only %s, one per segment of the paths and slug a rule asks for and one per post type; core's get_page_by_path() query for every path at once, on the post_name index.
+		$rows = (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name, post_parent, post_type FROM {$wpdb->posts} WHERE post_name IN ( {$placeholders} ) AND post_type IN ( {$type_list} )", ...array_merge( $names, $types ) ), OBJECT_K );
 		// Core's own query reads one slug's rows by ID on the post_name index, and its loop keeps the first or the last.
 		ksort( $rows );
 
@@ -655,7 +661,7 @@ final class Batch_Resolver {
 	 * @param int[] $ids Post IDs.
 	 */
 	public static function prime_with_ancestors( array $ids ): void {
-		for ( $depth = 0; [] !== $ids && $depth < 50; $depth++ ) {
+		for ( $depth = 0; [] !== $ids && $depth < Subtree::WALK_DEPTH; $depth++ ) {
 			_prime_post_caches( $ids, false, false );
 			$parents = [];
 			foreach ( $ids as $id ) {

@@ -14,6 +14,10 @@ use WP_HTTP_Response;
 use WP_REST_Request;
 use WP_REST_Response;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The REST server encodes every response as JSON. A CSV route returns its
  * body as a string flagged with a header, and this class prints it as is.

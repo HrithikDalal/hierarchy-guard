@@ -14,6 +14,10 @@ use HierarchyGuard\Subtree;
 use WP_Post;
 use WP_Query;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Adds "Tree" to the views row of every supported list screen. The Tree view
  * is core's own list table: the top level comes from core's query with
@@ -32,7 +36,7 @@ final class Tree_View {
 	public const OPEN_VAR          = 'hierarchy_guard_open';
 	public const CHILDREN_PAGE_VAR = 'hierarchy_guard_children_page';
 	public const PER_PAGE          = 50;
-	public const STYLE             = 'hierarchy_guard_tree_style';
+	public const SCRIPT            = 'hierarchy_guard_tree_script';
 
 	/**
 	 * What the screen knows about each tree row, by post ID: its level, its
@@ -117,13 +121,6 @@ final class Tree_View {
 		if ( '' === $mode ) {
 			return;
 		}
-		/**
-		 * Fires when the Tree view, or a search in it, loads: its stylesheet
-		 * prints in the head, so the rows are indented as they arrive.
-		 *
-		 * @internal
-		 */
-		do_action( 'hierarchy_guard_tree_style' );
 		add_filter( "manage_{$type}_posts_columns", [ $this, 'columns' ], 20 );
 		add_filter( "bulk_actions-edit-{$type}", [ $this, 'bulk_actions' ] );
 		add_filter( 'quick_edit_enabled_for_post_type', '__return_false' );
@@ -168,7 +165,7 @@ final class Tree_View {
 			'<a href="%1$s"%2$s>%3$s</a>',
 			esc_url( self::url( $type ) ),
 			'' !== $this->mode( $type ) ? ' class="current" aria-current="page"' : '',
-			esc_html__( 'Tree', 'hierarchy-guard' )
+			esc_html_x( 'Tree', 'list view', 'hierarchy-guard' )
 		);
 		return $views;
 	}
@@ -371,7 +368,13 @@ final class Tree_View {
 			return;
 		}
 		/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
-		do_action( 'hierarchy_guard_list_script' );
+		do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
+		/**
+		 * Fires when the Tree view, or a search in it, needs the tree's script.
+		 *
+		 * @internal
+		 */
+		do_action( self::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_tree_script.
 
 		printf( '<input type="hidden" name="%1$s" value="%2$s">', esc_attr( self::QUERY_VAR ), esc_attr( self::VIEW ) );
 		if ( 'search' === $mode ) {

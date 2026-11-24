@@ -45,6 +45,67 @@ final class PathsTest extends WP_UnitTestCase {
 		$this->assertSame( sanitize_title( $decoded ), Paths::normalize( $decoded ), 'Stored post_name values and request segments must normalize to the same string.' );
 	}
 
+	public function test_home_absolute_takes_the_home_url_s_scheme_whatever_the_request_s(): void {
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		$home  = 'http://example.org/blog';
+		$read  = static function () use ( &$home ): string {
+			return $home;
+		};
+		add_filter( 'pre_option_home', $read );
+		try {
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertSame( 'http://example.org/blog/careers/?ref=1#jobs', Paths::home_absolute( '/careers/?ref=1#jobs' ), 'An admin forced to SSL still gets the home URL’s http.' );
+
+			unset( $_SERVER['HTTPS'] );
+			$home = 'https://example.org';
+			$this->assertSame( 'https://example.org/', Paths::home_absolute( '/' ) );
+		} finally {
+			remove_filter( 'pre_option_home', $read );
+			if ( null === $https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $https;
+			}
+		}
+	}
+
+	public function test_uri_follows_a_chain_of_any_depth_as_get_page_uri_does(): void {
+		$parent = 0;
+		for ( $level = 1; $level <= 60; $level++ ) {
+			$parent = self::factory()->post->create(
+				[
+					'post_type'   => 'page',
+					'post_name'   => "level-{$level}",
+					'post_parent' => $parent,
+				]
+			);
+		}
+
+		$this->assertSame( 60, substr_count( Paths::uri( get_post( $parent ) ), '/' ) + 1 );
+		$this->assertSame( Paths::normalize( get_page_uri( $parent ) ), Paths::uri( get_post( $parent ) ) );
+	}
+
+	public function test_a_loop_in_the_parent_chain_ends_the_walk(): void {
+		global $wpdb;
+		$a = self::factory()->post->create(
+			[
+				'post_type' => 'page',
+				'post_name' => 'loop-a',
+			]
+		);
+		$b = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'loop-b',
+				'post_parent' => $a,
+			]
+		);
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $b ], [ 'ID' => $a ] );
+		clean_post_cache( $a );
+
+		$this->assertSame( 'loop-a/loop-b', Paths::uri( get_post( $b ) ) );
+	}
+
 	public function test_uri_follows_the_parent_chain(): void {
 		$company = self::factory()->post->create(
 			[

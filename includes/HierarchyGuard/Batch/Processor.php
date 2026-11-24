@@ -13,19 +13,38 @@ use HierarchyGuard\Ledger;
 use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Operations;
+use Throwable;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
- * Each run holds the root's lock and steps its job until the job is done or
- * the run's time or memory runs low, then schedules the next run. An hourly
- * watchdog restarts a job whose run died, and gives up on one after a week.
- * A run writes its job's record in the user's change log only while it
- * holds the lock: after each step, and when an offer replaces the job.
+ * A scheduled run works through the queued roots, oldest first. For each it
+ * holds the root's lock and steps its job until the job is done or the run's
+ * time or memory runs low, then schedules the next run. A watchdog, scheduled
+ * only while jobs wait, restarts a job whose run died each hour, and gives up
+ * on one after a week. A run writes its job's record in the user's change log
+ * only while it holds the lock: after each step, and when an offer replaces
+ * the job.
  */
 final class Processor {
 
 	public const TIME_LIMIT    = 20;
 	public const STALE_AFTER   = 10 * MINUTE_IN_SECONDS;
 	public const GIVE_UP_AFTER = 7 * DAY_IN_SECONDS;
+
+	/**
+	 * Queued roots a run reads at a time.
+	 */
+	private const ROOTS_PER_READ = 100;
+
+	/**
+	 * Seconds ahead a run that finds the request's box spent queues its
+	 * successor: about the pause Action Scheduler takes before it chains its
+	 * next request.
+	 */
+	private const SPENT_DELAY = 5;
 
 	/**
 	 * Queue.
@@ -49,16 +68,34 @@ final class Processor {
 	private Change_Log $log;
 
 	/**
+	 * The time in seconds, or null for microtime( true ).
+	 *
+	 * @var (callable(): float)|null
+	 */
+	private $clock;
+
+	/**
+	 * PHP's time limit in seconds, or null for max_execution_time().
+	 *
+	 * @var (callable(): int)|null
+	 */
+	private $limit;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param Queue      $queue      Queue.
-	 * @param Operations $operations Operations.
-	 * @param Change_Log $log        Change log.
+	 * @param Queue                 $queue      Queue.
+	 * @param Operations            $operations Operations.
+	 * @param Change_Log            $log        Change log.
+	 * @param (callable(): float)|null $clock   The time in seconds, microtime( true ) when null.
+	 * @param (callable(): int)|null   $limit   PHP's time limit in seconds, max_execution_time() when null.
 	 */
-	public function __construct( Queue $queue, Operations $operations, Change_Log $log ) {
+	public function __construct( Queue $queue, Operations $operations, Change_Log $log, ?callable $clock = null, ?callable $limit = null ) {
 		$this->queue      = $queue;
 		$this->operations = $operations;
 		$this->log        = $log;
+		$this->clock      = $clock;
+		$this->limit      = $limit;
 	}
 
 	/**
@@ -67,16 +104,90 @@ final class Processor {
 	public function register(): void {
 		add_action( Queue::HOOK, [ $this, 'handle' ] );
 		add_action( Queue::WATCHDOG, [ $this, 'watchdog' ] );
-		add_action( 'admin_init', [ self::class, 'schedule_watchdog' ] );
 	}
 
 	/**
-	 * Scheduler entry point: one time-boxed run for a root.
-	 *
-	 * @param mixed $root_id Root page, as the scheduler passes it.
+	 * Scheduler entry point: one time-boxed run through the queued roots,
+	 * oldest first, reading more roots once it has passed those it read. The
+	 * next run is scheduled before the first step, so a run that dies still
+	 * leaves one, and again when the run stops for time, in case a run beside
+	 * it cleared it. At the end the run is cleared, unless a root this run
+	 * could step is left, and the watchdog too once no root is left. A root
+	 * another process holds is passed over: that process schedules its own
+	 * next run. So is a root whose step failed, reported under WP_DEBUG: the
+	 * watchdog restarts it, and the roots behind it go on. A root whose step
+	 * killed the run, past what a catch can stop, is passed over for the
+	 * same reason, by the next run and by the runs after a time stop, until
+	 * a run ends or the watchdog retries it: the stepping note carries up to
+	 * Queue::PASSED_CAP such roots. A root with nothing to step is left to
+	 * the watchdog, which drops a row that does not decode.
 	 */
-	public function handle( $root_id ): void {
-		$this->run( (int) $root_id, $this->time_limit() );
+	public function handle(): void {
+		$max     = null === $this->limit ? self::max_execution_time() : (int) ( $this->limit )();
+		$limit   = self::time_limit( $max );
+		$shared  = $max > 0;
+		$start   = self::box_start( $max, $this->now() );
+		$stepped = false;
+		if ( $shared && (int) floor( $limit - ( $this->now() - $start ) ) < 1 ) {
+			if ( [] === $this->queue->roots( 1 ) ) {
+				// No job waits: end as a run that found no root does.
+				$this->queue->unschedule();
+				wp_clear_scheduled_hook( Queue::WATCHDOG );
+				return;
+			}
+			// The request's box is spent before the run starts. Its successor is due a few seconds
+			// ahead, so a runner that claims due actions again in this request doesn't spin on it.
+			$this->queue->forget_queued();
+			$this->queue->schedule( self::SPENT_DELAY );
+			return;
+		}
+		$carried = $this->queue->passed_over();
+		$passed  = $carried;
+		$skip    = $carried;
+		$this->queue->forget_queued();
+		$this->queue->schedule();
+		do {
+			$roots = array_diff( $this->queue->roots( self::ROOTS_PER_READ + count( $passed ) ), $passed );
+			foreach ( $roots as $root_id ) {
+				// Whole seconds left. In a box of its own the first root always gets a step, as run()
+				// always takes one; once a shared box is spent, no run of the request starts a step.
+				$left = (int) floor( $limit - ( $this->now() - $start ) );
+				if ( $this->out_of_time( $start, 0 ) || ( ( $stepped || $shared ) && $left < 1 ) ) {
+					$this->queue->mark_stepping( 0, $carried );
+					$this->queue->forget_queued();
+					$this->queue->schedule();
+					return;
+				}
+				$stepped  = true;
+				$passed[] = $root_id;
+				$this->queue->mark_stepping( $root_id, $carried );
+				try {
+					if ( in_array( $this->run( $root_id, max( 1, $left ) )['state'], [ 'busy', 'idle' ], true ) ) {
+						$skip[] = $root_id;
+					}
+				} catch ( Throwable $e ) {
+					$skip[] = $root_id;
+					wp_trigger_error(
+						__METHOD__,
+						sprintf(
+							/* translators: 1: post ID, 2: the error's message. */
+							__( 'The background job for post %1$d failed: %2$s', 'hierarchy-guard' ),
+							$root_id,
+							$e->getMessage()
+						)
+					);
+				}
+			}
+		} while ( [] !== $roots );
+
+		$this->queue->end_stepping();
+		$this->queue->unschedule();
+		$waiting = $this->queue->roots( self::ROOTS_PER_READ + count( $skip ) );
+		if ( [] === $waiting ) {
+			wp_clear_scheduled_hook( Queue::WATCHDOG );
+		} elseif ( [] !== array_diff( $waiting, $skip ) ) {
+			$this->queue->schedule();
+		}
 	}
 
 	/**
@@ -98,7 +209,7 @@ final class Processor {
 			];
 		}
 
-		$start = microtime( true );
+		$start = $this->now();
 		$job   = null;
 		$last  = null;
 		$steps = 0;
@@ -126,6 +237,8 @@ final class Processor {
 
 					/**
 					 * Fires when a background batch job completes.
+					 *
+					 * @since 1.0.0
 					 *
 					 * @param array<string,mixed> $job The finished job.
 					 */
@@ -157,7 +270,7 @@ final class Processor {
 
 		// Scheduled after the unlock, so the next run cannot find this one still holding it.
 		if ( null !== $job || null !== $this->queue->offered( $root_id ) ) {
-			$this->queue->schedule( $root_id );
+			$this->queue->schedule();
 		}
 
 		if ( null !== $job ) {
@@ -173,15 +286,20 @@ final class Processor {
 	}
 
 	/**
-	 * Restarts jobs whose run died and drops jobs that can no longer finish.
+	 * Restarts jobs whose run died, retrying a root runs passed over once its
+	 * job has waited past STALE_AFTER, drops jobs that can no longer finish
+	 * and rows that do not decode, then checks again in an hour while any job
+	 * waits.
 	 */
 	public function watchdog(): void {
-		$now = time();
+		$now   = time();
+		$stale = [];
 		foreach ( $this->queue->roots() as $root_id ) {
 			$job   = $this->queue->load( $root_id );
 			$offer = $this->queue->offered( $root_id );
 			$any   = $job ?? $offer;
 			if ( null === $any ) {
+				$this->queue->drop_unreadable( $root_id );
 				continue;
 			}
 
@@ -199,31 +317,46 @@ final class Processor {
 			}
 
 			$touched = max( (int) ( $job['touched'] ?? 0 ), (int) ( $offer['touched'] ?? 0 ) );
-			if ( $touched < $now - self::STALE_AFTER && ! $this->queue->is_scheduled( $root_id ) ) {
-				$this->queue->schedule( $root_id );
+			if ( $touched < $now - self::STALE_AFTER ) {
+				$stale[] = $root_id;
+				if ( ! $this->queue->is_scheduled() ) {
+					$this->queue->schedule();
+				}
 			}
+		}
+		if ( [] !== $stale ) {
+			$this->queue->retry( $stale );
+		}
+		if ( [] !== $this->queue->roots( 1 ) ) {
+			self::schedule_watchdog();
 		}
 	}
 
 	/**
-	 * Schedules the hourly watchdog if it is missing.
+	 * Schedules the watchdog an hour ahead, unless it is scheduled already.
+	 * It is a single event, so on a site where the plugin is no longer active,
+	 * as after a network deactivation, it runs once more with nothing hooked
+	 * and is gone.
 	 */
 	public static function schedule_watchdog(): void {
 		if ( false === wp_next_scheduled( Queue::WATCHDOG ) ) {
-			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', Queue::WATCHDOG );
+			wp_schedule_single_event( time() + HOUR_IN_SECONDS, Queue::WATCHDOG );
 		}
 	}
 
 	/**
-	 * Activation: start the watchdog, which also restarts jobs left from before.
+	 * Activation: the watchdog restarts jobs left from before, when there are any.
 	 */
 	public static function activate(): void {
-		self::schedule_watchdog();
+		if ( [] !== ( new Queue() )->roots( 1 ) ) {
+			self::schedule_watchdog();
+		}
 	}
 
 	/**
-	 * Deactivation: stop scheduled runs. Stored jobs stay, and the watchdog
-	 * restarts them after reactivation.
+	 * Deactivation: stop scheduled runs. Stored jobs stay: activation, or on
+	 * a network a subsite's first admin load after the plugin is
+	 * network-activated again, schedules the watchdog while any wait.
 	 */
 	public static function deactivate(): void {
 		wp_clear_scheduled_hook( Queue::WATCHDOG );
@@ -255,12 +388,13 @@ final class Processor {
 	}
 
 	/**
-	 * Seconds a scheduled run may take: 20, or half of max_execution_time when that is lower.
+	 * Seconds a scheduled run may take: 20, or half of PHP's time limit when that is lower.
 	 *
+	 * @param int|null $max PHP's time limit in seconds, max_execution_time() when null.
 	 * @return int
 	 */
-	private function time_limit(): int {
-		$max   = (int) ini_get( 'max_execution_time' );
+	public static function time_limit( ?int $max = null ): int {
+		$max   = $max ?? self::max_execution_time();
 		$limit = self::TIME_LIMIT;
 		if ( $max > 0 ) {
 			$limit = min( $limit, intdiv( $max, 2 ) );
@@ -269,18 +403,57 @@ final class Processor {
 	}
 
 	/**
+	 * PHP's time limit in seconds, 0 for none, as in WP-CLI.
+	 *
+	 * @return int
+	 */
+	public static function max_execution_time(): int {
+		return (int) ini_get( 'max_execution_time' );
+	}
+
+	/**
+	 * When a scheduled run's time box starts. Under PHP's time limit it is
+	 * the request's start, so the runs of one cron request share one box and
+	 * can't take the whole limit between them; without a start above 0 and
+	 * not after now, it is the run's own. With no limit, as in WP-CLI or
+	 * a long-lived Action Scheduler runner, nothing stops the process for
+	 * time, and each run's box starts with the run: counted from the
+	 * process's start, a run late in it would never step.
+	 *
+	 * @param int   $max PHP's time limit in seconds, 0 for none.
+	 * @param float $now The run's start, from its clock.
+	 * @return float
+	 */
+	public static function box_start( int $max, float $now ): float {
+		$request = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) && is_numeric( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : 0.0;
+		if ( $max > 0 && $request > 0 && $request <= $now ) {
+			return $request;
+		}
+		return $now;
+	}
+
+	/**
 	 * Whether the run should stop: its time is up, or memory use passed 80%.
 	 *
-	 * @param float $start      microtime() at the start of the run.
+	 * @param float $start      now() at the start of the run.
 	 * @param int   $time_limit Seconds, 0 for no limit.
 	 * @return bool
 	 */
 	private function out_of_time( float $start, int $time_limit ): bool {
-		if ( $time_limit > 0 && microtime( true ) - $start >= $time_limit ) {
+		if ( $time_limit > 0 && $this->now() - $start >= $time_limit ) {
 			return true;
 		}
 		$memory = wp_convert_hr_to_bytes( (string) ini_get( 'memory_limit' ) );
 		return $memory > 0 && memory_get_usage() > 0.8 * $memory;
+	}
+
+	/**
+	 * The time in seconds.
+	 *
+	 * @return float
+	 */
+	private function now(): float {
+		return null === $this->clock ? microtime( true ) : (float) ( $this->clock )();
 	}
 
 	/**

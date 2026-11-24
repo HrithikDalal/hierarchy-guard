@@ -89,6 +89,124 @@ final class ListTableTest extends WP_UnitTestCase {
 		$GLOBALS['wp_query'] = $query;
 	}
 
+	public function test_the_trash_view_says_how_many_subpages_a_restore_brings_back(): void {
+		wp_trash_post( $this->ids['about'] );
+		$this->screen_rows( [ $this->ids['about'] ], 'id=>parent' );
+		$GLOBALS['wp_query']->set( 'post_status', 'trash' );
+
+		$cell = $this->cell( $this->ids['about'] );
+
+		$this->assertStringContainsString( 'Restoring it brings back 2 subpages.', $cell );
+		$this->assertStringNotContainsString( 'Top level, no subpages', $cell );
+	}
+
+	public function test_the_trash_view_reads_the_screen_s_markers_in_one_query(): void {
+		wp_trash_post( $this->ids['about'] );
+		$other = $this->page( 'other' );
+		$this->page( 'other-child', $other );
+		wp_trash_post( $other );
+		$third = $this->page( 'third' );
+		$this->page( 'third-child', $third );
+		wp_trash_post( $third );
+		$this->screen_rows( [ $this->ids['about'], $other, $third ], 'id=>parent' );
+		$GLOBALS['wp_query']->set( 'post_status', 'trash' );
+		$reads = 0;
+		$count = static function ( string $query ) use ( &$reads ): string {
+			if ( str_contains( $query, '_hierarchy_guard_moved_' ) && str_starts_with( ltrim( $query ), '(' ) ) {
+				++$reads;
+			}
+			return $query;
+		};
+		add_filter( 'query', $count );
+
+		$this->cell( $this->ids['about'] );
+		$this->assertStringContainsString( 'Restoring it brings back 1 subpage.', $this->cell( $other ) );
+		$this->assertStringContainsString( 'Restoring it brings back 1 subpage.', $this->cell( $third ) );
+		remove_filter( 'query', $count );
+
+		$this->assertSame( 1, $reads, 'One query for the three trashed rows of the screen.' );
+	}
+
+	public function test_another_type_s_list_reads_its_own_labels(): void {
+		register_post_type(
+			'hg_book',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'labels'       => [
+					'all_items'         => 'All Books',
+					'parent_item_colon' => 'Parent Book:',
+				],
+			]
+		);
+		Post_Types::reset();
+		$shelf   = self::factory()->post->create(
+			[
+				'post_type'  => 'hg_book',
+				'post_title' => 'Shelf',
+			]
+		);
+		$chapter = self::factory()->post->create(
+			[
+				'post_type'   => 'hg_book',
+				'post_title'  => 'Chapter',
+				'post_parent' => $shelf,
+			]
+		);
+		$this->screen_rows( [ $chapter ] );
+		$_GET[ List_Table::QUERY_VAR ] = (string) $shelf;
+
+		$cell = $this->cell( $chapter );
+		ob_start();
+		$this->table->filter_controls( 'hg_book' );
+		$controls = (string) ob_get_clean();
+		unregister_post_type( 'hg_book' );
+		Post_Types::reset();
+
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent Book: </span>', $cell );
+		$this->assertStringContainsString( '>All Books</a>', $controls );
+	}
+
+	public function test_a_type_that_names_itself_only_gets_core_s_default_labels(): void {
+		register_post_type(
+			'hg_doc',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'labels'       => [
+					'name'          => 'Docs',
+					'singular_name' => 'Doc',
+				],
+			]
+		);
+		Post_Types::reset();
+		$guide = self::factory()->post->create(
+			[
+				'post_type'  => 'hg_doc',
+				'post_title' => 'Guide',
+			]
+		);
+		$step  = self::factory()->post->create(
+			[
+				'post_type'   => 'hg_doc',
+				'post_title'  => 'Step',
+				'post_parent' => $guide,
+			]
+		);
+		$this->screen_rows( [ $step ] );
+		$_GET[ List_Table::QUERY_VAR ] = (string) $guide;
+
+		$cell = $this->cell( $step );
+		ob_start();
+		$this->table->filter_controls( 'hg_doc' );
+		$controls = (string) ob_get_clean();
+		unregister_post_type( 'hg_doc' );
+		Post_Types::reset();
+
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent Page: </span>', $cell, 'Core fills parent_item_colon for every hierarchical type.' );
+		$this->assertStringContainsString( '>Docs</a>', $controls, 'Core fills all_items from the menu name.' );
+	}
+
 	public function test_the_column_comes_after_the_title(): void {
 		$this->assertSame(
 			[ 'cb', 'title', List_Table::COLUMN, 'author', 'date' ],
@@ -125,7 +243,7 @@ final class ListTableTest extends WP_UnitTestCase {
 		$cell = $this->cell( $this->ids['about'] );
 
 		$this->assertStringContainsString( 'data-children="2"', $cell );
-		$this->assertStringContainsString( '<span class="screen-reader-text">Parent: </span><a href="', $cell );
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent Page: </span><a href="', $cell );
 		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> · </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '" aria-label="View the 2 subpages of “About”">2 subpages</a>', $cell );
 	}
 
@@ -148,7 +266,7 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		$cell = $this->cell( $this->ids['leadership'] );
 
-		$this->assertStringContainsString( 'Parent: </span>Team (in the Trash)', $cell, 'Core refuses to edit a page in the Trash, so it is not linked.' );
+		$this->assertStringContainsString( 'Parent Page: </span>Team (in the Trash)', $cell, 'Core refuses to edit a page in the Trash, so it is not linked.' );
 		$this->assertStringNotContainsString( 'post=' . $this->ids['team'] . '&amp;action=edit', $cell );
 	}
 
@@ -273,16 +391,58 @@ final class ListTableTest extends WP_UnitTestCase {
 		);
 
 		$this->assertSame( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'] );
-		$this->assertSame(
-			[
-				'menu_order' => 'ASC',
-				'title'      => 'ASC',
-			],
-			$vars['orderby'],
-			'Not core’s tree mode, which loads every page.'
-		);
+		$this->assertSame( 'post__in', $vars['orderby'], 'The walk’s tree order, and not core’s tree mode, which loads every page.' );
 		$this->assertSame( 20, $vars['posts_per_page'] );
 		$this->assertArrayNotHasKey( 'fields', $vars );
+	}
+
+	public function test_the_filter_lists_each_page_followed_by_its_own_subpages(): void {
+		$early                         = $this->page( 'aa-early', $this->ids['history'] );
+		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
+
+		$vars = $this->table->filter_request(
+			[
+				'post_type' => 'page',
+				'orderby'   => 'menu_order title',
+			]
+		);
+
+		$this->assertSame( [ $this->ids['history'], $early, $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'], 'Not level by level, where branches interleave.' );
+	}
+
+	/**
+	 * Sort orders the list's own links never send.
+	 *
+	 * @return array<string,array{0:mixed,1:mixed}> The orderby query var, the orderby the list query gets.
+	 */
+	public static function crafted_orderby(): array {
+		return [
+			'post__in itself' => [ 'post__in', 'post__in' ],
+			'wrong case'      => [ 'Menu_Order Title', 'Menu_Order Title' ],
+			'an array'        => [ [ 'title' ], [ 'title' ] ],
+			'empty'           => [ '', '' ],
+			'slashed'         => [ 'menu_order\\ title', 'menu_order\\ title' ],
+			'none'            => [ null, null ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_orderby
+	 *
+	 * @param mixed $orderby  The orderby query var, null for none.
+	 * @param mixed $expected The orderby the list query gets, null for none.
+	 */
+	public function test_a_crafted_orderby_is_left_as_sent_and_the_subtree_still_filters( $orderby, $expected ): void {
+		$_GET[ List_Table::QUERY_VAR ] = (string) $this->ids['about'];
+		$vars                          = [ 'post_type' => 'page' ];
+		if ( null !== $orderby ) {
+			$vars['orderby'] = $orderby;
+		}
+
+		$vars = $this->table->filter_request( $vars );
+
+		$this->assertSame( $expected, $vars['orderby'] ?? null );
+		$this->assertSame( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $vars['post__in'] );
 	}
 
 	public function test_a_sorted_list_keeps_its_sort(): void {
@@ -335,7 +495,7 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		ob_start();
 		$this->table->filter_controls( 'page', 'top' );
-		$this->assertStringContainsString( '(the first 2)', (string) ob_get_clean() );
+		$this->assertStringContainsString( '(2 of them, the levels nearest the top first)', (string) ob_get_clean() );
 	}
 
 	public function test_the_filter_controls_keep_the_filter_and_show_the_ancestors(): void {
@@ -347,7 +507,7 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		$this->assertStringContainsString( '<input type="hidden" name="hierarchy_guard_under" value="' . $this->ids['team'] . '">', $html );
 		$this->assertStringContainsString( 'Subpages of <a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['company'] ) ) . '">Company</a><span aria-hidden="true"> › </span><a href="' . esc_url( List_Table::filter_url( 'page', $this->ids['about'] ) ) . '">About</a><span aria-hidden="true"> › </span><strong>Team</strong>', $html );
-		$this->assertStringContainsString( '>Show all pages</a>', $html );
+		$this->assertStringContainsString( '>All Pages</a>', $html );
 
 		ob_start();
 		$this->table->filter_controls( 'page', 'bottom' );
@@ -495,11 +655,11 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<a class="hierarchy-guard-more" href="' . esc_url( Tree_View::place_url( 'page', $this->ids['about'], 2 ) ) . '" data-page="2" aria-label="Show more subpages of “About”">Show more</a>', $this->cell( $this->ids['about'] ), 'Named for its page, as the script’s button is.' );
 	}
 
-	public function test_past_the_cap_an_opened_tree_row_says_only_the_first_are_shown(): void {
+	public function test_past_the_cap_an_opened_tree_row_says_only_the_oldest_are_shown(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 1 );
 		$this->tree_table( [ $this->ids['company'] ], $this->ids['about'] );
 
-		$this->assertStringContainsString( '<span class="hierarchy-guard-capped">Only the first 1 subpage is shown.</span>', $this->cell( $this->ids['about'] ) );
+		$this->assertStringContainsString( '<span class="hierarchy-guard-capped">Only the 1 oldest subpage is shown.</span>', $this->cell( $this->ids['about'] ) );
 	}
 
 	public function test_a_tree_row_the_user_may_not_edit_has_no_toggle_but_keeps_its_count(): void {
@@ -582,7 +742,7 @@ final class ListTableTest extends WP_UnitTestCase {
 		$this->table                  = new List_Table( new Tree_View() );
 		$this->screen_rows( [ $this->ids['about'] ] );
 
-		$this->assertStringContainsString( '<span class="screen-reader-text">Parent page: </span><a href="', $this->cell( $this->ids['about'] ) );
+		$this->assertStringContainsString( '<span class="screen-reader-text">Parent Page: </span><a href="', $this->cell( $this->ids['about'] ) );
 	}
 
 	public function test_a_closed_toggle_points_toward_the_title_right_to_left(): void {
@@ -628,7 +788,7 @@ final class ListTableTest extends WP_UnitTestCase {
 
 		$cell = $this->cell( $this->ids['team'] );
 
-		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span>(private page)<span aria-hidden="true"> · </span>', $cell );
+		$this->assertStringContainsString( '>Company</a><span aria-hidden="true"> › </span>(private)<span aria-hidden="true"> · </span>', $cell );
 		$this->assertStringNotContainsString( 'About', $cell, 'Neither its title nor a link to it.' );
 	}
 

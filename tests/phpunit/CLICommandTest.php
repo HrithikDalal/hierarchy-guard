@@ -10,7 +10,13 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Batch\CLI_Command;
+use HierarchyGuard\Batch\Processor;
+use HierarchyGuard\Batch\Queue;
+use HierarchyGuard\Ledger;
+use HierarchyGuard\Trash\Change_Log;
+use HierarchyGuard\Trash\Mover;
 use HierarchyGuard\Trash\Operations;
+use WP_CLI;
 use WP_UnitTestCase;
 
 /**
@@ -52,5 +58,32 @@ final class CLICommandTest extends WP_UnitTestCase {
 			)
 		);
 		$this->assertSame( 'Page 12: cleaned up after the deleted page.', CLI_Command::describe( $this->job( Operations::TYPE_CLEANUP, 0, [] ) ) );
+	}
+
+	/**
+	 * In a process of its own, so the stub WP-CLI it loads never reaches
+	 * another test.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_row_that_does_not_decode_is_dropped_and_drained_as_no_job(): void {
+		global $wpdb;
+		require_once __DIR__ . '/stubs/wp-cli.php';
+		$wpdb->insert(
+			$wpdb->options,
+			[
+				'option_name'  => Queue::job_option( 10 ),
+				'option_value' => 'a:1:{s:4:"root";',
+				'autoload'     => 'off',
+			]
+		);
+		$queue   = new Queue();
+		$command = new CLI_Command( $queue, new Processor( $queue, new Operations( new Ledger(), new Mover() ), new Change_Log() ) );
+
+		$command->process_jobs( [], [ 'sleep' => '0' ] );
+
+		$this->assertSame( [ 'Success: No queued jobs.' ], WP_CLI::$lines, 'A root with nothing to step is not a job, and the drain stops at once.' );
+		$this->assertNull( $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Queue::job_option( 10 ) ) ), 'The row is dropped.' );
 	}
 }

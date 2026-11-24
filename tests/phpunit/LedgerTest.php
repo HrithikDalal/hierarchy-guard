@@ -10,6 +10,8 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Tests;
 
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Meta_Guard;
+use HierarchyGuard\Plugin;
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Settings;
 use WP_UnitTestCase;
@@ -59,6 +61,284 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertTrue( $this->ledger->record( $this->about, '/About-Us/' ) );
 		$this->assertSame( [ 'about-us' ], $this->ledger->paths_for( $this->about ) );
 		$this->assertSame( 'about-us', get_post_meta( $this->about, Ledger::key( 'page', 'about-us' ), true ) );
+	}
+
+	/**
+	 * Each method that changes an old URL's record, and the URL it purges.
+	 *
+	 * @return array<string,string[]>
+	 */
+	public static function purge_sites(): array {
+		return [
+			'record'                   => [ '/old-about/' ],
+			'record_root'              => [ '/section/' ],
+			'set_target'               => [ '/old-about/' ],
+			'forget'                   => [ '/old-about/' ],
+			'forget_root'              => [ '/section/' ],
+			'claim'                    => [ '/spot/' ],
+			'prune'                    => [ '/about-us/' ],
+			'record_root past the cap' => [ '/root-1/', '/newest/' ],
+		];
+	}
+
+	/**
+	 * Each method alone, after this request's purges are forgotten, so the
+	 * URL it purges is its own. In a process of its own, so VIP's functions
+	 * exist for this test only.
+	 *
+	 * @dataProvider purge_sites
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 *
+	 * @param string ...$urls The URLs the method purges, in order.
+	 */
+	public function test_each_change_to_an_old_url_s_record_purges_it_from_a_vip_edge_cache( string ...$urls ): void {
+		global $wpdb;
+		require_once __DIR__ . '/stubs/vip.php';
+		$site = $this->dataName();
+		switch ( $site ) {
+			case 'set_target':
+			case 'forget':
+				$this->ledger->record( $this->about, 'old-about' );
+				break;
+			case 'forget_root':
+				$this->ledger->record_root( 'page', 'section' );
+				break;
+			case 'claim':
+				$this->ledger->record( $this->about, 'spot' );
+				$spot = self::factory()->post->create(
+					[
+						'post_type' => 'page',
+						'post_name' => 'spot-new',
+					]
+				);
+				// Takes the path without a save, so only claim() acts on it.
+				$wpdb->update( $wpdb->posts, [ 'post_name' => 'spot' ], [ 'ID' => $spot ] );
+				clean_post_cache( $spot );
+				break;
+			case 'record_root past the cap':
+				update_option( Ledger::ROOT_OPTION, [ 'page' => array_map( static fn( int $i ): string => "root-{$i}", range( 1, Ledger::ROOT_CAP ) ) ], false );
+				break;
+			case 'prune':
+				$this->ledger->record( $this->about, 'about-us' );
+				// Back at the recorded path without a save, so only prune() acts on it.
+				$wpdb->update( $wpdb->posts, [ 'post_name' => 'about-us' ], [ 'ID' => $this->about ] );
+				clean_post_cache( $this->about );
+				break;
+		}
+		$this->forget_purges();
+
+		switch ( $site ) {
+			case 'record':
+				$this->ledger->record( $this->about, 'old-about' );
+				break;
+			case 'record_root':
+				$this->ledger->record_root( 'page', 'section' );
+				break;
+			case 'set_target':
+				$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 302 );
+				break;
+			case 'forget':
+				$this->ledger->forget( $this->about, 'old-about' );
+				break;
+			case 'forget_root':
+				$this->ledger->forget_root( 'page', 'section' );
+				break;
+			case 'claim':
+				$this->ledger->claim( get_post( $spot ) );
+				break;
+			case 'prune':
+				$this->ledger->prune( $this->about );
+				break;
+			case 'record_root past the cap':
+				$this->ledger->record_root( 'page', 'newest' );
+				break;
+		}
+
+		$this->assertSame( array_map( 'home_url', $urls ), $GLOBALS['hierarchy_guard_purged'], 'VIP\'s current function, for each URL this method changed.' );
+		$this->assertSame( [], $GLOBALS['hierarchy_guard_purged_deprecated'] );
+	}
+
+	/**
+	 * In a process of its own, so VIP's functions exist for this test only.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_request_purges_an_old_url_once(): void {
+		require_once __DIR__ . '/stubs/vip.php';
+		$this->forget_purges();
+
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, 'https://example.org/', 302 );
+		$this->ledger->forget( $this->about, 'old-about' );
+
+		$this->assertSame( [ home_url( '/old-about/' ) ], $GLOBALS['hierarchy_guard_purged'] );
+	}
+
+	/**
+	 * In a process of its own, with only the purge function VIP deprecated.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_vip_site_with_only_the_deprecated_purge_function_still_purges(): void {
+		require_once __DIR__ . '/stubs/vip-deprecated.php';
+		$this->forget_purges();
+
+		$this->ledger->record( $this->about, 'old-about' );
+
+		$this->assertFalse( function_exists( 'wpvip_purge_edge_cache_for_url' ), 'Precondition: an older VIP platform.' );
+		$this->assertSame( [ home_url( '/old-about/' ) ], $GLOBALS['hierarchy_guard_purged_deprecated'] );
+	}
+
+	/**
+	 * In a process of its own, so VIP's functions exist for this test only.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_page_moved_back_to_its_old_url_purges_that_url_from_a_vip_edge_cache(): void {
+		require_once __DIR__ . '/stubs/vip.php';
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-us',
+			]
+		);
+		$this->forget_purges();
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about',
+			]
+		);
+
+		$this->assertSame( [ home_url( '/about-us/' ), home_url( '/about/' ) ], $GLOBALS['hierarchy_guard_purged'], 'The edge forgets the redirect it keeps for /about/, which now leads to the page itself.' );
+	}
+
+	/**
+	 * In a process of its own, so VIP's functions exist for this test only.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_request_purges_at_most_fifty_old_urls_so_vip_keeps_its_own(): void {
+		require_once __DIR__ . '/stubs/vip.php';
+		$this->forget_purges();
+
+		for ( $i = 1; $i <= 60; $i++ ) {
+			$this->ledger->record( $this->about, "old-{$i}" );
+		}
+
+		$this->assertCount( 50, $GLOBALS['hierarchy_guard_purged'] );
+		$this->assertSame( home_url( '/old-50/' ), end( $GLOBALS['hierarchy_guard_purged'] ) );
+	}
+
+	/**
+	 * Clears what the VIP stubs recorded and what this request purged.
+	 */
+	private function forget_purges(): void {
+		$GLOBALS['hierarchy_guard_purged']            = [];
+		$GLOBALS['hierarchy_guard_purged_deprecated'] = [];
+		$purged                                       = new \ReflectionProperty( Ledger::class, 'purged' );
+		$purged->setAccessible( true );
+		$purged->setValue( null, [] );
+	}
+
+	public function test_a_url_target_on_this_site_is_kept_as_a_path_and_follows_the_site_to_a_new_domain(): void {
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, home_url( '/news/?ref=old#latest' ), 302 );
+		$this->ledger->record_root( 'page', 'archive' );
+		$this->ledger->set_target( 'page', 'archive', 0, home_url( '/blog/' ), 0 );
+		$this->ledger->record( $this->about, 'elsewhere' );
+		$this->ledger->set_target( 'page', 'elsewhere', $this->about, 'https://jobs.example.org/open/', 0 );
+
+		$this->assertSame( '/news/?ref=old#latest', get_post_meta( $this->about, Ledger::target_key( 'page', 'old-about' ), true )['url'], 'Stored as a path.' );
+		$this->assertSame( '/blog/', get_option( Ledger::ROOT_TARGETS )['page']['archive']['url'] );
+		$this->assertSame( 'https://jobs.example.org/open/', get_post_meta( $this->about, Ledger::target_key( 'page', 'elsewhere' ), true )['url'], 'Another site’s URL stays as it is.' );
+
+		$moved = static fn(): string => 'https://new.example.com';
+		add_filter( 'pre_option_home', $moved );
+		wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+		$target = $this->ledger->target( 'page', 'old-about', $this->about );
+		$root   = $this->ledger->target( 'page', 'archive', 0 );
+		remove_filter( 'pre_option_home', $moved );
+
+		$this->assertSame(
+			[
+				'url'  => 'https://new.example.com/news/?ref=old#latest',
+				'code' => 302,
+			],
+			$target,
+			'Read against the home URL, as after an import on a new domain.'
+		);
+		$this->assertSame( 'https://new.example.com/blog/', $root['url'] );
+	}
+
+	public function test_a_target_kept_as_a_path_is_read_with_the_home_url_s_scheme_whatever_the_request_s(): void {
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		$home  = static fn(): string => 'http://example.org';
+		add_filter( 'pre_option_home', $home );
+		try {
+			$this->ledger->record( $this->about, 'old-about' );
+			$this->ledger->set_target( 'page', 'old-about', $this->about, 'http://example.org/news/?ref=old#latest', 0 );
+			$_SERVER['HTTPS'] = 'on';
+			wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+
+			$this->assertSame( 'http://example.org/news/?ref=old#latest', $this->ledger->target( 'page', 'old-about', $this->about )['url'], 'An admin forced to SSL reads what the home URL says.' );
+		} finally {
+			remove_filter( 'pre_option_home', $home );
+			if ( null === $https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $https;
+			}
+		}
+	}
+
+	/**
+	 * URLs typed for a site at http://example.org/blog, and what is stored.
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public static function same_site_forms(): array {
+		return [
+			'the home URL without its slash' => [ 'http://example.org/blog', '/', 'http://example.org/blog/' ],
+			'the home URL with its slash'    => [ 'http://example.org/blog/', '/', 'http://example.org/blog/' ],
+			'the home URL with a query'      => [ 'http://example.org/blog?ref=1', '/?ref=1', 'http://example.org/blog/?ref=1' ],
+			'a page, query and fragment'     => [ 'http://example.org/blog/about/?a=1#team', '/about/?a=1#team', 'http://example.org/blog/about/?a=1#team' ],
+			'the other scheme'               => [ 'https://example.org/blog/about/', '/about/', 'http://example.org/blog/about/' ],
+			'an upper-case host'             => [ 'http://EXAMPLE.org/blog/about/', '/about/', 'http://example.org/blog/about/' ],
+			'an upper-case home path'        => [ 'http://example.org/BLOG/about/', '/about/', 'http://example.org/blog/about/' ],
+			'another port'                   => [ 'http://example.org:8080/blog/about/', 'http://example.org:8080/blog/about/', 'http://example.org:8080/blog/about/' ],
+			'the www host'                   => [ 'http://www.example.org/blog/about/', 'http://www.example.org/blog/about/', 'http://www.example.org/blog/about/' ],
+			'a path outside the home path'   => [ 'http://example.org/other/', 'http://example.org/other/', 'http://example.org/other/' ],
+			'a path starting like the home'  => [ 'http://example.org/blogroll/', 'http://example.org/blogroll/', 'http://example.org/blogroll/' ],
+			'a doubled slash after the home' => [ 'http://example.org/blog//about/?a=1', '/about/?a=1', 'http://example.org/blog/about/?a=1' ],
+			'slashes that look like a host'  => [ 'http://example.org/blog///evil.example/x', '/evil.example/x', 'http://example.org/blog/evil.example/x' ],
+		];
+	}
+
+	/**
+	 * @dataProvider same_site_forms
+	 *
+	 * @param string $typed  URL entered as the target.
+	 * @param string $stored What the record keeps.
+	 * @param string $read   What it is read back as.
+	 */
+	public function test_a_target_on_a_site_in_a_subdirectory_is_kept_as_a_path_only_when_it_is_under_the_home_url( string $typed, string $stored, string $read ): void {
+		$home = static fn(): string => 'http://example.org/blog';
+		add_filter( 'pre_option_home', $home );
+		$this->ledger->record( $this->about, 'old-about' );
+		$this->ledger->set_target( 'page', 'old-about', $this->about, $typed, 0 );
+		wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+		$target = $this->ledger->target( 'page', 'old-about', $this->about );
+		remove_filter( 'pre_option_home', $home );
+
+		$this->assertSame( $stored, get_post_meta( $this->about, Ledger::target_key( 'page', 'old-about' ), true )['url'] );
+		$this->assertSame( $read, $target['url'] );
 	}
 
 	public function test_record_is_idempotent(): void {
@@ -617,7 +897,7 @@ final class LedgerTest extends WP_UnitTestCase {
 	 * @return int Meta ID.
 	 */
 	private function old_entry( int $post_id, string $path ): int {
-		return (int) add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true );
+		return (int) Meta_Guard::writing( static fn() => add_post_meta( $post_id, Ledger::key( 'page', $path ), $path, true ) );
 	}
 
 	/**
@@ -642,6 +922,85 @@ final class LedgerTest extends WP_UnitTestCase {
 		return $out;
 	}
 
+	public function test_a_site_without_entries_schedules_no_rebuild(): void {
+		Ledger::schedule_rebuild();
+
+		$this->assertSame( [], self::rebuild_events() );
+		$this->assertFalse( get_option( Ledger::RECENT_STATE ) );
+		$this->assertFalse( Ledger::building(), 'Nothing to build, so no notice.' );
+	}
+
+	public function test_the_first_entry_recorded_schedules_the_daily_rebuild(): void {
+		$this->ledger->record( $this->about, 'first' );
+
+		$events = self::rebuild_events();
+		$this->assertCount( 1, $events );
+		$this->assertGreaterThan( time() + DAY_IN_SECONDS - MINUTE_IN_SECONDS, $events[0]['time'] );
+		$this->assertFalse( Ledger::building(), 'The entry is on the list already.' );
+	}
+
+	public function test_a_rebuild_that_finds_no_entry_schedules_nothing_after_it(): void {
+		$this->ledger->record( $this->about, 'gone' );
+		$this->ledger->forget( $this->about, 'gone' );
+		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
+
+		self::run_rebuild();
+
+		$this->assertSame( [], self::rebuild_events(), 'The next entry recorded schedules it again.' );
+		$this->assertSame( 'done:page', get_option( Ledger::RECENT_STATE ) );
+	}
+
+	public function test_an_imported_entry_brings_the_rebuild_forward(): void {
+		$this->ledger->record( $this->about, 'kept' );
+		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'Precondition: a day ahead.' );
+
+		$this->assertNull( ( new Meta_Guard() )->check( null, Ledger::key( 'page', 'imported' ), true ), 'An import may add the row.' );
+		( new Meta_Guard() )->note_import( Ledger::key( 'page', 'imported' ), true );
+
+		$this->assertLessThanOrEqual( time(), wp_next_scheduled( Ledger::REBUILD_HOOK ) );
+		$this->assertCount( 1, self::rebuild_events() );
+	}
+
+	public function test_an_imported_entry_is_found_where_a_miss_was_cached(): void {
+		$this->assertNull( $this->ledger->find( 'page', 'imported-about' ), 'Precondition: the miss is cached now.' );
+		Meta_Guard::writing( fn() => add_post_meta( $this->about, Ledger::key( 'page', 'imported-about' ), 'imported-about' ) );
+		$this->assertNull( $this->ledger->find( 'page', 'imported-about' ), 'Precondition: a row added without a bump is not seen.' );
+
+		( new Meta_Guard() )->note_import( Ledger::key( 'page', 'imported-about' ), true );
+
+		$this->assertSame( $this->about, $this->ledger->find( 'page', 'imported-about' ) );
+	}
+
+	public function test_a_row_added_outside_an_import_brings_nothing_forward(): void {
+		$this->ledger->record( $this->about, 'kept' );
+		$changed = wp_cache_get_last_changed( Ledger::CACHE_GROUP );
+
+		( new Meta_Guard() )->note_import( Ledger::key( 'page', 'other' ), false );
+		( new Meta_Guard() )->note_import( '_other_key', true );
+
+		$this->assertSame( $changed, wp_cache_get_last_changed( Ledger::CACHE_GROUP ) );
+		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ) );
+	}
+
+	public function test_the_rebuild_reads_the_ledger_s_rows_through_the_meta_key_index(): void {
+		global $wpdb;
+		$this->ledger->record( $this->about, 'old-about' );
+		$sql  = '';
+		$keep = static function ( string $query ) use ( &$sql ): string {
+			if ( str_contains( $query, 'ORDER BY pm.meta_id DESC LIMIT' ) ) {
+				$sql = $query;
+			}
+			return $query;
+		};
+		add_filter( 'query', $keep );
+		Ledger::rebuild_recent();
+		remove_filter( 'query', $keep );
+
+		$plan = $wpdb->get_results( 'EXPLAIN ' . $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The rebuild's own prepared query.
+		$this->assertSame( 'meta_key', $plan[0]['key'], 'Not a walk of the primary key through every newer row of other meta.' );
+		$this->assertSame( 'range', $plan[0]['type'] );
+	}
+
 	public function test_records_made_before_the_list_reach_it_on_the_first_rebuild(): void {
 		$first  = $this->old_entry( $this->about, 'first' );
 		$second = $this->old_entry( $this->about, 'second' );
@@ -662,6 +1021,7 @@ final class LedgerTest extends WP_UnitTestCase {
 	}
 
 	public function test_the_rebuild_schedules_its_own_next_run_a_day_later_and_only_one(): void {
+		$this->ledger->record( $this->about, 'kept' );
 		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
 
 		self::run_rebuild();
@@ -676,19 +1036,6 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->record( $this->about, 'one' );
 		$this->ledger->forget( $this->about, 'one' );
 		$this->assertCount( 1, self::rebuild_events(), 'Never more than one.' );
-	}
-
-	public function test_an_old_recurring_rebuild_event_is_replaced_by_a_single_one(): void {
-		Ledger::schedule_rebuild();
-		Ledger::rebuild_recent();
-		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
-		wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', Ledger::REBUILD_HOOK );
-
-		Ledger::schedule_rebuild();
-
-		$events = self::rebuild_events();
-		$this->assertCount( 1, $events );
-		$this->assertFalse( $events[0]['schedule'] ?? false );
 	}
 
 	/**
@@ -781,7 +1128,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		Ledger::schedule_rebuild();
 		// Another request read the list before the rebuild wrote it, and writes after:
 		// it records an entry, and its view knew nothing of a or b, whose row it deleted.
-		$new   = (int) add_post_meta( $this->about, Ledger::key( 'page', 'new' ), 'new', true );
+		$new   = (int) Meta_Guard::writing( fn() => add_post_meta( $this->about, Ledger::key( 'page', 'new' ), 'new', true ) );
 		$after = static function () use ( $wpdb, $new, $meanwhile, $b ): void {
 			static $done = false;
 			if ( $done ) {
@@ -847,13 +1194,15 @@ final class LedgerTest extends WP_UnitTestCase {
 	public function test_once_built_a_normal_load_runs_nothing(): void {
 		global $wp_filter;
 
+		$this->old_entry( $this->about, 'old' );
 		Ledger::schedule_rebuild();
 		Ledger::rebuild_recent();
+		Plugin::setup();
 		$next = wp_next_scheduled( Ledger::REBUILD_HOOK );
 
 		$queries = get_num_queries();
-		Ledger::schedule_rebuild();
-		$this->assertSame( $queries, get_num_queries(), 'Reads of autoloaded options only.' );
+		Plugin::maybe_upgrade();
+		$this->assertSame( $queries, get_num_queries(), 'A read of an autoloaded option only.' );
 		$this->assertSame( $next, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The daily run is left where it is.' );
 
 		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
@@ -873,7 +1222,8 @@ final class LedgerTest extends WP_UnitTestCase {
 			}
 			return false;
 		};
-		$this->assertTrue( $hooked( 'admin_init', 'schedule_rebuild' ) );
+		$this->assertFalse( $hooked( 'admin_init', 'schedule_rebuild' ), 'An admin load schedules nothing.' );
+		$this->assertSame( 10, has_action( 'admin_init', [ Plugin::class, 'maybe_upgrade' ] ) );
 		$this->assertTrue( $hooked( Ledger::REBUILD_HOOK, 'rebuild_recent' ) );
 		foreach ( [ 'init', 'wp', 'template_redirect', 'admin_init' ] as $hook ) {
 			$this->assertFalse( $hooked( $hook, 'rebuild_recent' ), "The rebuild never runs on $hook." );
@@ -910,8 +1260,9 @@ final class LedgerTest extends WP_UnitTestCase {
 				'post_name' => 'guide',
 			]
 		);
-		$entry = (int) add_post_meta( $doc, Ledger::key( 'hg_docs', 'manual' ), 'manual', true );
-		$only  = static fn(): array => [ 'page' ];
+		$entry = (int) Meta_Guard::writing( static fn() => add_post_meta( $doc, Ledger::key( 'hg_docs', 'manual' ), 'manual', true ) );
+		$this->old_entry( $this->about, 'old' );
+		$only = static fn(): array => [ 'page' ];
 		add_filter( 'hierarchy_guard_post_types', $only );
 		Post_Types::reset();
 		Ledger::schedule_rebuild();
@@ -935,6 +1286,7 @@ final class LedgerTest extends WP_UnitTestCase {
 	}
 
 	public function test_types_wp_cron_sees_differently_from_wp_admin_never_keep_the_notice_on(): void {
+		$this->old_entry( $this->about, 'old' );
 		Ledger::schedule_rebuild();
 		// WP-Cron supports only pages; wp-admin also a type registered there alone.
 		$cron = static fn(): array => [ 'page' ];
@@ -1008,27 +1360,6 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertGreaterThan( time() + HOUR_IN_SECONDS, wp_next_scheduled( Ledger::REBUILD_HOOK ), 'The rebuild reads supported types only, so it is not brought forward for this one.' );
 	}
 
-	public function test_scheduling_the_daily_rebuild_clears_what_earlier_builds_left_once(): void {
-		Ledger::schedule_rebuild();
-		Ledger::rebuild_recent();
-		wp_clear_scheduled_hook( Ledger::REBUILD_HOOK );
-		// Left by a build of the plugin from before the daily rebuild.
-		wp_schedule_single_event( time() + HOUR_IN_SECONDS, 'hierarchy_guard_backfill_recent' );
-		add_option( 'hierarchy_guard_recent_lock', (string) ( time() + 10 ), '', false );
-		add_option( 'hierarchy_guard_recent_queue', '["add","page",[1]]', '', false );
-
-		Ledger::schedule_rebuild();
-
-		$this->assertFalse( wp_next_scheduled( 'hierarchy_guard_backfill_recent' ) );
-		$this->assertFalse( get_option( 'hierarchy_guard_recent_lock' ) );
-		$this->assertFalse( get_option( 'hierarchy_guard_recent_queue' ) );
-		$this->assertCount( 1, self::rebuild_events() );
-
-		$queries = get_num_queries();
-		Ledger::schedule_rebuild();
-		$this->assertSame( $queries, get_num_queries(), 'Once: with the daily run scheduled, nothing is cleared again.' );
-	}
-
 	public function test_the_daily_rebuild_restores_an_entry_a_lost_update_dropped(): void {
 		$this->ledger->record( $this->about, 'one' );
 		$this->ledger->record( $this->about, 'two' );
@@ -1075,7 +1406,7 @@ final class LedgerTest extends WP_UnitTestCase {
 		$one = $this->meta_id( $this->about, 'one' );
 		get_option( Ledger::RECENT );
 		// Another request records an entry: the row is in the database, this request's cache is stale.
-		$other = (int) add_post_meta( $this->about, Ledger::key( 'page', 'other' ), 'other', true );
+		$other = (int) Meta_Guard::writing( fn() => add_post_meta( $this->about, Ledger::key( 'page', 'other' ), 'other', true ) );
 		$wpdb->update(
 			$wpdb->options,
 			[

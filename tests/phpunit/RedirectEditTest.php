@@ -62,7 +62,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		foreach ( [ 'tab', 'action', 'redirect', '_wpnonce', 'target', 'code', 's', 'redirect_type', 'paged' ] as $key ) {
+		foreach ( [ 'tab', 'action', 'redirect', '_wpnonce', 'target', 'code', 's', 'hierarchy_guard_type', 'paged' ] as $key ) {
 			unset( $_GET[ $key ], $_POST[ $key ], $_REQUEST[ $key ] );
 		}
 		$GLOBALS['wp_settings_errors'] = [];
@@ -125,11 +125,11 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
 		$this->assertStringContainsString( '<form method="post" action="' . esc_url( Settings_Page::url( 'redirects' ) ) . '">', $html );
 		$this->assertStringContainsString( '<tr><th scope="row">Old URL</th><td><code>/old-about/</code> and the URLs under it</td></tr>', $html );
-		$this->assertStringContainsString( '<td><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" dir="ltr" aria-describedby="hierarchy-guard-target-description">', $html, 'A text field, so a path is not stopped by the browser.' );
-		$this->assertStringContainsString( '<p class="description" id="hierarchy-guard-target-description">A page on this site: the redirect follows it when it moves, and the URLs under <code>/old-about/</code> go to the matching URLs under it. Any other URL: only <code>/old-about/</code> redirects, and this redirect no longer covers the URLs under it. A path on this site, such as <code>/about/team/</code>, works as well as a full URL.</p>', $html );
-		$this->assertStringContainsString( 'the URLs under <code>/old-about/</code> go to', $html, 'The old URL prints in <code> in the help, so it reads left to right in a right-to-left admin.' );
-		$this->assertStringNotContainsString( 'Leave empty to keep this.', $html );
-		$this->assertMatchesRegularExpression( '#<input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description"\s+checked=\'checked\'> Automatic</label><p class="description" id="hierarchy-guard-code-automatic-description">301, or 302 while restoring a page from the Trash could undo the move.</p>#', $html );
+		$this->assertStringContainsString( '<td><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="' . esc_attr( get_permalink( $this->ids['about'] ) ) . '" dir="ltr" aria-describedby="hierarchy-guard-target-description">', $html, 'A text field, so a path is not stopped by the browser; not marked invalid before a save.' );
+		$this->assertStringContainsString( '<div id="hierarchy-guard-target-description"><p class="description">If you enter a page on this site, the redirect follows that page when it moves, and URLs under <code>/old-about/</code> go to the matching URLs under that page.</p><p class="description">If you enter any other URL, only <code>/old-about/</code> itself redirects there, and this redirect no longer covers the URLs under it.</p><p class="description">You can enter a path on this site, such as <code>/about/team/</code>, instead of a full URL.</p></div>', $html, 'One sentence a line, for each kind of target.' );
+		$this->assertStringContainsString( 'URLs under <code>/old-about/</code> go to', $html, 'The old URL prints in <code> in the help, so it reads left to right in a right-to-left admin.' );
+		$this->assertStringNotContainsString( 'Leave this empty', $html );
+		$this->assertMatchesRegularExpression( '#<input type="radio" name="code" value="0" aria-describedby="hierarchy-guard-code-automatic-description"\s+checked=\'checked\'> Automatic</label><p class="description" id="hierarchy-guard-code-automatic-description">Uses 301 \(permanent\), or 302 \(temporary\) while a restore from the Trash can still undo the move.</p>#', $html );
 		$this->assertStringContainsString( '301 (permanent)', $html );
 		$this->assertStringContainsString( '302 (temporary)', $html );
 		$this->assertStringContainsString( 'name="_wpnonce" value="' . wp_create_nonce( Redirect_Edit::NONCE_SAVE . $this->id ) . '"', $html );
@@ -195,10 +195,31 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$this->assertSame( [ 'Enter a URL that starts with http:// or https://, or a path on this site that starts with /.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
 		$this->assertStringContainsString( '<h2>Edit redirect</h2>', $html );
-		$this->assertStringContainsString( 'value="ftp://example.org/"', $html );
+		$this->assertStringContainsString( '<span class="screen-reader-text" id="hierarchy-guard-target-error">Enter a URL that starts with http:// or https://, or a path on this site that starts with /.</span><input', $html, 'Why, without the notice’s Dismiss button.' );
+		$this->assertStringContainsString( 'value="ftp://example.org/" dir="ltr" aria-describedby="hierarchy-guard-target-error hierarchy-guard-target-description" aria-invalid="true" autofocus>', $html, 'Marked invalid, described by why, and focused.' );
 		$this->assertMatchesRegularExpression( '#value="301"\s+checked=\'checked\'#', $html );
 		$this->assertStringNotContainsString( 'wp-list-table', $html );
 		$this->assertNull( $this->ledger->target( 'page', 'old-about', $this->ids['about'] ) );
+	}
+
+	public function test_a_save_that_fails_to_store_says_why_without_calling_the_field_invalid(): void {
+		set_current_screen( 'settings_page_hierarchy-guard' );
+		require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		$page = new Settings_Page( new Providers(), $this->records );
+		$this->submit( get_permalink( $this->ids['history'] ), '301' );
+		add_filter( 'hierarchy_guard_should_record', '__return_false' );
+
+		$page->load();
+		ob_start();
+		$page->render();
+		$html = (string) ob_get_clean();
+		remove_filter( 'hierarchy_guard_should_record', '__return_false' );
+		set_current_screen( 'front' );
+
+		$this->assertSame( [ 'The redirect could not be saved.' ], array_column( get_settings_errors( 'hierarchy_guard' ), 'message' ) );
+		$this->assertStringContainsString( '<span class="screen-reader-text" id="hierarchy-guard-target-error">The redirect could not be saved.</span><input', $html );
+		$this->assertStringContainsString( 'dir="ltr" aria-describedby="hierarchy-guard-target-error hierarchy-guard-target-description" autofocus>', $html, 'What was entered is not at fault: described by why and focused, not marked invalid.' );
+		$this->assertStringNotContainsString( 'aria-invalid', $html );
 	}
 
 	public function test_a_code_sent_as_an_array_is_read_as_automatic(): void {
@@ -319,8 +340,9 @@ final class RedirectEditTest extends WP_UnitTestCase {
 
 		$html = $this->view();
 
-		$this->assertStringContainsString( '<td><p id="hierarchy-guard-target-now">Now redirects to the same page at the top level, for example <code>/about/team/</code> to <code>/team/</code>.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="" dir="ltr" aria-describedby="hierarchy-guard-target-now hierarchy-guard-target-description">', $html, 'The field starts empty, and is described by where it leads now too.' );
-		$this->assertStringContainsString( 'id="hierarchy-guard-target-description">Leave empty to keep this. Enter a URL to send these URLs somewhere else. A page on this site:', $html );
+		$this->assertStringContainsString( '<td><p id="hierarchy-guard-target-now">URLs under <code>/archive/</code> now go to the same page at the top level, for example <code>/archive/example/</code> to <code>/example/</code>.</p><input type="text" class="regular-text code" id="hierarchy-guard-target" name="target" value="" dir="ltr" aria-describedby="hierarchy-guard-target-now hierarchy-guard-target-description">', $html, 'The field starts empty, and is described by where it leads now too, with an example from its own old URL.' );
+		$this->assertStringContainsString( 'id="hierarchy-guard-target-description"><p class="description">Leave this empty to keep sending them to the same page at the top level.</p><p class="description">Or enter a URL to send them somewhere else.</p><p class="description">If you enter a page on this site,', $html );
+		$this->assertStringContainsString( '<tr><th scope="row">Old URL</th><td>The URLs under <code>/archive/</code></td></tr>', $html, 'Its old URL itself is a 404: only the URLs under it redirect.' );
 
 		$this->submit( '', '302' );
 		$this->assertStringContainsString( 'settings-updated=true', $this->edit->handle() );
@@ -328,18 +350,42 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertSame( 302, $this->ledger->target( 'page', 'archive', 0 )['code'] );
 	}
 
+	public function test_a_top_level_entry_of_a_type_with_a_prefix_gives_an_example_under_that_prefix(): void {
+		register_post_type(
+			'hg_docs',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'rewrite'      => [ 'slug' => 'docs' ],
+			]
+		);
+		Post_Types::reset();
+		try {
+			$this->ledger->record_root( 'hg_docs', 'archive' );
+			$this->id = Records::id( 0, 'hg_docs', 'archive' );
+			$this->follow( Redirect_Edit::edit_url( $this->id ) );
+
+			$html = $this->view();
+		} finally {
+			unregister_post_type( 'hg_docs' );
+			Post_Types::reset();
+		}
+
+		$this->assertStringContainsString( '<p id="hierarchy-guard-target-now">URLs under <code>/docs/archive/</code> now go to the same page at the top level, for example <code>/docs/archive/example/</code> to <code>/docs/example/</code>.</p>', $html );
+	}
+
 	public function test_the_edit_view_keeps_the_list_s_search_filter_and_page_through_save_cancel_and_delete(): void {
 		$list = [
-			's'             => 'old about',
-			'redirect_type' => 'page',
-			'paged'         => '2',
+			's'                    => 'old about',
+			'hierarchy_guard_type' => 'page',
+			'paged'                => '2',
 		];
 		foreach ( $list as $key => $value ) {
 			$_GET[ $key ]     = $value;
 			$_REQUEST[ $key ] = $value;
 		}
-		$back = admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=old%20about&redirect_type=page&paged=2' );
-		$this->assertStringContainsString( '&amp;s=old+about&amp;redirect_type=page&amp;paged=2', Redirect_Edit::edit_url( $this->id ), 'The row’s Edit link.' );
+		$back = admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=old%20about&hierarchy_guard_type=page&paged=2' );
+		$this->assertStringContainsString( '&amp;s=old+about&amp;hierarchy_guard_type=page&amp;paged=2', Redirect_Edit::edit_url( $this->id ), 'The row’s Edit link.' );
 		$this->follow( Redirect_Edit::edit_url( $this->id ) );
 
 		$html = $this->view();
@@ -353,7 +399,7 @@ final class RedirectEditTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'class="subtitle"', $page, 'The search heading belongs to the list, not the Edit view.' );
 		$this->assertStringContainsString( '<h1>Hierarchy Guard</h1>', $page );
 
-		$this->assertStringContainsString( '<input type="hidden" name="s" value="old about"><input type="hidden" name="redirect_type" value="page"><input type="hidden" name="paged" value="2">', $html, 'Save posts them back.' );
+		$this->assertStringContainsString( '<input type="hidden" name="s" value="old about"><input type="hidden" name="hierarchy_guard_type" value="page"><input type="hidden" name="paged" value="2">', $html, 'Save posts them back.' );
 		$this->assertStringContainsString( '<a class="button" href="' . esc_url( $back ) . '">Cancel</a>', $html );
 		$this->assertStringContainsString( '<a class="delete" href="' . esc_url( Redirect_Edit::delete_url( $this->id ) ) . '"', $html );
 		$this->assertStringContainsString( 's=old+about', Redirect_Edit::delete_url( $this->id ) );

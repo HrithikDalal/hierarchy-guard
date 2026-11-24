@@ -11,6 +11,10 @@ namespace HierarchyGuard;
 
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Every query here is bounded by a limit or a cap, never by the size of the
  * subtree. "Live" means any status except trash and core's internal
@@ -22,6 +26,12 @@ final class Subtree {
 	public const COUNT_CAP = 1000;
 
 	/**
+	 * The most levels a level-by-level walk reads, one query each, so a loop
+	 * in the parent data or a very deep tree can't make it run on.
+	 */
+	public const WALK_DEPTH = 50;
+
+	/**
 	 * The most a subtree count reports exactly.
 	 *
 	 * @return int
@@ -29,6 +39,8 @@ final class Subtree {
 	public static function count_cap(): int {
 		/**
 		 * Filters the cap on subtree counts.
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param int $cap Largest count reported exactly, 1,000 by default.
 		 */
@@ -90,6 +102,29 @@ final class Subtree {
 	}
 
 	/**
+	 * Direct children in any status, lowest ID first, as core's own
+	 * re-parent on a delete finds them: one read of the post_parent index
+	 * that stops at the limit, never sorting every child, and no query
+	 * filter of another plugin narrows it.
+	 *
+	 * @param int    $parent_id Parent post ID.
+	 * @param string $post_type Post type name.
+	 * @param int    $limit     Maximum IDs to return.
+	 * @return int[]
+	 */
+	public static function children_in_any_status( int $parent_id, string $post_type, int $limit ): array {
+		global $wpdb;
+
+		if ( $limit < 1 ) {
+			return [];
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Index range on post_parent, bounded by LIMIT; once per post deleted for good.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent = %d AND post_type = %s ORDER BY ID ASC LIMIT %d", $parent_id, $post_type, $limit ) );
+
+		return array_map( 'intval', $ids );
+	}
+
+	/**
 	 * Number of live direct children, stopping at a cap.
 	 *
 	 * @param int    $parent_id Parent post ID.
@@ -127,11 +162,11 @@ final class Subtree {
 		$level = [ $root_id ];
 		$depth = 0;
 
-		while ( [] !== $level && $count <= $cap && $depth < 50 ) {
+		while ( [] !== $level && $count <= $cap && $depth < self::WALK_DEPTH ) {
 			++$depth;
-			$in = implode( ',', array_map( 'intval', $level ) );
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only; LIMIT bounds each level by the remaining cap.
-			$level  = array_map( 'intval', $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) LIMIT %d", $post_type, $cap + 1 - $count ) ) );
+			$in = implode( ',', array_fill( 0, count( $level ), '%d' ) );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $in holds only %d, one per post of the level, and the values come as one array; LIMIT bounds each level by the remaining cap.
+			$level  = array_map( 'intval', $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) LIMIT %d", array_merge( array_map( 'intval', $level ), [ $post_type, $cap + 1 - $count ] ) ) ) );
 			$count += count( $level );
 		}
 
@@ -153,9 +188,9 @@ final class Subtree {
 			return [];
 		}
 
-		$in = implode( ',', $ids );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, at most one batch of them.
-		$parents = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT post_parent FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' )", $post_type ) );
+		$in = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds only %d, one per post, at most one batch of them.
+		$parents = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT post_parent FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' )", ...array_merge( $ids, [ $post_type ] ) ) );
 
 		$parents = array_map( 'intval', $parents );
 		return array_values( array_filter( $ids, static fn( int $id ): bool => in_array( $id, $parents, true ) ) );
@@ -220,8 +255,9 @@ final class Subtree {
 	/**
 	 * Live children of the given parents, at most $limit, in menu order then
 	 * title then ID. The first query follows the post_parent index in its own
-	 * order and stops at the limit; the second sorts only that bounded set. No
-	 * query reads every child of a large parent.
+	 * order and stops at the limit, so past it the set is the oldest
+	 * children, by ID; the second sorts only that bounded set. No query reads
+	 * every child of a large parent.
 	 *
 	 * @param int[]  $parent_ids Parent post IDs; 0 stands for top level.
 	 * @param string $post_type  Post type name.
@@ -236,9 +272,9 @@ final class Subtree {
 			return [];
 		}
 
-		$in = implode( ',', $parent_ids );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only; the index's own order lets LIMIT stop the read.
-		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY post_parent ASC, ID ASC LIMIT %d", $post_type, $limit ) );
+		$in = implode( ',', array_fill( 0, count( $parent_ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $in holds only %d, one per parent, and the values come as one array; the index's own order lets LIMIT stop the read.
+		$ids = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM {$wpdb->posts} WHERE post_parent IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY post_parent ASC, ID ASC LIMIT %d", array_merge( $parent_ids, [ $post_type, $limit ] ) ) );
 		if ( [] === $ids ) {
 			return [];
 		}
@@ -250,29 +286,51 @@ final class Subtree {
 	}
 
 	/**
-	 * Live descendants level by level, stopping at the cap.
+	 * Live descendants in the order a tree lists them, stopping at the cap:
+	 * each page followed by its own subpages, siblings in menu order then
+	 * title. The levels are read one query each, nearest the root first, so
+	 * past the cap the levels nearest the root are the ones kept.
 	 *
 	 * @param int    $root_id   Root post ID.
 	 * @param string $post_type Post type name.
 	 * @param int    $cap       Most IDs to return.
-	 * @return array{ids:int[],capped:bool} IDs root-near first, each level in menu order; capped when more exist.
+	 * @return array{ids:int[],capped:bool} IDs in tree order; capped when more exist.
 	 */
 	public static function descendant_ids( int $root_id, string $post_type, int $cap ): array {
 		$cap   = max( 1, $cap );
-		$ids   = [];
+		$rows  = [];
 		$found = 0;
 		$level = [ $root_id ];
 		$depth = 0;
 
-		while ( [] !== $level && $found <= $cap && $depth < 50 ) {
+		while ( [] !== $level && $found <= $cap && $depth < self::WALK_DEPTH ) {
 			++$depth;
-			$level  = array_map( 'intval', array_column( self::ordered_children( $level, $post_type, $cap + 1 - $found ), 'ID' ) );
-			$ids    = array_merge( $ids, $level );
-			$found += count( $level );
+			$read   = self::ordered_children( $level, $post_type, $cap + 1 - $found );
+			$rows   = array_merge( $rows, $read );
+			$found += count( $read );
+			$level  = array_map( 'intval', array_column( $read, 'ID' ) );
+		}
+
+		// A page read again, as a parent loop in the data brings the root back, is listed once.
+		$kids = [];
+		$seen = [ $root_id => true ];
+		foreach ( array_slice( $rows, 0, $cap ) as $row ) {
+			$id = (int) $row['ID'];
+			if ( ! isset( $seen[ $id ] ) ) {
+				$seen[ $id ]                         = true;
+				$kids[ (int) $row['post_parent'] ][] = $id;
+			}
+		}
+		$ids   = [];
+		$stack = array_reverse( $kids[ $root_id ] ?? [] );
+		while ( [] !== $stack ) {
+			$id    = array_pop( $stack );
+			$ids[] = $id;
+			$stack = array_merge( $stack, array_reverse( $kids[ $id ] ?? [] ) );
 		}
 
 		return [
-			'ids'    => array_slice( $ids, 0, $cap ),
+			'ids'    => $ids,
 			'capped' => $found > $cap,
 		];
 	}

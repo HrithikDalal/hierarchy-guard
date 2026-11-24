@@ -15,6 +15,10 @@ use HierarchyGuard\Redirects\Records;
 use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The plugin's one admin page, under Settings, for users with manage_options:
  * core nav tabs, the Settings tab's three fields, saved through the Settings
@@ -83,7 +87,7 @@ final class Settings_Page {
 	}
 
 	/**
-	 * The Redirects field, for "Set up redirects" links.
+	 * The Built-in redirects field, for "Set up redirects" links.
 	 *
 	 * @return string
 	 */
@@ -153,7 +157,7 @@ final class Settings_Page {
 	 * @return string
 	 */
 	public function admin_title( $admin_title ): string {
-		$view = $this->edit->is_editing() ? __( 'Edit redirect', 'hierarchy-guard' ) : __( 'Redirects', 'hierarchy-guard' );
+		$view = $this->edit->is_editing() ? __( 'Edit redirect', 'hierarchy-guard' ) : _x( 'Redirects', 'settings tab', 'hierarchy-guard' );
 		/* translators: 1: the view of the page, such as Redirects; 2: the page's title, as the browser shows it. */
 		return sprintf( __( '%1$s ‹ %2$s', 'hierarchy-guard' ), $view, (string) $admin_title );
 	}
@@ -179,7 +183,7 @@ final class Settings_Page {
 
 		add_settings_field( 'hierarchy_guard_post_types', __( 'Post types', 'hierarchy-guard' ), [ $this, 'render_post_types' ], self::SLUG, self::SECTION );
 		add_settings_field( 'hierarchy_guard_trash_policy', __( 'Trashing a page with subpages', 'hierarchy-guard' ), [ $this, 'render_trash_policy' ], self::SLUG, self::SECTION );
-		add_settings_field( 'hierarchy_guard_serve_redirects', __( 'Redirects', 'hierarchy-guard' ), [ $this, 'render_serve_redirects' ], self::SLUG, self::SECTION );
+		add_settings_field( 'hierarchy_guard_serve_redirects', __( 'Built-in redirects', 'hierarchy-guard' ), [ $this, 'render_serve_redirects' ], self::SLUG, self::SECTION );
 	}
 
 	/**
@@ -232,13 +236,14 @@ final class Settings_Page {
 
 		if ( Ledger::building() ) {
 			$building = __( 'The list of recorded redirects is still being built.', 'hierarchy-guard' );
-			$older    = __( 'Older redirects appear here once it’s done.', 'hierarchy-guard' );
+			/* translators: "it" is the list of recorded redirects. */
+			$older = __( 'Older redirects will appear when it’s finished.', 'hierarchy-guard' );
 			$this->inline_notice( esc_html( $building . ' ' . $older ), 'info' );
 		}
 		if ( ! Settings::serve_redirects() ) {
 			$off = esc_html__( 'Built-in redirects are off, so these redirects aren’t served.', 'hierarchy-guard' );
-			/* translators: %s: URL of the Redirects field on the Settings tab. */
-			$on = sprintf( __( 'Turn them on in the <a href="%s">Settings tab</a>.', 'hierarchy-guard' ), esc_url( self::redirects_url() ) );
+			/* translators: %s: URL of the Built-in redirects field on the Settings tab. */
+			$on = sprintf( __( 'Turn on built-in redirects in the <a href="%s">Settings tab</a>.', 'hierarchy-guard' ), esc_url( self::redirects_url() ) );
 			$this->inline_notice( $off . ' ' . $on, 'warning' );
 		}
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
@@ -253,13 +258,17 @@ final class Settings_Page {
 			if ( '' !== $name ) {
 				/* translators: %s: name of the detected redirect plugin. */
 				$active = sprintf( __( '%s is active.', 'hierarchy-guard' ), $name );
-				/* translators: %s: name of the detected redirect plugin. */
-				$recorded = sprintf( __( 'These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them in %s.', 'hierarchy-guard' ), $name );
 			} else {
-				$active   = __( 'A redirect plugin is active.', 'hierarchy-guard' );
-				$recorded = __( 'These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them there.', 'hierarchy-guard' );
+				$active = __( 'A redirect plugin is active.', 'hierarchy-guard' );
 			}
-			$this->inline_notice( esc_html( $active . ' ' . $recorded ), 'info' );
+			// The notices offer the redirects to add only while built-in redirects are off; with them on, they say the old URLs redirect.
+			if ( ! Settings::serve_redirects() ) {
+				$active .= ' ' . ( '' !== $name
+					/* translators: %s: name of the detected redirect plugin. */
+					? sprintf( __( 'After each URL change, Hierarchy Guard’s notice offers to add these redirects to %s.', 'hierarchy-guard' ), $name )
+					: __( 'After each URL change, Hierarchy Guard’s notice offers to add these redirects to that plugin.', 'hierarchy-guard' ) );
+			}
+			$this->inline_notice( esc_html( $active ), 'info' );
 		}
 		if ( $table->is_capped() ) {
 			$cap = Subtree::count_cap();
@@ -276,9 +285,10 @@ final class Settings_Page {
 		$table->search_box( __( 'Search Redirects', 'hierarchy-guard' ), 'hierarchy-guard-search' );
 		$table->display();
 		echo '</form>';
-		$checks = __( 'Status checks posts and pages at each old URL.', 'hierarchy-guard' );
-		$others = __( 'Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked.', 'hierarchy-guard' );
-		$shared = __( 'When two recorded redirects share an old URL, at most one is served, and both can read Active.', 'hierarchy-guard' );
+		$checks = __( 'At each old URL, the Status column checks only for a post or page.', 'hierarchy-guard' );
+		/* translators: "It" is the Status column. */
+		$others = __( 'It doesn’t check archives or other plugins’ redirect rules.', 'hierarchy-guard' );
+		$shared = __( 'If two recorded redirects have the same old URL, only one is served, though both may show Active.', 'hierarchy-guard' );
 		printf( '<p class="description">%s</p>', esc_html( $checks . ' ' . $others . ' ' . $shared ) );
 	}
 
@@ -312,7 +322,7 @@ final class Settings_Page {
 	private function tabs(): array {
 		return [
 			'settings'  => __( 'Settings', 'hierarchy-guard' ),
-			'redirects' => __( 'Redirects', 'hierarchy-guard' ),
+			'redirects' => _x( 'Redirects', 'settings tab', 'hierarchy-guard' ),
 		];
 	}
 
@@ -363,7 +373,12 @@ final class Settings_Page {
 				esc_html( $type->labels->name )
 			);
 		}
-		echo '<p class="description">' . esc_html__( 'Public hierarchical post types appear here automatically.', 'hierarchy-guard' ) . '</p>';
+		$help = __( 'Public hierarchical post types appear here automatically.', 'hierarchy-guard' );
+		if ( [] !== array_diff( array_keys( $types ), [ 'page' ] ) ) {
+			// Sentences can't take a type's own words; the type's labels appear where core has them.
+			$help .= ' ' . __( 'Hierarchy Guard’s messages say “page” and “subpage” for every post type.', 'hierarchy-guard' );
+		}
+		echo '<p class="description">' . esc_html( $help ) . '</p>';
 		echo '</fieldset>';
 	}
 
@@ -374,22 +389,34 @@ final class Settings_Page {
 		$current = (string) Settings::get( 'trash_policy' );
 		$options = [
 			Settings::POLICY_REPARENT       => __( 'Move subpages up one level', 'hierarchy-guard' ),
-			Settings::POLICY_TRASH_CHILDREN => __( 'Trash the subpages too', 'hierarchy-guard' ),
+			Settings::POLICY_TRASH_CHILDREN => __( 'Trash subpages too', 'hierarchy-guard' ),
 			Settings::POLICY_KEEP           => __( 'Leave subpages where they are', 'hierarchy-guard' ),
 		];
 
+		// The trash dialog's own descriptions.
+		$descriptions = [
+			/* translators: "Their" are the subpages of the page being trashed. */
+			Settings::POLICY_REPARENT       => __( 'Their URLs change.', 'hierarchy-guard' ),
+			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
+			Settings::POLICY_TRASH_CHILDREN => __( 'Restoring their parent restores them with their original status.', 'hierarchy-guard' ),
+			/* translators: "Their" and "them" are the subpages of the page being trashed. */
+			Settings::POLICY_KEEP           => __( 'Their URLs will contain “__trashed” until you move them.', 'hierarchy-guard' ),
+		];
+
 		echo '<fieldset id="hierarchy-guard-trash-policy"><legend class="screen-reader-text"><span>' . esc_html__( 'Trashing a page with subpages', 'hierarchy-guard' ) . '</span></legend>';
+		// Each description sits under its own label's text, with space after it, so it reads as that option's.
 		foreach ( $options as $value => $label ) {
 			printf(
-				'<label><input type="radio" name="%1$s[trash_policy]" value="%2$s" %3$s> %4$s</label><br>',
+				'<div style="margin-bottom:12px"><label><input type="radio" name="%1$s[trash_policy]" value="%2$s" %3$s aria-describedby="hierarchy-guard-policy-%2$s"> %4$s</label><p class="description" id="hierarchy-guard-policy-%2$s" style="margin-top:0;margin-inline-start:24px">%5$s</p></div>',
 				esc_attr( Settings::OPTION ),
 				esc_attr( $value ),
 				checked( $current, $value, false ),
-				esc_html( $label )
+				esc_html( $label ),
+				esc_html( $descriptions[ $value ] )
 			);
 		}
 
-		$help = __( 'Used when there’s no chance to ask, for example in the editor, the REST API, or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'The Pages list asks each time.', 'hierarchy-guard' );
+		$help = __( 'Applies whenever there’s no chance to ask, for example in the editor, the REST API or WP-CLI.', 'hierarchy-guard' ) . ' ' . __( 'With JavaScript on, the Pages list asks each time.', 'hierarchy-guard' );
 		if ( ! EMPTY_TRASH_DAYS ) {
 			$help .= ' ' . __( 'The Trash is turned off on this site, so deleted pages skip it and their subpages always move up one level.', 'hierarchy-guard' );
 		}
@@ -413,9 +440,11 @@ final class Settings_Page {
 		$name = null !== $provider ? trim( (string) ( $provider['name'] ?? '' ) ) : '';
 		if ( null !== $provider && '' !== $name ) {
 			/* translators: %s: name of the detected redirect plugin. */
-			$help = sprintf( __( '%s is active and can handle these.', 'hierarchy-guard' ), $name );
+			$help = sprintf( __( '%s is active and can redirect old URLs to their new pages instead.', 'hierarchy-guard' ), $name );
 		} elseif ( null !== $provider ) {
-			$help = __( 'A redirect plugin is active and can handle these.', 'hierarchy-guard' );
+			$help = __( 'A redirect plugin is active and can redirect old URLs to their new pages instead.', 'hierarchy-guard' );
+		} elseif ( Settings::serve_redirects() ) {
+			$help = __( 'No redirect plugin was found.', 'hierarchy-guard' );
 		} else {
 			$help = __( 'No redirect plugin was found.', 'hierarchy-guard' ) . ' ' . __( 'Turn this on so old URLs reach their new pages.', 'hierarchy-guard' );
 		}

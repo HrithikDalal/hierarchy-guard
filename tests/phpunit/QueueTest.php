@@ -26,8 +26,33 @@ final class QueueTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
+		Action_Scheduler_Stub::reset();
 		wp_unschedule_hook( Queue::HOOK );
+		wp_unschedule_hook( Queue::WATCHDOG );
 		parent::tear_down();
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_bulk_trash_asks_action_scheduler_once_until_the_run_is_cleared(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$queue                     = new Queue();
+
+		$this->assertTrue( $queue->schedule() );
+		$this->assertTrue( $queue->schedule() );
+		$this->assertTrue( $queue->schedule() );
+
+		$this->assertSame( 1, Action_Scheduler_Stub::$asked );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued );
+
+		$queue->unschedule();
+		$this->assertSame( [], Action_Scheduler_Stub::$queued );
+		$queue->schedule();
+		$this->assertSame( 2, Action_Scheduler_Stub::$asked );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued );
 	}
 
 	public function test_a_saved_job_round_trips_without_autoloading(): void {
@@ -74,6 +99,82 @@ final class QueueTest extends WP_UnitTestCase {
 		$this->assertSame( [ 10, 11 ], $this->queue->roots() );
 	}
 
+	public function test_roots_counts_roots_however_many_have_offers_beside_their_jobs(): void {
+		foreach ( [ 10, 11, 12 ] as $root ) {
+			$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, $root, 'page', 0 ) );
+			$this->queue->offer( Operations::new_job( Operations::TYPE_RESTORE, $root, 'page', 0 ) );
+		}
+
+		$this->assertSame( [ 10, 11 ], $this->queue->roots( 2 ) );
+		$this->assertSame( [ 10 ], $this->queue->roots( 1 ) );
+	}
+
+	public function test_only_a_row_that_does_not_decode_is_dropped(): void {
+		global $wpdb;
+		$wpdb->insert(
+			$wpdb->options,
+			[
+				'option_name'  => Queue::job_option( 10 ),
+				'option_value' => 'a:1:{s:4:"root";',
+				'autoload'     => 'off',
+			]
+		);
+		$this->queue->offer( Operations::new_job( Operations::TYPE_RESTORE, 10, 'page', 0 ) );
+		$this->queue->save( Operations::new_job( Operations::TYPE_REPARENT, 11, 'page', 0 ) );
+
+		$this->queue->drop_unreadable( 10 );
+		$this->queue->drop_unreadable( 11 );
+
+		$this->assertNull( $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", Queue::job_option( 10 ) ) ) );
+		$this->assertNotNull( $this->queue->offered( 10 ), 'The offer beside it decodes, and stays.' );
+		$this->assertNotNull( $this->queue->load( 11 ) );
+	}
+
+	public function test_overlapping_runs_write_and_delete_only_their_own_stepping_note(): void {
+		$first = new Queue();
+		$this->assertSame( [], $first->passed_over() );
+		$first->mark_stepping( 10, [] );
+
+		$second = new Queue();
+		$this->assertSame( [ 10 ], $second->passed_over(), 'A run starting takes the note over, passing the root being stepped over.' );
+		$second->mark_stepping( 11, [ 10 ] );
+
+		$first->mark_stepping( 12, [] );
+		$this->assertSame(
+			[
+				'root'   => 11,
+				'passed' => [ 10 ],
+			],
+			$this->queue->noted(),
+			'The first run does not overwrite the note the second wrote since.'
+		);
+
+		$third = new Queue();
+		$third->passed_over();
+		$third->mark_stepping( 13, [ 10, 11 ] );
+		$second->end_stepping();
+		$this->assertSame( 13, $this->queue->noted()['root'], 'The second run’s end leaves the note the third wrote since.' );
+
+		$third->end_stepping();
+		$this->assertSame(
+			[
+				'root'   => 0,
+				'passed' => [],
+			],
+			$this->queue->noted()
+		);
+		$first->mark_stepping( 14, [] );
+		$this->assertSame( 14, $this->queue->noted()['root'], 'With no note left, a run writes its own again.' );
+	}
+
+	public function test_the_roots_passed_over_are_capped_and_keep_the_newest(): void {
+		$dead = new Queue();
+		$dead->passed_over();
+		$dead->mark_stepping( 99, range( 1, 30 ) );
+
+		$this->assertSame( array_merge( range( 12, 30 ), [ 99 ] ), $this->queue->passed_over() );
+	}
+
 	public function test_a_lock_is_held_until_its_owner_releases_it(): void {
 		$token = $this->queue->lock( 10 );
 
@@ -100,13 +201,21 @@ final class QueueTest extends WP_UnitTestCase {
 
 	public function test_schedule_uses_wp_cron_without_action_scheduler(): void {
 		$this->assertFalse( function_exists( 'as_enqueue_async_action' ), 'Precondition: Action Scheduler is not loaded in the test site.' );
-		$this->assertFalse( $this->queue->is_scheduled( 10 ) );
+		$this->assertFalse( $this->queue->is_scheduled() );
 
-		$this->assertTrue( $this->queue->schedule( 10 ) );
-		$this->assertTrue( $this->queue->schedule( 10 ), 'An existing event counts.' );
+		$this->assertTrue( $this->queue->schedule() );
+		$this->assertTrue( $this->queue->schedule(), 'An existing event counts.' );
 
-		$this->assertTrue( $this->queue->is_scheduled( 10 ) );
+		$this->assertTrue( $this->queue->is_scheduled() );
 		$this->assertCount( 1, array_filter( _get_cron_array(), static fn( array $hooks ): bool => isset( $hooks[ Queue::HOOK ] ) ) );
+	}
+
+	public function test_a_scheduled_run_brings_the_watchdog_with_it(): void {
+		$this->assertFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+
+		$this->queue->schedule();
+
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
 	}
 
 	public function test_extend_renews_only_the_owner_s_lock(): void {

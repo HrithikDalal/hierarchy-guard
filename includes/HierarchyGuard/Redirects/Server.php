@@ -16,6 +16,10 @@ use WP;
 use WP_Post;
 use WP_Rewrite;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Runs on 404s at template_redirect priority 9, before redirect_canonical()
  * and its fuzzy guess, and before wp_old_slug_redirect().
@@ -60,6 +64,10 @@ final class Server {
 		if ( null === $target ) {
 			return;
 		}
+		// Browsers and caches that honour these headers keep no redirect, which a restore or an
+		// administrator's edit can make wrong. VIP's edge keeps redirects for times of its own; the
+		// ledger purges an old URL there when its record changes.
+		nocache_headers();
 
 		// phpcs:ignore WordPress.Security.SafeRedirect.wp_redirect_wp_redirect -- A page target passed wp_validate_redirect() in target_for_current_request(); a URL target, which only an administrator can set, passed esc_url_raw() as http(s).
 		if ( wp_redirect( $target['url'], $target['status'], 'Hierarchy Guard' ) ) {
@@ -110,7 +118,7 @@ final class Server {
 			return null;
 		}
 
-		// A URL target is sent as it was set: the suffixes are re-applied to a page only.
+		// A URL target is sent as it was set, one on this site in the scheme below; the suffixes are re-applied to a page only.
 		$post = $target instanceof WP_Post ? $target : null;
 		if ( null !== $post ) {
 			$url = get_permalink( $post );
@@ -120,11 +128,17 @@ final class Server {
 			$url = $this->reapply_suffixes( $url, $post, $request );
 		} else {
 			$url = (string) $target;
+			// On this site, the scheme core gives a permalink: https in an SSL request, else the home URL's, which the target already has.
+			if ( is_ssl() && self::is_here( $url ) ) {
+				$url = set_url_scheme( $url, 'https' );
+			}
 		}
 		$url = $this->append_query_string( $url );
 
 		/**
 		 * Filters the HTTP status used for a hierarchy redirect.
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param int          $status Status code: the 301 or 302 chosen on the Redirects tab, or else 301, or 302 while a restore from the trash could still undo the move the redirect follows.
 		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
@@ -139,6 +153,8 @@ final class Server {
 		 * Filters the URL a hierarchy redirect sends visitors to. A page
 		 * target's URL still passes wp_validate_redirect(); a URL target's is
 		 * sent only while it is http(s).
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param string       $url    Target URL, with the request's query string appended.
 		 * @param WP_Post|null $target The post being redirected to, null for a URL target.
@@ -295,6 +311,8 @@ final class Server {
 	public static function max_segments(): int {
 		/**
 		 * Filters the maximum number of path segments a request may have to be resolved.
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param int $max Segment cap.
 		 */
@@ -473,13 +491,13 @@ final class Server {
 	}
 
 	/**
-	 * The raw request URI, empty when there is none (WP-CLI, cron).
+	 * The request URI, sanitized as a URL, empty when there is none (WP-CLI, cron).
 	 *
 	 * @return string
 	 */
 	private function request_uri(): string {
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Kept verbatim (sanitize_text_field() strips percent-encoding). Only its path is compared, and its query reaches the redirect through wp_validate_redirect(), which runs wp_sanitize_redirect(), for a page target, or through external(), esc_url_raw() and http(s) only, for a URL target.
-		return isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+		// esc_url_raw() keeps the percent-encoding, which sanitize_text_field() would strip.
+		return isset( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( (string) wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
 	}
 
 	/**

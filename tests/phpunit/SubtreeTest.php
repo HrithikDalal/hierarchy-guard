@@ -123,17 +123,30 @@ final class SubtreeTest extends WP_UnitTestCase {
 		$this->assertSame( [], Subtree::child_counts( [], 'page', 2 ) );
 	}
 
-	public function test_descendant_ids_walks_level_by_level_up_to_the_cap(): void {
+	public function test_descendant_ids_lists_a_subtree_in_tree_order_up_to_the_cap(): void {
+		$team_b = $this->page( 'team-b', $this->ids['history'] );
+
 		$all = Subtree::descendant_ids( $this->ids['company'], 'page', 10 );
-		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], $all['ids'], 'Level by level, each in menu order then title.' );
+		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $team_b, $this->ids['team'], $this->ids['leadership'] ], $all['ids'], 'Each page followed by its subpages, siblings in menu order then title.' );
 		$this->assertFalse( $all['capped'] );
 
+		$this->assertSame( [ $this->ids['about'], $this->ids['history'], $this->ids['team'] ], Subtree::descendant_ids( $this->ids['company'], 'page', 3 )['ids'], 'Past the cap, the levels nearest the root stay.' );
 		$two = Subtree::descendant_ids( $this->ids['company'], 'page', 2 );
 		$this->assertSame( [ $this->ids['about'], $this->ids['history'] ], $two['ids'] );
 		$this->assertTrue( $two['capped'] );
 
-		$exact = Subtree::descendant_ids( $this->ids['company'], 'page', 4 );
+		$exact = Subtree::descendant_ids( $this->ids['company'], 'page', 5 );
 		$this->assertFalse( $exact['capped'], 'Exactly the cap is not capped.' );
+	}
+
+	public function test_descendant_ids_lists_each_page_once_when_the_parents_loop(): void {
+		global $wpdb;
+		// About under its own grandchild: core refuses this, direct SQL or an import does not.
+		$wpdb->update( $wpdb->posts, [ 'post_parent' => $this->ids['leadership'] ], [ 'ID' => $this->ids['about'] ] );
+		clean_post_cache( $this->ids['about'] );
+
+		$this->assertSame( [ $this->ids['history'], $this->ids['team'], $this->ids['leadership'] ], Subtree::descendant_ids( $this->ids['about'], 'page', 10 )['ids'] );
+		$this->assertSame( [ $this->ids['leadership'], $this->ids['about'], $this->ids['history'] ], Subtree::descendant_ids( $this->ids['team'], 'page', 10 )['ids'], 'From inside the loop, each page once, the root not again.' );
 	}
 
 	public function test_ordered_children_reads_up_to_the_limit_in_menu_order(): void {

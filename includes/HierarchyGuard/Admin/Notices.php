@@ -23,6 +23,10 @@ use HierarchyGuard\Trash\Change_Log;
 use WP_Post;
 use WP_Screen;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Trashing from the editor or the Pages list lands on core's "moved to the
  * Trash" notice. This adds what happened to the subpages to it once per
@@ -194,8 +198,9 @@ final class Notices {
 			/* translators: %s: number of URLs, such as 12 or 1,000+. */
 			$text  = sprintf( _n( '%s URL changed.', '%s URLs changed.', $n, 'hierarchy-guard' ), $shown ) . ' ';
 			$text .= '' !== $name
-				/* translators: %s: name of the redirect plugin. */
+				/* translators: %s: name of the redirect plugin; "its" and "their" are the changed URLs'. */
 				? sprintf( _n( 'Add its redirect in %s.', 'Add their redirects in %s.', $n, 'hierarchy-guard' ), $name )
+				/* translators: "its" and "their" are the changed URLs'. */
 				: _n( 'Add its redirect in your redirect plugin.', 'Add their redirects in your redirect plugin.', $n, 'hierarchy-guard' );
 			return [
 				'type'    => 'info',
@@ -204,7 +209,7 @@ final class Notices {
 		}
 
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
-		$message = esc_html( sprintf( _n( '%s old URL now shows “Page not found”.', '%s old URLs now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) ) . ' ' . $view;
+		$message = esc_html( sprintf( _n( '%s old URL may now show “Page not found”.', '%s old URLs may now show “Page not found”.', $n, 'hierarchy-guard' ), $shown ) ) . ' ' . $view;
 		if ( current_user_can( 'manage_options' ) ) {
 			$message .= sprintf( '<span aria-hidden="true"> ·</span> <a href="%1$s">%2$s</a>', esc_url( Settings_Page::redirects_url() ), esc_html__( 'Set up redirects', 'hierarchy-guard' ) );
 		}
@@ -252,7 +257,8 @@ final class Notices {
 		if ( null !== $this->shown ) {
 			$notice = $this->urls_notice( $this->shown );
 			if ( null !== $notice ) {
-				do_action( 'hierarchy_guard_list_script' );
+				/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
+				do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 				self::print_urls( $notice );
 			}
 			// The trash notice on this load already says what is still running and what to do.
@@ -273,7 +279,8 @@ final class Notices {
 		}
 
 		if ( $this->wants_nudge() ) {
-			do_action( 'hierarchy_guard_list_script' );
+			/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
+			do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 			wp_admin_notice(
 				sprintf(
 					'%1$s <a href="%2$s">%3$s</a>',
@@ -339,7 +346,8 @@ final class Notices {
 			return false;
 		}
 		// The list script turns its download link into the modal's button.
-		do_action( 'hierarchy_guard_list_script' );
+		/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
+		do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 		self::print_urls( $notice );
 		return true;
 	}
@@ -410,12 +418,28 @@ final class Notices {
 			}
 		}
 
+		if ( [] !== $out ) {
+			$this->keep_going();
+		}
+
 		$rest = count( $running ) - count( $first );
 		if ( $rest > 0 && [] !== $out ) {
 			/* translators: %s: number of pages. */
-			$out[] = sprintf( _n( 'The subpages of %s more page are still being worked on in the background.', 'The subpages of %s more pages are still being worked on in the background.', $rest, 'hierarchy-guard' ), number_format_i18n( $rest ) );
+			$out[] = sprintf( _n( 'The subpages of %s more page are still being processed in the background.', 'The subpages of %s more pages are still being processed in the background.', $rest, 'hierarchy-guard' ), number_format_i18n( $rest ) );
 		}
 		return $out;
+	}
+
+	/**
+	 * Jobs are waiting: schedules the run when neither it nor the watchdog
+	 * is scheduled, as when the cron option lost both. The watchdog is read
+	 * first, from the cron array in memory, so Action Scheduler is asked only
+	 * when it is missing.
+	 */
+	private function keep_going(): void {
+		if ( false === wp_next_scheduled( Queue::WATCHDOG ) && ! $this->queue->is_scheduled() ) {
+			$this->queue->schedule();
+		}
 	}
 
 	/**
@@ -479,7 +503,9 @@ final class Notices {
 		foreach ( $roots as $root ) {
 			if ( ! empty( $root['job'] ) ) {
 				$out[] = Settings::POLICY_TRASH_CHILDREN === $root['policy']
+					/* translators: "The rest" are the subpages not yet moved to the Trash. */
 					? __( 'The rest are still going to the Trash in the background.', 'hierarchy-guard' )
+					/* translators: "The rest" are the subpages not yet moved. */
 					: __( 'The rest are still moving in the background.', 'hierarchy-guard' );
 				break;
 			}
@@ -520,7 +546,7 @@ final class Notices {
 		$stayed = $counts['kept'] - $counts['denied'];
 		if ( $stayed > 0 ) {
 			if ( null !== $single && Settings::POLICY_KEEP === $single['policy'] ) {
-				/* translators: %s: number of subpages. */
+				/* translators: %s: number of subpages; "Its" is the trashed page's. */
 				$out[] = sprintf( _n( 'Its %s subpage stayed where it is.', 'Its %s subpages stayed where they are.', $stayed, 'hierarchy-guard' ), number_format_i18n( $stayed ) );
 			} else {
 				/* translators: %s: number of subpages. */
@@ -567,7 +593,7 @@ final class Notices {
 
 		if ( $counts['restored'] > 0 ) {
 			$out[] = null !== $single
-				/* translators: %s: number of subpages. */
+				/* translators: %s: number of subpages; "it" is the restored page. */
 				? sprintf( _n( '%s subpage was restored with it.', '%s subpages were restored with it.', $counts['restored'], 'hierarchy-guard' ), number_format_i18n( $counts['restored'] ) )
 				/* translators: %s: number of subpages. */
 				: sprintf( _n( '%s subpage was restored too.', '%s subpages were restored too.', $counts['restored'], 'hierarchy-guard' ), number_format_i18n( $counts['restored'] ) );
@@ -575,12 +601,18 @@ final class Notices {
 
 		if ( $counts['left'] > 0 ) {
 			/* translators: %s: number of subpages. */
-			$out[] = sprintf( _n( '%s subpage couldn’t be brought back and stayed where it is.', '%s subpages couldn’t be brought back and stayed where they are.', $counts['left'], 'hierarchy-guard' ), number_format_i18n( $counts['left'] ) );
+			$out[] = sprintf( _n( '%s subpage couldn’t be restored and stayed where it is.', '%s subpages couldn’t be restored and stayed where they are.', $counts['left'], 'hierarchy-guard' ), number_format_i18n( $counts['left'] ) );
 		}
 
 		if ( $counts['renamed'] > 0 ) {
 			/* translators: %s: number of subpages. */
 			$out[] = sprintf( _n( '%s subpage couldn’t get its old URL back.', '%s subpages couldn’t get their old URLs back.', $counts['renamed'], 'hierarchy-guard' ), number_format_i18n( $counts['renamed'] ) );
+		}
+
+		// Core's Restore, unlike Undo, brings a page back as a draft: its subpages' URLs work, its own doesn't until it is published.
+		if ( null !== $single && $counts['moved'] + $counts['restored'] > 0 && 'draft' === get_post_status( (int) $single['root'] ) ) {
+			/* translators: "It" is the page just restored from the Trash. */
+			$out[] = __( 'It’s a draft now, so visitors can’t see it until you publish it.', 'hierarchy-guard' );
 		}
 
 		return $out;

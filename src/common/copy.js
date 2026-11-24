@@ -1,10 +1,9 @@
 /**
- * Every sentence the scripts show, in one place so it can be tested.
+ * The scripts' sentences that depend on counts, policies or redirect state,
+ * kept here so they can be tested.
  */
-import { __, _n, sprintf } from '@wordpress/i18n';
+import { __, _n, _x, sprintf } from '@wordpress/i18n';
 import config from './config';
-
-export const POLICIES = [ 'reparent', 'trash_children', 'keep' ];
 
 /**
  * A number in the user's locale, as PHP's number_format_i18n() writes it:
@@ -152,10 +151,14 @@ function genericTail( policy ) {
 			'The subpages move up one level and get new URLs.',
 			'hierarchy-guard'
 		),
-		trash_children: __(
-			'The subpages go to the Trash too, and come back with their statuses if you restore their parent.',
-			'hierarchy-guard'
-		),
+		trash_children:
+			__( 'The subpages go to the Trash too.', 'hierarchy-guard' ) +
+			' ' +
+			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
+			__(
+				'Restoring their parent restores them with their original status.',
+				'hierarchy-guard'
+			),
 		keep: __(
 			'The subpages stay where they are, and their URLs will contain “__trashed” until you move them.',
 			'hierarchy-guard'
@@ -230,54 +233,74 @@ export function trashSentence( page, policy, cap ) {
 					formatCount( children, page.descendants.capped )
 				);
 
-	let tail;
+	// Each sentence is passed as an argument, so the minifier keeps its translator comment beside it.
+	const parts = [ head ];
 	if ( 'trash_children' === policy && true === page.fallback ) {
-		tail = sprintf(
-			/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
-			__(
-				'That is more than %s, so they’ll move up one level instead of going to the Trash.',
-				'hierarchy-guard'
-			),
-			formatCount( cap )
+		parts.push(
+			sprintf(
+				/* translators: %s: the most subpages trashed together with a page, such as 1,000; "they" are the page's subpages. */
+				__(
+					'That’s more than %s, so they’ll move up one level instead of going to the Trash.',
+					'hierarchy-guard'
+				),
+				formatCount( cap )
+			)
 		);
 	} else if ( 'trash_children' === policy ) {
-		tail = sprintf(
-			/* translators: %s: page title. */
+		parts.push(
+			/* translators: "It" or "They" are the subpages of the page being trashed. */
 			_n(
-				'It goes to the Trash too, and comes back with its status if you restore “%s”.',
-				'They go to the Trash too, and come back with their statuses if you restore “%s”.',
+				'It goes to the Trash too.',
+				'They go to the Trash too.',
 				all,
 				'hierarchy-guard'
 			),
-			page.title
+			sprintf(
+				/* translators: %s: page title; "it" or "them" are its subpages. */
+				_n(
+					'Restoring “%s” restores it with its original status.',
+					'Restoring “%s” restores them with their original status.',
+					all,
+					'hierarchy-guard'
+				),
+				page.title
+			)
 		);
 	} else if ( 'keep' === policy ) {
-		tail = _n(
-			'It stays where it is, and its URL changes until you move it.',
-			'They stay where they are, and their URLs change until you move them.',
-			children,
-			'hierarchy-guard'
-		);
-	} else if ( page.to ) {
-		tail = sprintf(
-			/* translators: %s: title of the page the subpages move under. */
+		parts.push(
+			/* translators: "It" or "They" are the subpages of the page being trashed. */
 			_n(
-				'It will move up under “%s” and get a new URL.',
-				'They’ll move up under “%s” and get new URLs.',
+				'It stays where it is, and its URL changes until you move it.',
+				'They stay where they are, and their URLs change until you move them.',
 				children,
 				'hierarchy-guard'
-			),
-			page.to.title
+			)
+		);
+	} else if ( page.to ) {
+		parts.push(
+			sprintf(
+				/* translators: %s: title of the page the subpages move under; "It" or "They" are the subpages. */
+				_n(
+					'It’ll move up under “%s” and get a new URL.',
+					'They’ll move up under “%s” and get new URLs.',
+					children,
+					'hierarchy-guard'
+				),
+				page.to.title
+			)
 		);
 	} else {
-		tail = _n(
-			'It will become a top-level page and get a new URL.',
-			'They’ll become top-level pages and get new URLs.',
-			children,
-			'hierarchy-guard'
+		parts.push(
+			/* translators: "It" or "They" are the subpages of the page being trashed. */
+			_n(
+				'It’ll become a top-level page and get a new URL.',
+				'They’ll become top-level pages and get new URLs.',
+				children,
+				'hierarchy-guard'
+			)
 		);
 	}
-	return head + ' ' + tail;
+	return parts.join( ' ' );
 }
 
 /**
@@ -316,8 +339,10 @@ export function bulkSentence( preview, policy, withChildren, cap ) {
 			' ' +
 			sprintf(
 				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
-				__(
+				_n(
+					'A page with more than %s subpage has them moved up instead.',
 					'A page with more than %s subpages has them moved up instead.',
+					cap,
 					'hierarchy-guard'
 				),
 				formatCount( cap )
@@ -349,7 +374,7 @@ export function optionLabel( policy, page ) {
 						page.descendants.capped
 					)
 				)
-			: __( 'Trash the subpages too', 'hierarchy-guard' );
+			: __( 'Trash subpages too', 'hierarchy-guard' );
 	}
 	if ( 'keep' === policy ) {
 		return __( 'Leave subpages where they are', 'hierarchy-guard' );
@@ -376,49 +401,72 @@ export function optionLabel( policy, page ) {
  * @return {string} Description or template.
  */
 export function optionDescription( policy, page, cap ) {
-	if ( 'trash_children' === policy ) {
-		if ( page && true === page.fallback ) {
-			return sprintf(
+	// Each sentence is passed as an argument, as in trashSentence(), so the
+	// minifier keeps its translator comment beside it.
+	const sentence = [];
+	if ( 'trash_children' === policy && page && true === page.fallback ) {
+		sentence.push(
+			sprintf(
 				/* translators: %s: the most subpages trashed together with a page, such as 1,000. */
 				__(
 					'Not available: there are more than %s.',
 					'hierarchy-guard'
 				),
 				formatCount( cap )
-			);
-		}
-		return page
-			? sprintf(
-					/* translators: %s: page title. */
-					__(
-						'They come back with their statuses if you restore “%s”.',
-						'hierarchy-guard'
-					),
-					page.title
-				)
-			: __(
-					'They come back with their statuses if you restore their parent.',
+			)
+		);
+	} else if ( 'trash_children' === policy && ! page ) {
+		sentence.push(
+			/* translators: "Their parent" is the page being trashed; "them" are its subpages. */
+			__(
+				'Restoring their parent restores them with their original status.',
+				'hierarchy-guard'
+			)
+		);
+	} else if ( 'trash_children' === policy ) {
+		sentence.push(
+			sprintf(
+				/* translators: %s: page title; "it" or "them" are its subpages. */
+				_n(
+					'Restoring “%s” restores it with its original status.',
+					'Restoring “%s” restores them with their original status.',
+					page.descendants.count,
 					'hierarchy-guard'
-				);
-	}
-	if ( 'keep' === policy ) {
-		return page && keptUrl( page )
-			? __(
-					'Their URLs change until you move them, for example <from /> becomes <to />.',
-					'hierarchy-guard'
-				)
-			: __(
-					'Their URLs will contain “__trashed” until you move them.',
-					'hierarchy-guard'
-				);
-	}
-	if ( page && page.example ) {
-		return __(
-			'Their URLs change, for example <from /> becomes <to />.',
-			'hierarchy-guard'
+				),
+				page.title
+			)
+		);
+	} else if ( 'keep' === policy && page && keptUrl( page ) ) {
+		sentence.push(
+			/* translators: "Their" and "them" are the subpages; <from /> and <to /> are replaced by URLs. */
+			__(
+				'Their URLs change until you move them, for example <from /> becomes <to />.',
+				'hierarchy-guard'
+			)
+		);
+	} else if ( 'keep' === policy ) {
+		sentence.push(
+			/* translators: "Their" and "them" are the subpages of the page being trashed. */
+			__(
+				'Their URLs will contain “__trashed” until you move them.',
+				'hierarchy-guard'
+			)
+		);
+	} else if ( page && page.example ) {
+		sentence.push(
+			/* translators: "Their" are the subpages; <from /> and <to /> are replaced by URLs. */
+			__(
+				'Their URLs change, for example <from /> becomes <to />.',
+				'hierarchy-guard'
+			)
+		);
+	} else {
+		sentence.push(
+			/* translators: "Their" are the subpages of the page being trashed. */
+			__( 'Their URLs change.', 'hierarchy-guard' )
 		);
 	}
-	return __( 'Their URLs change.', 'hierarchy-guard' );
+	return sentence[ 0 ];
 }
 
 /**
@@ -430,10 +478,16 @@ export function optionDescription( policy, page, cap ) {
 export function deniedSentence( policy ) {
 	const first =
 		'trash_children' === policy
-			? __( 'You can’t delete some of the subpages.', 'hierarchy-guard' )
+			? __(
+					'You can’t move some of the subpages to the Trash.',
+					'hierarchy-guard'
+				)
 			: __( 'You can’t edit some of the subpages.', 'hierarchy-guard' );
 	return (
-		first + ' ' + __( 'They’ll stay where they are.', 'hierarchy-guard' )
+		first +
+		' ' +
+		/* translators: "They" are the subpages the user can't change. */
+		__( 'They’ll stay where they are.', 'hierarchy-guard' )
 	);
 }
 
@@ -445,14 +499,17 @@ export function deniedSentence( policy ) {
  */
 export function previewError( policy ) {
 	const outcomes = {
+		/* translators: "they" are the subpages of the page being trashed. */
 		reparent: __(
 			'If you continue, they’ll move up one level.',
 			'hierarchy-guard'
 		),
+		/* translators: "they" are the subpages of the page being trashed. */
 		trash_children: __(
 			'If you continue, they’ll go to the Trash too.',
 			'hierarchy-guard'
 		),
+		/* translators: "they" are the subpages of the page being trashed. */
 		keep: __(
 			'If you continue, they’ll stay where they are.',
 			'hierarchy-guard'
@@ -474,19 +531,22 @@ export function previewError( policy ) {
  * @return {string} Sentence.
  */
 export function saveWarning( count, capped, serving ) {
-	return (
-		quickEditWarning( count, capped ) +
-		' ' +
-		( serving
-			? __(
-					'The old URLs will redirect to the new ones.',
-					'hierarchy-guard'
-				)
-			: __(
-					'You’ll get the redirects to add after saving.',
-					'hierarchy-guard'
-				) )
-	);
+	return quickEditWarning( count, capped ) + ' ' + afterSave( serving );
+}
+
+/**
+ * What happens to the old URLs once a save that changes them is made.
+ *
+ * @param {boolean} serving Whether built-in redirects are on.
+ * @return {string} Sentence.
+ */
+export function afterSave( serving ) {
+	return serving
+		? __( 'The old URLs will redirect to the new ones.', 'hierarchy-guard' )
+		: __(
+				'After you save, you’ll see the redirects to add.',
+				'hierarchy-guard'
+			);
 }
 
 /**
@@ -516,13 +576,35 @@ export function quickEditWarning( count, capped ) {
 	return sprintf(
 		/* translators: %s: number of subpages, such as 12 or 1,000+. */
 		_n(
-			'Saving changes this page’s URL and the URL of %s subpage.',
-			'Saving changes this page’s URL and the URLs of %s subpages.',
+			'Saving will change the URL of this page and of its %s subpage.',
+			'Saving will change the URLs of this page and of its %s subpages.',
 			count,
 			'hierarchy-guard'
 		),
 		formatCount( count, capped )
 	);
+}
+
+/**
+ * The Bulk Edit warning, when a new parent is chosen for selected pages of
+ * which some have subpages.
+ *
+ * @param {number}  pages   Number of the published pages it moves that have subpages.
+ * @param {boolean} serving Whether built-in redirects are on.
+ * @return {string} Two sentences.
+ */
+export function bulkEditWarning( pages, serving ) {
+	const change = sprintf(
+		/* translators: %s: number of the pages it moves that have subpages. */
+		_n(
+			'Saving will change the URLs of the pages it moves, and of the subpages under %s of them.',
+			'Saving will change the URLs of the pages it moves, and of the subpages under %s of them.',
+			pages,
+			'hierarchy-guard'
+		),
+		formatCount( pages )
+	);
+	return change + ' ' + afterSave( serving );
 }
 
 /**
@@ -573,9 +655,12 @@ export function changedSentence( count, capped, serving, provider ) {
 			),
 			shown
 		);
-		const add = provider.name
-			? sprintf(
-					/* translators: %s: name of the redirect plugin. */
+		// Passed as an argument, as in trashSentence(), for the translator comments.
+		const parts = [ changed ];
+		if ( provider.name ) {
+			parts.push(
+				sprintf(
+					/* translators: %s: name of the redirect plugin; "its" and "their" are the changed URLs'. */
 					_n(
 						'Add its redirect in %s.',
 						'Add their redirects in %s.',
@@ -584,19 +669,25 @@ export function changedSentence( count, capped, serving, provider ) {
 					),
 					provider.name
 				)
-			: _n(
+			);
+		} else {
+			parts.push(
+				/* translators: "its" and "their" are the changed URLs'. */
+				_n(
 					'Add its redirect in your redirect plugin.',
 					'Add their redirects in your redirect plugin.',
 					count,
 					'hierarchy-guard'
-				);
-		return changed + ' ' + add;
+				)
+			);
+		}
+		return parts.join( ' ' );
 	}
 	return sprintf(
 		/* translators: %s: number of old URLs, such as 12 or 1,000+. */
 		_n(
-			'%s old URL now shows “Page not found”.',
-			'%s old URLs now show “Page not found”.',
+			'%s old URL may now show “Page not found”.',
+			'%s old URLs may now show “Page not found”.',
 			count,
 			'hierarchy-guard'
 		),
@@ -617,6 +708,65 @@ export function viewRedirectsLabel( count, capped ) {
 		__( 'View redirects (%s)', 'hierarchy-guard' ),
 		formatCount( count, capped )
 	);
+}
+
+/**
+ * The CSV button's label: it names the redirect plugin only when the file is
+ * in that plugin's own import layout.
+ *
+ * @param {(Object|null)} provider The detected redirect plugin: `name` and `csv`, its layout.
+ * @return {string} Label.
+ */
+export function csvLabel( provider ) {
+	if ( provider && provider.name && 'generic' !== provider.csv ) {
+		return sprintf(
+			/* translators: %s: name of the redirect plugin. */
+			__( 'Download CSV for %s', 'hierarchy-guard' ),
+			provider.name
+		);
+	}
+	return __( 'Download CSV', 'hierarchy-guard' );
+}
+
+/**
+ * What to know before importing the CSV into the detected redirect plugin:
+ * its own note, then that a plugin which adds a redirect for a changed page
+ * on its own already has that row.
+ *
+ * @param {(Object|null)} provider The detected redirect plugin: `name` and `note`.
+ * @return {string[]} Sentences.
+ */
+export function importNotes( provider ) {
+	if ( ! provider ) {
+		return [];
+	}
+	const own = provider.name
+		? sprintf(
+				/* translators: %s: name of the redirect plugin. */
+				__(
+					'If %s already added any of these redirects itself, skip those rows.',
+					'hierarchy-guard'
+				),
+				provider.name
+			)
+		: __(
+				'If your redirect plugin already added any of these redirects itself, skip those rows.',
+				'hierarchy-guard'
+			);
+	return provider.note ? [ provider.note, own ] : [ own ];
+}
+
+/**
+ * The import notes the modal shows under its buttons: whenever the CSV
+ * button shows, so whenever the change has redirects, whether or not
+ * built-in redirects are on.
+ *
+ * @param {Object}        data     A page of pairs: `total`.
+ * @param {(Object|null)} provider The detected redirect plugin: `name` and `note`.
+ * @return {string[]} Sentences.
+ */
+export function shownImportNotes( data, provider ) {
+	return data.total > 0 ? importNotes( provider ) : [];
 }
 
 /**
@@ -851,7 +1001,8 @@ export function treeShownLine( shown, total, capped = false ) {
 }
 
 /**
- * The Tree view's last row past the cap: "Only the first 1,000 subpages are shown."
+ * The Tree view's last row past the cap: "Only the 1,000 oldest subpages are shown.",
+ * in menu order, as the route reads a large parent's subpages without sorting every one.
  *
  * @param {number} cap The most subpages the tree shows.
  * @return {string} Sentence.
@@ -860,8 +1011,8 @@ export function treeCappedSentence( cap ) {
 	return sprintf(
 		/* translators: %s: the most subpages the tree shows, such as 1,000. */
 		_n(
-			'Only the first %s subpage is shown.',
-			'Only the first %s subpages are shown.',
+			'Only the %s oldest subpage is shown.',
+			'Only the %s oldest subpages are shown.',
 			cap,
 			'hierarchy-guard'
 		),
@@ -884,13 +1035,13 @@ export function treeRowLabels( title ) {
 			__( 'Edit “%s”', 'hierarchy-guard' ),
 			title
 		),
-		trash: __( 'Trash', 'hierarchy-guard' ),
+		trash: _x( 'Trash', 'verb', 'hierarchy-guard' ),
 		trashLabel: sprintf(
 			/* translators: %s: page title. */
 			__( 'Move “%s” to the Trash', 'hierarchy-guard' ),
 			title
 		),
-		view: __( 'View', 'hierarchy-guard' ),
+		view: _x( 'View', 'verb', 'hierarchy-guard' ),
 		viewLabel: sprintf(
 			/* translators: %s: page title. */
 			__( 'View “%s”', 'hierarchy-guard' ),

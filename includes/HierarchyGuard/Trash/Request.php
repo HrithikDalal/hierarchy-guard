@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Core's Pages list trashes and restores bulk selections one ID at a time and
  * stops with wp_die() when an ID is already in, or already out of, the trash.

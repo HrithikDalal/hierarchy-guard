@@ -12,7 +12,8 @@
 		"env:start": "wp-env start",
 		"env:stop": "wp-env stop",
 		"env:destroy": "wp-env destroy",
-		"test:php": "wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard vendor/bin/phpunit"
+		"test:php": "wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard vendor/bin/phpunit",
+		"test:php:multisite": "wp-env run tests-cli --env-cwd=wp-content/plugins/hierarchy-guard env WP_MULTISITE=1 vendor/bin/phpunit --fail-on-skipped"
 	},
 	"devDependencies": {
 		"@wordpress/a11y": "^4.57.0",

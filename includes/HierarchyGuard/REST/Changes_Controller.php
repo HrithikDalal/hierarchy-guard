@@ -18,6 +18,10 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Backs the "View redirects" link of the outcome notice, after a trash or a
  * save that changed URLs. A change is the current user's own and lives for
@@ -152,11 +156,12 @@ final class Changes_Controller {
 	private function collected( string $change_id ) {
 		$change = $this->log->latest( get_current_user_id() );
 		if ( null === $change || $change_id !== $change['id'] ) {
-			$minutes  = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
+			$minutes = (int) ( Change_Log::TTL / MINUTE_IN_SECONDS );
+			/* translators: "them" are the redirects the user asked for. */
 			$message  = null !== $change ? __( 'A later change replaced them.', 'hierarchy-guard' ) . ' ' : '';
 			$message .= sprintf(
 				/* translators: %s: number of minutes. */
-				_n( 'They are kept for %s minute.', 'They are kept for %s minutes.', $minutes, 'hierarchy-guard' ),
+				_n( 'Each change’s redirects are listed for %s minute.', 'Each change’s redirects are listed for %s minutes.', $minutes, 'hierarchy-guard' ),
 				number_format_i18n( $minutes )
 			);
 			return self::gone( $message );

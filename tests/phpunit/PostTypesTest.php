@@ -40,6 +40,23 @@ final class PostTypesTest extends WP_UnitTestCase {
 		$this->assertFalse( Post_Types::is_supported( 'post' ) );
 	}
 
+	public function test_a_label_falls_back_for_a_type_gone_or_a_label_left_empty(): void {
+		register_post_type(
+			'hg_blank',
+			[
+				'public'       => true,
+				'hierarchical' => true,
+				'labels'       => [ 'all_items' => '' ],
+			]
+		);
+		$blank = Post_Types::label( 'hg_blank', 'all_items', 'Show all pages' );
+		unregister_post_type( 'hg_blank' );
+
+		$this->assertSame( 'Show all pages', Post_Types::label( 'hg_gone', 'all_items', 'Show all pages' ), 'A type no longer registered.' );
+		$this->assertSame( 'Show all pages', $blank, 'A label registered empty.' );
+		$this->assertSame( 'Pages', Post_Types::label( 'page', 'name', 'Show all pages' ) );
+	}
+
 	public function test_public_hierarchical_custom_types_are_included(): void {
 		register_post_type(
 			'hg_docs',

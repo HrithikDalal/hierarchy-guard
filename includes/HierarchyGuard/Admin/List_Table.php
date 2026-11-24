@@ -11,8 +11,13 @@ namespace HierarchyGuard\Admin;
 
 use HierarchyGuard\Post_Types;
 use HierarchyGuard\Subtree;
+use HierarchyGuard\Trash\Markers;
 use WP_Post;
 use WP_Query;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * Adds a one-line Hierarchy column to every supported list screen, a
@@ -40,6 +45,14 @@ final class List_Table {
 	 * @var bool
 	 */
 	private bool $counted = false;
+
+	/**
+	 * In the Trash view, how many subpages a restore of each row brings back,
+	 * from the trash's markers, read with the screen's counts.
+	 *
+	 * @var array<int,int>
+	 */
+	private array $restorable = [];
 
 	/**
 	 * Whether the list-table script was asked for.
@@ -170,7 +183,9 @@ final class List_Table {
 
 		if ( 'search' === $mode && $above instanceof WP_Post ) {
 			$ancestors = get_post_ancestors( $post );
-			$parts[]   = '<span class="screen-reader-text">' . esc_html( _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) ) . ' </span>' . $this->trail( $type, $ancestors );
+			// The type's own label names one parent; core has no plural label, so a trail of several takes the plugin's plural.
+			$label   = count( $ancestors ) > 1 ? _n( 'Parent page:', 'Parent pages:', count( $ancestors ), 'hierarchy-guard' ) : Post_Types::label( $type, 'parent_item_colon', __( 'Parent page:', 'hierarchy-guard' ) );
+			$parts[] = '<span class="screen-reader-text">' . esc_html( $label ) . ' </span>' . $this->trail( $type, $ancestors );
 		} elseif ( '' === $mode && $above instanceof WP_Post ) {
 			$title = _draft_or_post_title( $parent );
 			// Core refuses to edit a page in the Trash.
@@ -180,16 +195,21 @@ final class List_Table {
 				/* translators: %s: title of a parent page that is in the trash. */
 				$name = sprintf( esc_html__( '%s (in the Trash)', 'hierarchy-guard' ), $name );
 			}
-			$parts[] = '<span class="screen-reader-text">' . esc_html__( 'Parent:', 'hierarchy-guard' ) . ' </span>' . $name;
+			$parts[] = '<span class="screen-reader-text">' . esc_html( Post_Types::label( $type, 'parent_item_colon', __( 'Parent page:', 'hierarchy-guard' ) ) ) . ' </span>' . $name;
 		}
 		if ( $count > 0 ) {
-			$this->signal();
+			$this->request_list_script();
 			$shown = Subtree::format_count( min( $count, $cap ), $count > $cap );
 			/* translators: %s: number of subpages, such as 3 or 1,000+. */
 			$label = sprintf( _n( '%s subpage', '%s subpages', min( $count, $cap ), 'hierarchy-guard' ), $shown );
 			/* translators: 1: number of subpages, such as 3 or 1,000+, 2: page title. */
 			$aria    = sprintf( _n( 'View the %1$s subpage of “%2$s”', 'View the %1$s subpages of “%2$s”', min( $count, $cap ), 'hierarchy-guard' ), $shown, _draft_or_post_title( $post ) );
 			$parts[] = sprintf( '<a href="%1$s" aria-label="%2$s">%3$s</a>', esc_url( self::filter_url( $type, (int) $post->ID ) ), esc_attr( $aria ), esc_html( $label ) );
+		}
+		$back = 'trash' === $post->post_status ? ( $this->restorable[ (int) $post->ID ] ?? 0 ) : 0;
+		if ( $back > 0 ) {
+			/* translators: %s: number of subpages, such as 3 or 1,000+; "it" is the trashed page of this row. */
+			$parts[] = esc_html( sprintf( _n( 'Restoring it brings back %s subpage.', 'Restoring it brings back %s subpages.', min( $back, $cap ), 'hierarchy-guard' ), Subtree::format_count( min( $back, $cap ), $back > $cap ) ) );
 		}
 
 		if ( 'tree' === $mode ) {
@@ -226,7 +246,7 @@ final class List_Table {
 		$title = _draft_or_post_title( $post );
 
 		if ( $count > 0 && current_user_can( 'edit_post', $id ) ) {
-			$this->signal();
+			$this->request_list_script();
 			// An opened row closes to its parent, at the page of subpages it is on.
 			$href = $open ? Tree_View::place_url( $type, $row['parent'], $row['page'] ) : Tree_View::place_url( $type, $id );
 			array_unshift(
@@ -260,7 +280,7 @@ final class List_Table {
 			$parts[] = '<span class="hierarchy-guard-capped">' . esc_html(
 				sprintf(
 					/* translators: %s: the most subpages the tree shows, such as 1,000. */
-					_n( 'Only the first %s subpage is shown.', 'Only the first %s subpages are shown.', $cap, 'hierarchy-guard' ),
+					_n( 'Only the %s oldest subpage is shown.', 'Only the %s oldest subpages are shown.', $cap, 'hierarchy-guard' ),
 					Subtree::format_count( $cap )
 				)
 			) . '</span>';
@@ -308,7 +328,7 @@ final class List_Table {
 		foreach ( array_reverse( $ancestors ) as $ancestor_id ) {
 			$ancestor_id = (int) $ancestor_id;
 			if ( ! current_user_can( 'read_post', $ancestor_id ) ) {
-				$crumbs[] = esc_html__( '(private page)', 'hierarchy-guard' );
+				$crumbs[] = esc_html_x( '(private)', 'title of a page the user can’t read', 'hierarchy-guard' );
 				continue;
 			}
 			$title = _draft_or_post_title( $ancestor_id );
@@ -348,9 +368,10 @@ final class List_Table {
 	}
 
 	/**
-	 * Narrows the list query to the filtered page's subtree, and asks for a
-	 * sort order so core renders normal paginated rows rather than loading
-	 * every page for its indented tree.
+	 * Narrows the list query to the filtered page's subtree. Unless a column
+	 * is sorted, the rows come in the walk's tree order, each page followed by
+	 * its own subpages; that sort also makes core render normal paginated
+	 * rows rather than loading every page for its indented tree.
 	 *
 	 * @param mixed $vars Query vars.
 	 * @return mixed
@@ -369,11 +390,8 @@ final class List_Table {
 		$vars['post__in'] = [] !== $walk['ids'] ? $walk['ids'] : [ 0 ];
 
 		if ( 'menu_order title' === ( $vars['orderby'] ?? '' ) ) {
-			$vars['orderby'] = [
-				'menu_order' => 'ASC',
-				'title'      => 'ASC',
-			];
-			unset( $vars['fields'], $vars['posts_per_archive_page'] );
+			$vars['orderby'] = 'post__in';
+			unset( $vars['order'], $vars['fields'], $vars['posts_per_archive_page'] );
 			$vars['posts_per_page'] = self::per_page( $type );
 		}
 
@@ -394,13 +412,13 @@ final class List_Table {
 		if ( 'top' !== $which || ! self::is_root( $root, $type ) ) {
 			return;
 		}
-		$this->signal();
+		$this->request_list_script();
 
 		$crumbs = [];
 		foreach ( array_reverse( get_post_ancestors( $root ) ) as $ancestor_id ) {
 			$crumbs[] = current_user_can( 'read_post', (int) $ancestor_id )
 				? sprintf( '<a href="%s">%s</a>', esc_url( self::filter_url( $type, (int) $ancestor_id ) ), _draft_or_post_title( (int) $ancestor_id ) )
-				: esc_html__( '(private page)', 'hierarchy-guard' );
+				: esc_html_x( '(private)', 'title of a page the user can’t read', 'hierarchy-guard' );
 		}
 		$crumbs[] = '<strong>' . _draft_or_post_title( $root ) . '</strong>';
 
@@ -413,7 +431,7 @@ final class List_Table {
 		if ( $walk['capped'] ) {
 			printf(
 				/* translators: 1: the filtered page, after its ancestors, such as "Company › About", 2: the most subpages the filter lists, such as 1,000. */
-				esc_html__( 'Subpages of %1$s (the first %2$s)', 'hierarchy-guard' ),
+				esc_html__( 'Subpages of %1$s (%2$s of them, the levels nearest the top first)', 'hierarchy-guard' ),
 				$trail, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
 				esc_html( Subtree::format_count( count( $walk['ids'] ) ) )
 			);
@@ -421,7 +439,7 @@ final class List_Table {
 			/* translators: %s: the filtered page, after its ancestors, such as "Company › About". */
 			printf( esc_html__( 'Subpages of %s', 'hierarchy-guard' ), $trail ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Every crumb was escaped as it was built.
 		}
-		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html__( 'Show all pages', 'hierarchy-guard' ) );
+		printf( '<span aria-hidden="true"> · </span><a href="%1$s">%2$s</a>', esc_url( $clear ), esc_html( Post_Types::label( $type, 'all_items', __( 'Show all pages', 'hierarchy-guard' ) ) ) );
 		echo '</span>';
 	}
 
@@ -496,7 +514,7 @@ final class List_Table {
 		_prime_post_caches( $parents, false, false );
 		if ( null !== $this->tree && 'search' === $this->tree->mode( $post_type ) ) {
 			// A search shows each row's whole parent path: one query per level, whatever the rows.
-			for ( $depth = 0; [] !== $parents && $depth < 50; ++$depth ) {
+			for ( $depth = 0; [] !== $parents && $depth < Subtree::WALK_DEPTH; ++$depth ) {
 				$above = [];
 				foreach ( $parents as $parent_id ) {
 					$above[] = (int) get_post_field( 'post_parent', $parent_id );
@@ -504,6 +522,10 @@ final class List_Table {
 				$parents = array_values( array_unique( array_filter( $above ) ) );
 				_prime_post_caches( $parents, false, false );
 			}
+		}
+
+		if ( 'trash' === (string) $wp_query->get( 'post_status' ) ) {
+			$this->restorable = Markers::counts( $ids, Subtree::count_cap() + 1 );
 		}
 
 		return Subtree::child_counts( $ids, $post_type, Subtree::count_cap() + 1 );
@@ -599,7 +621,7 @@ final class List_Table {
 	/**
 	 * Asks once for the list-table script: this screen prints something it acts on.
 	 */
-	private function signal(): void {
+	private function request_list_script(): void {
 		if ( ! $this->signalled ) {
 			$this->signalled = true;
 			/**
@@ -607,7 +629,7 @@ final class List_Table {
 			 *
 			 * @internal
 			 */
-			do_action( 'hierarchy_guard_list_script' );
+			do_action( self::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 		}
 	}
 

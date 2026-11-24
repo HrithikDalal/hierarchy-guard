@@ -219,7 +219,7 @@ describe( 'the tree grid', () => {
 		expect( rows().pop().id ).toBe( '' );
 	} );
 
-	it( 'says past the cap that only the first are shown', async () => {
+	it( 'says past the cap that only the oldest are shown', async () => {
 		fetchChildren = vi.fn( () =>
 			Promise.resolve(
 				page( [ child( 30, 'Last' ) ], 1000, false, true )
@@ -233,7 +233,7 @@ describe( 'the tree grid', () => {
 		expect( row( 30 ).hasAttribute( 'aria-posinset' ) ).toBe( false );
 		expect(
 			document.querySelector( '.hierarchy-guard-capped' ).textContent
-		).toBe( 'Only the first 1,000 subpages are shown.' );
+		).toBe( 'Only the 1,000 oldest subpages are shown.' );
 	} );
 
 	it( 'collapses every open row without a request', async () => {
@@ -833,6 +833,27 @@ describe( 'the tree grid', () => {
 				row( 4 ).querySelector( '.hierarchy-guard-toggle .dashicons' )
 					.className
 			).toBe( 'dashicons dashicons-arrow-left-alt2' );
+		} finally {
+			setLocaleData( { 'text direction\u0004ltr': [ 'ltr' ] } );
+		}
+	} );
+
+	it( 'swaps left and right right to left, as the toggle’s arrow does', async () => {
+		setLocaleData( { 'text direction\u0004ltr': [ 'rtl' ] } );
+		try {
+			bindTree( document, fetchChildren );
+			row( 4 ).focus();
+
+			press( row( 4 ), 'ArrowLeft' );
+			await settle();
+			expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+			press( row( 4 ), 'ArrowLeft' );
+			expect( document.activeElement ).toBe( row( 5 ) );
+
+			press( row( 5 ), 'ArrowRight' );
+			expect( document.activeElement ).toBe( row( 4 ) );
+			press( row( 4 ), 'ArrowRight' );
+			expect( row( 4 ).getAttribute( 'aria-expanded' ) ).toBe( 'false' );
 		} finally {
 			setLocaleData( { 'text direction\u0004ltr': [ 'ltr' ] } );
 		}

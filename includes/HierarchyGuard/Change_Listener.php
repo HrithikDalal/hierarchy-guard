@@ -15,19 +15,16 @@ use HierarchyGuard\Trash\Markers;
 use HierarchyGuard\Trash\Request;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Records URL changes. Every handler returns as early and as cheaply as it
  * can. A save that records an old path is also the current user's latest
  * change, so the redirects it needs can be offered right after it.
  */
 final class Change_Listener {
-
-	/**
-	 * When true, nothing is recorded: for code that changes many posts and records their paths itself.
-	 *
-	 * @var bool
-	 */
-	private static bool $suspended = false;
 
 	/**
 	 * Ledger.
@@ -122,24 +119,6 @@ final class Change_Listener {
 	}
 
 	/**
-	 * Suspends or resumes recording.
-	 *
-	 * @param bool $on True to suspend.
-	 */
-	public static function suspend( bool $on ): void {
-		self::$suspended = $on;
-	}
-
-	/**
-	 * Whether recording is suspended.
-	 *
-	 * @return bool
-	 */
-	public static function is_suspended(): bool {
-		return self::$suspended;
-	}
-
-	/**
 	 * Records the old path of a post whose slug or parent changed, and, once
 	 * the ledger holds that path on the post, the save as the current user's
 	 * latest change: the post at its old path under its new parent. With no
@@ -154,9 +133,6 @@ final class Change_Listener {
 	 * @param WP_Post $before  Post before the update.
 	 */
 	public function on_post_updated( int $post_id, WP_Post $after, WP_Post $before ): void {
-		if ( self::$suspended ) {
-			return;
-		}
 		if ( ! Post_Types::is_supported( (string) $after->post_type ) ) {
 			return;
 		}
@@ -271,9 +247,6 @@ final class Change_Listener {
 		if ( Ledger::has_entries( $post_id ) ) {
 			$this->deleting[ $post_id ] = true;
 		}
-		if ( self::$suspended ) {
-			return;
-		}
 		if ( '' === (string) get_option( 'permalink_structure' ) ) {
 			return;
 		}
@@ -312,25 +285,22 @@ final class Change_Listener {
 	 * @param string $post_type Its post type.
 	 */
 	private function record_on_children( int $post_id, string $post_type ): void {
-		$children = get_posts(
-			[
-				'post_parent'            => $post_id,
-				'post_type'              => $post_type,
-				'post_status'            => array_values( array_diff( array_keys( get_post_stati() ), [ 'auto-draft', 'inherit' ] ) ),
-				'posts_per_page'         => Subtree::count_cap(),
-				'orderby'                => 'ID',
-				'order'                  => 'ASC',
-				'no_found_rows'          => true,
-				'update_post_term_cache' => false,
-			]
-		);
+		$ids = Subtree::children_in_any_status( $post_id, $post_type, Subtree::count_cap() );
 
 		Ledger::deferred(
-			function () use ( $children ): void {
-				foreach ( $children as $child ) {
-					$was = 'trash' === $child->post_status ? (string) get_post_meta( $child->ID, '_wp_trash_meta_status', true ) : (string) $child->post_status;
-					if ( 'publish' === $was ) {
-						$this->ledger->record( (int) $child->ID, Paths::untrashed_uri( $child ) );
+			function () use ( $ids ): void {
+				// Primes posts and their meta a hundred at a time, so no one query reads the whole cap.
+				foreach ( array_chunk( $ids, 100 ) as $chunk ) {
+					_prime_post_caches( $chunk, false, true );
+					foreach ( $chunk as $id ) {
+						$child = get_post( $id );
+						if ( ! $child instanceof WP_Post ) {
+							continue;
+						}
+						$was = 'trash' === $child->post_status ? (string) get_post_meta( $id, '_wp_trash_meta_status', true ) : (string) $child->post_status;
+						if ( 'publish' === $was ) {
+							$this->ledger->record( $id, Paths::untrashed_uri( $child ) );
+						}
 					}
 				}
 			}
@@ -353,7 +323,7 @@ final class Change_Listener {
 		if ( $new_status === $old_status ) {
 			return;
 		}
-		if ( 'publish' === $new_status && ! self::$suspended ) {
+		if ( 'publish' === $new_status ) {
 			// A page published, or published again, takes its path.
 			$this->ledger->claim( $post );
 		}
@@ -409,25 +379,12 @@ final class Change_Listener {
 
 	/**
 	 * Whether a post has at least one child of the same type, in any status:
-	 * core re-parents trashed and auto-draft children too. One indexed query.
+	 * core re-parents trashed and auto-draft children too.
 	 *
 	 * @param int    $post_id   Post ID.
 	 * @param string $post_type Post type name.
 	 */
 	private function has_children( int $post_id, string $post_type ): bool {
-		$children = get_posts(
-			[
-				'post_parent'            => $post_id,
-				'post_type'              => $post_type,
-				'post_status'            => array_keys( get_post_stati() ),
-				'posts_per_page'         => 1,
-				'fields'                 => 'ids',
-				'no_found_rows'          => true,
-				'update_post_meta_cache' => false,
-				'update_post_term_cache' => false,
-			]
-		);
-
-		return ! empty( $children );
+		return [] !== Subtree::children_in_any_status( $post_id, $post_type, 1 );
 	}
 }

@@ -287,7 +287,7 @@ final class NoticesTest extends WP_UnitTestCase {
 
 		$notice = $this->notice->urls_notice( $change );
 		$this->assertSame( 'warning', $notice['type'] );
-		$this->assertStringStartsWith( '4 old URLs now show “Page not found”. <a href="', $notice['message'] );
+		$this->assertStringStartsWith( '4 old URLs may now show “Page not found”. <a href="', $notice['message'] );
 		$this->assertStringContainsString( '/hierarchy-guard/v1/changes/' . $change['id'] . '/csv', $notice['message'] );
 
 		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
@@ -313,7 +313,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'notice-warning', $html );
 		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
 		$this->assertStringContainsString( 'is-dismissible', $html );
-		$this->assertStringContainsString( '4 old URLs now show “Page not found”.', $html );
+		$this->assertStringContainsString( '4 old URLs may now show “Page not found”.', $html );
 		$this->assertStringContainsString( 'changes/' . $change['id'] . '/csv', $html, 'Without JavaScript the link downloads the CSV.' );
 		$this->assertStringContainsString( 'download>Download redirects (CSV)</a>', $html );
 		$this->assertSame( 0, did_action( 'hierarchy_guard_list_script' ) - $before, 'The edit screen needs no list script.' );
@@ -376,7 +376,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$html = $this->rendered();
 
 		$this->assertStringContainsString( 'hierarchy-guard-urls', $html );
-		$this->assertStringContainsString( '4 old URLs now show “Page not found”.', $html );
+		$this->assertStringContainsString( '4 old URLs may now show “Page not found”.', $html );
 		$this->assertStringContainsString( 'data-change="' . $change['id'] . '"', $html );
 		$this->assertSame( 1, did_action( 'hierarchy_guard_list_script' ) - $before, 'The list script turns its link into the modal’s button.' );
 		$this->assertStringNotContainsString( 'hierarchy-guard-nudge', $html, 'Never beside the nudge.' );
@@ -537,7 +537,7 @@ final class NoticesTest extends WP_UnitTestCase {
 
 	public function test_restore_sentences(): void {
 		$this->assertSame(
-			[ '2 subpages moved back under “About”.', '3 subpages were restored with it.', '1 subpage couldn’t be brought back and stayed where it is.', '1 subpage couldn’t get its old URL back.' ],
+			[ '2 subpages moved back under “About”.', '3 subpages were restored with it.', '1 subpage couldn’t be restored and stayed where it is.', '1 subpage couldn’t get its old URL back.' ],
 			Notices::sentences(
 				$this->change(
 					'restore',
@@ -569,6 +569,24 @@ final class NoticesTest extends WP_UnitTestCase {
 			]
 		);
 		$this->assertSame( [ '1 subpage moved back under its parent.', '2 subpages were restored too.' ], Notices::sentences( $change ) );
+	}
+
+	public function test_a_restore_that_leaves_the_parent_a_draft_says_visitors_can_t_see_it_until_it_is_published(): void {
+		$restored = $this->change( 'restore', [ $this->about( [ 'counts' => [ 'moved' => 2 ] ] ) ] );
+		$this->assertSame( [ '2 subpages moved back under “About”.' ], Notices::sentences( $restored ), 'Undo brings it back published.' );
+
+		wp_update_post(
+			[
+				'ID'          => $this->ids['about'],
+				'post_status' => 'draft',
+			]
+		);
+
+		$this->assertSame(
+			[ '2 subpages moved back under “About”.', 'It’s a draft now, so visitors can’t see it until you publish it.' ],
+			Notices::sentences( $restored ),
+			'Core’s Restore brings it back as a draft.'
+		);
 	}
 
 	public function test_the_fallback_sentence_agrees_with_the_cap(): void {
@@ -644,7 +662,7 @@ final class NoticesTest extends WP_UnitTestCase {
 		$notice = $this->urls_notice();
 
 		$this->assertSame( 'warning', $notice['type'] );
-		$this->assertStringStartsWith( '3 old URLs now show “Page not found”. <a href="', $notice['message'] );
+		$this->assertStringStartsWith( '3 old URLs may now show “Page not found”. <a href="', $notice['message'] );
 		$this->assertStringContainsString( 'class="hierarchy-guard-view-redirects"', $notice['message'] );
 		$this->assertStringEndsWith( 'download>Download redirects (CSV)</a><span aria-hidden="true"> ·</span> <a href="' . esc_url( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ) ) . '">Set up redirects</a>', $notice['message'], 'View comes first, as in the other two notices.' );
 		$this->assertStringContainsString( 'format=generic', $notice['message'] );
@@ -705,6 +723,69 @@ final class NoticesTest extends WP_UnitTestCase {
 		$messages = $this->notice->append( $this->core_messages(), [ 'trashed' => 2 ] );
 
 		$this->assertStringStartsWith( '2 page moved to the Trash. 3 subpages moved up one level.', sprintf( $messages['page']['trashed'], '2' ) );
+	}
+
+	public function test_a_waiting_job_shown_with_neither_its_run_nor_the_watchdog_scheduled_schedules_them(): void {
+		$queue = new Queue();
+		$id    = $this->change( 'trash', [ $this->about( [ 'job' => true ] ) ] )['id'];
+		$queue->save(
+			[
+				'root'   => $this->ids['about'],
+				'change' => $id,
+				'total'  => 40,
+				'counts' => array_merge( Change_Log::empty_counts(), [ 'moved' => 25 ] ),
+			]
+		);
+		wp_unschedule_hook( Queue::HOOK );
+		wp_unschedule_hook( Queue::WATCHDOG );
+
+		$this->notice->progress_sentences( 'page' );
+
+		$this->assertTrue( $queue->is_scheduled() );
+		$this->assertNotFalse( wp_next_scheduled( Queue::WATCHDOG ) );
+
+		wp_unschedule_hook( Queue::HOOK );
+		$this->notice->progress_sentences( 'page' );
+		$this->assertFalse( $queue->is_scheduled(), 'With the watchdog still scheduled, the job is not lost: nothing more is scheduled.' );
+
+		$queue->delete( $this->ids['about'] );
+		wp_unschedule_hook( Queue::WATCHDOG );
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_waiting_jobs_shown_check_the_schedule_once_and_ask_action_scheduler_only_without_a_watchdog(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on = true;
+		$queue                     = new Queue();
+		$team                      = array_merge( $this->about( [ 'job' => true ] ), [ 'root' => $this->ids['team'] ] );
+		$id                        = $this->change( 'trash', [ $this->about( [ 'job' => true ] ), $team ] )['id'];
+		foreach ( [ $this->ids['about'], $this->ids['team'] ] as $root ) {
+			$queue->save(
+				[
+					'root'   => $root,
+					'change' => $id,
+					'total'  => 40,
+					'counts' => array_merge( Change_Log::empty_counts(), [ 'moved' => 25 ] ),
+				]
+			);
+		}
+		$notices = fn(): Notices => new Notices( $this->log, new Queue(), new Pairs(), new Providers() );
+
+		$this->assertCount( 2, $notices()->progress_sentences( 'page' ), 'Precondition: both jobs are shown.' );
+		$this->assertSame( 1, Action_Scheduler_Stub::$checked, 'Once for both jobs.' );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued );
+
+		Action_Scheduler_Stub::$checked = 0;
+		$notices()->progress_sentences( 'page' );
+		$this->assertSame( 0, Action_Scheduler_Stub::$checked, 'With the watchdog scheduled, Action Scheduler is not asked.' );
+
+		foreach ( [ $this->ids['about'], $this->ids['team'] ] as $root ) {
+			$queue->delete( $root );
+		}
+		wp_unschedule_hook( Queue::WATCHDOG );
 	}
 
 	public function test_progress_is_shown_while_the_batch_runs_and_not_on_the_landing_load(): void {
@@ -837,7 +918,7 @@ final class NoticesTest extends WP_UnitTestCase {
 
 		$this->assertCount( 4, $sentences );
 		$this->assertSame( 'Still moving the subpages of “One” in the background: 4 of 10 done.', $sentences[0] );
-		$this->assertSame( 'The subpages of 2 more pages are still being worked on in the background.', $sentences[3] );
+		$this->assertSame( 'The subpages of 2 more pages are still being processed in the background.', $sentences[3] );
 		foreach ( $entries as $entry ) {
 			$queue->delete( $entry['root'] );
 		}

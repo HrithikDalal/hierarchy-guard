@@ -28,3 +28,6 @@ tests_add_filter(
 );
 
 require $hierarchy_guard_tests_dir . '/includes/bootstrap.php';
+
+// A test run in a separate process loads this file again: its tables are installed already.
+putenv( 'WP_TESTS_SKIP_INSTALL=1' ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv -- The test bootstrap's own environment, for its child processes.

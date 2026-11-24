@@ -12,6 +12,10 @@ namespace HierarchyGuard;
 use WP_Post;
 use WP_Rewrite;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Builds and normalizes page paths from slug chains.
  *
@@ -82,11 +86,12 @@ final class Paths {
 	private static function chain( WP_Post $post, callable $slug_of, array $as_before = [] ): string {
 		$segments  = [ (string) $slug_of( $post ) ];
 		$parent_id = (int) $post->post_parent;
-		$guard     = 0;
+		// However deep, as get_page_uri() goes; a parent seen before is a loop in the data, and ends the walk.
+		$seen = [ (int) $post->ID => true ];
 
-		while ( $parent_id > 0 && $guard < 50 ) {
-			++$guard;
-			$parent = $as_before[ $parent_id ] ?? get_post( $parent_id );
+		while ( $parent_id > 0 && ! isset( $seen[ $parent_id ] ) ) {
+			$seen[ $parent_id ] = true;
+			$parent             = $as_before[ $parent_id ] ?? get_post( $parent_id );
 			if ( ! $parent instanceof WP_Post ) {
 				break;
 			}
@@ -203,6 +208,19 @@ final class Paths {
 	}
 
 	/**
+	 * A path on this site as a full URL, with the home URL's own scheme
+	 * whatever the request's: home_url() takes https in any SSL request, as
+	 * in an admin forced to SSL on a site whose home URL is http.
+	 *
+	 * @param string $path Path from the home URL, with any query and fragment.
+	 * @return string
+	 */
+	public static function home_absolute( string $path ): string {
+		$scheme = strtolower( (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_SCHEME ) );
+		return home_url( $path, in_array( $scheme, [ 'http', 'https' ], true ) ? $scheme : null );
+	}
+
+	/**
 	 * A URL on this site as a path relative to the home URL, such as `/about/team/`.
 	 * This is the form redirect plugins expect for the old and the new URL.
 	 *
@@ -214,8 +232,11 @@ final class Paths {
 		$path  = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
 
-		// The home path in any case, as WP::parse_request() strips it.
-		if ( '' !== $home && '/' !== $home && 0 === stripos( $path, $home ) ) {
+		// The home path in any case, as WP::parse_request() strips it; typed without
+		// its trailing slash it is the home URL itself.
+		if ( '' !== $home && '/' !== $home && 0 === strcasecmp( untrailingslashit( $path ), untrailingslashit( $home ) ) ) {
+			$path = '/';
+		} elseif ( '' !== $home && '/' !== $home && 0 === stripos( $path, $home ) ) {
 			$path = '/' . substr( $path, strlen( $home ) );
 		}
 		if ( '' === $path ) {

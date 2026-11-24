@@ -17,6 +17,10 @@ use HierarchyGuard\Subtree;
 use WP_Error;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * One record per ledger entry: a post's _hierarchy_guard_path_{md5} row, or
  * one root-list entry. A listing reads the newest Subtree::count_cap() post
@@ -33,8 +37,11 @@ final class Records {
 	public const STATUS_ACTIVE      = 'active';
 	public const STATUS_IN_USE      = 'in_use';
 	public const STATUS_UNPUBLISHED = 'unpublished';
-	public const STATUS_REFUSED     = 'refused';
+	public const STATUS_TOO_DEEP    = 'too_deep';
+	public const STATUS_LOOP        = 'loop';
+	public const STATUS_CHAINED     = 'chained';
 	public const STATUS_OFF         = 'off';
+	public const STATUS_PLAIN       = 'plain';
 
 	/**
 	 * Ledger.
@@ -196,13 +203,14 @@ final class Records {
 	 * - unpublished: the page the record points to is not published, or its
 	 *   holder is in the Trash, which the resolver passes over. A row whose
 	 *   own holder is in the Trash reads so before anything else;
-	 * - refused: the server can't send it, whether built-in redirects are on
-	 *   or off: a path deeper than its segment cap, which it refuses before
-	 *   it looks, counting for a top-level root-list entry the segment of the
-	 *   URLs under it; a URL target at the old URL itself; or a URL target
-	 *   that is another old URL this plugin redirects, which the server
-	 *   never sends (Server::redirected());
-	 * - off: built-in redirects are off, or the site has plain permalinks;
+	 * - too deep, loop, chained: the server can't send it, whether built-in
+	 *   redirects are on or off: a path deeper than its segment cap, which it
+	 *   refuses before it looks, counting for a top-level root-list entry the
+	 *   segment of the URLs under it; a URL target at the old URL itself; or
+	 *   a URL target that is another old URL this plugin redirects, which the
+	 *   server never sends (Server::redirected());
+	 * - off: built-in redirects are off;
+	 * - plain: the site has plain permalinks, under which nothing is served;
 	 * - active: otherwise.
 	 *
 	 * The checks run for these rows only, one page at most: one lookup of
@@ -212,38 +220,98 @@ final class Records {
 	 * @return array<string,string> One of the STATUS_ constants by row ID.
 	 */
 	public function statuses( array $rows ): array {
-		$serving  = Settings::serve_redirects() && '' !== (string) get_option( 'permalink_structure' );
 		$resolver = new Resolver( $this->ledger );
 		Batch_Resolver::prime_with_ancestors( array_values( array_filter( array_column( $rows, 'holder' ) ) ) );
+		$serving = Settings::serve_redirects();
+		$plain   = '' === (string) get_option( 'permalink_structure' );
 
 		$out = [];
 		foreach ( $rows as $row ) {
-			$type   = $row['post_type'];
-			$path   = $row['path'];
-			$holder = $row['holder'] > 0 ? get_post( $row['holder'] ) : null;
-			$url    = null !== $row['target'] ? $row['target']['url'] : '';
-			if ( $holder instanceof WP_Post && 'trash' === $holder->post_status ) {
-				// Its own page is why it is not served, whatever else is at its old URL.
-				$status = self::STATUS_UNPUBLISHED;
-			} elseif ( Server::shows_post( self::full_old_url( $type, $path ) ) ) {
-				$status = self::STATUS_IN_USE;
-			} elseif ( $holder instanceof WP_Post && ! self::reachable( $holder, $url ) ) {
-				$status = self::STATUS_UNPUBLISHED;
-			} elseif (
-				// A top-level root-list entry serves only the URLs one segment under it.
-				self::too_deep( $type, $path, self::is_top_level( $row ) ? 1 : 0 )
-				|| self::loops( $type, $path, $url )
-				|| ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) )
-			) {
-				$status = self::STATUS_REFUSED;
-			} elseif ( ! $serving ) {
-				$status = self::STATUS_OFF;
-			} else {
-				$status = self::STATUS_ACTIVE;
-			}
-			$out[ $row['id'] ] = $status;
+			$out[ $row['id'] ] = $this->status_of( $row, $resolver, $serving, $plain );
 		}
 		return $out;
+	}
+
+	/**
+	 * One row's status: the first check of statuses() that applies, from
+	 * three groups of reasons in order: what the page's state says, what the
+	 * server refuses, then the built-in redirects and permalinks switches.
+	 *
+	 * @param array{id:string,holder:int,post_type:string,path:string,old:string,target:array{url:string,code:int}|null} $row Row.
+	 * @param Resolver $resolver Resolver, shared by the page of rows.
+	 * @param bool     $serving  Whether built-in redirects are on.
+	 * @param bool     $plain    Whether the site has plain permalinks.
+	 * @return string One of the STATUS_ constants.
+	 */
+	private function status_of( array $row, Resolver $resolver, bool $serving, bool $plain ): string {
+		$holder = $row['holder'] > 0 ? get_post( $row['holder'] ) : null;
+		$url    = null !== $row['target'] ? $row['target']['url'] : '';
+		return self::page_reason( $row, $holder, $url )
+			?? self::refusal( $row, $url, $resolver )
+			?? self::switch_reason( $serving, $plain );
+	}
+
+	/**
+	 * Why a row isn't served by its page's state: its own page is in the
+	 * Trash, a post is at its old URL, or the page it points to can't be
+	 * reached.
+	 *
+	 * @param array{holder:int,post_type:string,path:string} $row    Row.
+	 * @param WP_Post|null                                   $holder The row's page, if it has one.
+	 * @param string                                         $url    The URL target, or ''.
+	 * @return string|null A STATUS_ constant, or null when the page's state is no reason.
+	 */
+	private static function page_reason( array $row, ?WP_Post $holder, string $url ): ?string {
+		if ( null !== $holder && 'trash' === $holder->post_status ) {
+			// Its own page is why it is not served, whatever else is at its old URL.
+			return self::STATUS_UNPUBLISHED;
+		}
+		if ( Server::shows_post( self::full_old_url( $row['post_type'], $row['path'] ) ) ) {
+			return self::STATUS_IN_USE;
+		}
+		if ( null !== $holder && ! self::reachable( $holder, $url ) ) {
+			return self::STATUS_UNPUBLISHED;
+		}
+		return null;
+	}
+
+	/**
+	 * Why the server refuses a row, whether built-in redirects are on or
+	 * off: too many levels, a URL target at its own old URL, or one that is
+	 * another redirected URL.
+	 *
+	 * @param array{holder:int,post_type:string,path:string} $row      Row.
+	 * @param string                                         $url      The URL target, or ''.
+	 * @param Resolver                                       $resolver Resolver, shared by the page of rows.
+	 * @return string|null A STATUS_ constant, or null when the server would send it.
+	 */
+	private static function refusal( array $row, string $url, Resolver $resolver ): ?string {
+		// A top-level root-list entry serves only the URLs one segment under it.
+		if ( self::too_deep( $row['post_type'], $row['path'], self::is_top_level( $row ) ? 1 : 0 ) ) {
+			return self::STATUS_TOO_DEEP;
+		}
+		if ( self::loops( $row['post_type'], $row['path'], $url ) ) {
+			return self::STATUS_LOOP;
+		}
+		if ( '' !== $url && Server::is_here( $url ) && Server::redirected( $resolver, $url ) ) {
+			return self::STATUS_CHAINED;
+		}
+		return null;
+	}
+
+	/**
+	 * A row's status by the switches alone: built-in redirects off, then
+	 * plain permalinks, else active.
+	 *
+	 * @param bool $serving Whether built-in redirects are on.
+	 * @param bool $plain   Whether the site has plain permalinks.
+	 * @return string One of the STATUS_ constants.
+	 */
+	private static function switch_reason( bool $serving, bool $plain ): string {
+		if ( ! $serving ) {
+			return self::STATUS_OFF;
+		}
+		return $plain ? self::STATUS_PLAIN : self::STATUS_ACTIVE;
 	}
 
 	/**
@@ -568,10 +636,10 @@ final class Records {
 		if ( [] !== $holders ) {
 			_prime_post_caches( $holders, false, false );
 			$keys = array_values( array_unique( array_map( static fn( array $row ): string => Ledger::target_key( (string) $row['post_type'], (string) $row['path'] ), $rows ) ) );
-			$ids  = implode( ',', array_map( 'intval', $holders ) );
+			$ids  = implode( ',', array_fill( 0, count( $holders ), '%d' ) );
 			$in   = implode( ',', array_fill( 0, count( $keys ), '%s' ) );
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $ids holds integers only and $in only %s, one per row of the page.
-			$overrides = (array) $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id IN ( {$ids} ) AND meta_key IN ( {$in} )", $keys ), ARRAY_A );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $ids holds only %d and $in only %s, one per row of the page.
+			$overrides = (array) $wpdb->get_results( $wpdb->prepare( "SELECT post_id, meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id IN ( {$ids} ) AND meta_key IN ( {$in} )", ...array_merge( array_map( 'intval', $holders ), $keys ) ), ARRAY_A );
 			foreach ( $overrides as $override ) {
 				$found[ (int) $override['post_id'] ][ (string) $override['meta_key'] ] = maybe_unserialize( (string) $override['meta_value'] );
 			}

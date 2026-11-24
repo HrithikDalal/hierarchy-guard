@@ -182,7 +182,7 @@ describe( 'the notice after a save', () => {
 		const redirects = { serving: false, provider: null };
 		expect( changeNotice( pairs( 1 ), redirects ) ).toEqual( {
 			status: 'warning',
-			sentence: '1 old URL now shows “Page not found”.',
+			sentence: '1 old URL may now show “Page not found”.',
 			view: 'View redirects (1)',
 			setup: false,
 		} );

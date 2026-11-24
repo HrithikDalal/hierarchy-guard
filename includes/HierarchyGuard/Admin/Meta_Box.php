@@ -15,6 +15,10 @@ use HierarchyGuard\Settings;
 use HierarchyGuard\Subtree;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * A read-only box with the same data as the block editor panel. The
  * classic-editor script asks for confirmation when the form is submitted with
@@ -83,7 +87,8 @@ final class Meta_Box {
 			$data['redirects']['serving'] ? 1 : 0
 		);
 
-		echo '<p><strong>' . esc_html__( 'Parent pages', 'hierarchy-guard' ) . '</strong><br>';
+		// Headings in the look of core's Page Attributes labels, at the level under the box's own title.
+		echo '<p class="post-attributes-label-wrapper" role="heading" aria-level="3"><span class="post-attributes-label">' . esc_html__( 'Parent pages', 'hierarchy-guard' ) . '</span></p><p>';
 		if ( [] === $data['ancestors'] ) {
 			esc_html_e( 'None.', 'hierarchy-guard' );
 			echo ' ';
@@ -94,7 +99,7 @@ final class Meta_Box {
 		}
 		echo '</p>';
 
-		echo '<p><strong>' . esc_html__( 'Subpages', 'hierarchy-guard' ) . '</strong><br>';
+		echo '<p class="post-attributes-label-wrapper" role="heading" aria-level="3"><span class="post-attributes-label">' . esc_html__( 'Subpages', 'hierarchy-guard' ) . '</span></p><p>';
 		if ( 0 === (int) $data['children_total'] ) {
 			esc_html_e( 'No subpages.', 'hierarchy-guard' );
 			echo '</p>';
@@ -102,7 +107,7 @@ final class Meta_Box {
 			echo esc_html( self::counts_line( $data ) ) . '</p><ul class="hierarchy-guard-box__children">';
 			foreach ( $data['children'] as $child ) {
 				$note = (int) $child['children_count'] > 0
-					/* translators: %s: number of subpages. */
+					/* translators: %s: number of subpages, such as 3 or 1,000+. */
 					? sprintf( _n( '%s subpage', '%s subpages', (int) $child['children_count'], 'hierarchy-guard' ), Subtree::format_count( (int) $child['children_count'], (bool) $child['children_capped'] ) )
 					: '';
 				$state = 'publish' !== $child['status'] ? (string) $child['status_label'] : '';

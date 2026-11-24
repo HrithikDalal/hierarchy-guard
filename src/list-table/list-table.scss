@@ -33,8 +33,10 @@
 
 }
 
-// Core's save bar wraps; the warning takes a line of its own above the buttons.
-.inline-edit-save .hierarchy-guard-quick-edit {
+// Core's save bar wraps; the Quick Edit and Bulk Edit warnings take a line
+// of their own above the buttons.
+.inline-edit-save .hierarchy-guard-quick-edit,
+.inline-edit-save #hierarchy-guard-bulk-edit {
 	flex-basis: 100%;
 	box-sizing: border-box;
 	margin: 0 0 8px;

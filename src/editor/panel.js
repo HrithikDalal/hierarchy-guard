@@ -1,6 +1,6 @@
 /**
- * The Hierarchy plugin for the block editor: a warning under the Summary
- * before a save changes subpage URLs, a notice with that change's redirects
+ * The Hierarchy plugin for the block editor: a warning in the document
+ * sidebar's status area before a save changes subpage URLs, a notice with that change's redirects
  * after it did, and a panel with what is above and below the page.
  */
 import { BaseControl, Notice, Spinner } from '@wordpress/components';
@@ -23,6 +23,7 @@ import {
 	trashNote,
 	viewAllLabel,
 } from '../common/copy';
+import { loadingText, speakLoading, waiting } from '../common/loading';
 import RedirectsModal from '../common/redirects-modal';
 
 const PANEL = 'hierarchy-guard/hierarchy-guard';
@@ -240,6 +241,14 @@ export default function HierarchyPlugin() {
 		}
 	}, [ needed, load ] );
 
+	// The spinner shows in the open panel until the hierarchy or an error does.
+	const spinning = waiting( supported && opened, data, error );
+	useEffect( () => {
+		if ( spinning ) {
+			speakLoading();
+		}
+	}, [ spinning ] );
+
 	// A save that changed the slug or parent moved the page: show where it
 	// is now, and the redirects of the change it recorded.
 	useEffect( () => {
@@ -371,7 +380,14 @@ export default function HierarchyPlugin() {
 						{ error }
 					</Notice>
 				) }
-				{ ! data && ! error && <Spinner /> }
+				{ ! data && ! error && (
+					<>
+						<Spinner />
+						<span className="screen-reader-text">
+							{ loadingText() }
+						</span>
+					</>
+				) }
 				{ data && <Overview data={ data } /> }
 			</PluginDocumentSettingPanel>
 			{ modal && (

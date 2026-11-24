@@ -4,15 +4,18 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import config from '../config';
 import {
+	bulkEditWarning,
 	bulkSentence,
 	classicConfirm,
 	changedSentence,
 	changedStatus,
 	copiedSentence,
 	countsLine,
+	csvLabel,
 	deniedSentence,
 	dialogTitle,
 	formatCount,
+	importNotes,
 	initialSentence,
 	keptUrl,
 	optionDescription,
@@ -22,6 +25,7 @@ import {
 	previewError,
 	quickEditWarning,
 	saveWarning,
+	shownImportNotes,
 	subpagesLabel,
 	trashNote,
 	trashSentence,
@@ -126,7 +130,7 @@ describe( 'the trash dialog', () => {
 				1000
 			)
 		).toBe(
-			'“Team” has 1 subpage. It will move up under “Studio” and get a new URL.'
+			'“Team” has 1 subpage. It’ll move up under “Studio” and get a new URL.'
 		);
 	} );
 
@@ -138,12 +142,12 @@ describe( 'the trash dialog', () => {
 
 	it( 'describes trashing the subpages too, and the fallback past the cap', () => {
 		expect( trashSentence( team, 'trash_children', 1000 ) ).toBe(
-			'“Team” has 2 subpages directly under it, 3 in all. They go to the Trash too, and come back with their statuses if you restore “Team”.'
+			'“Team” has 2 subpages directly under it, 3 in all. They go to the Trash too. Restoring “Team” restores them with their original status.'
 		);
 		expect(
 			trashSentence( { ...team, fallback: true }, 'trash_children', 1000 )
 		).toBe(
-			'“Team” has 2 subpages directly under it, 3 in all. That is more than 1,000, so they’ll move up one level instead of going to the Trash.'
+			'“Team” has 2 subpages directly under it, 3 in all. That’s more than 1,000, so they’ll move up one level instead of going to the Trash.'
 		);
 	} );
 
@@ -210,7 +214,22 @@ describe( 'the trash dialog', () => {
 				1000
 			)
 		).toBe(
-			'2 of the selected pages have subpages, 1,000+ in all. The subpages go to the Trash too, and come back with their statuses if you restore their parent. A page with more than 1,000 subpages has them moved up instead.'
+			'2 of the selected pages have subpages, 1,000+ in all. The subpages go to the Trash too. Restoring their parent restores them with their original status. A page with more than 1,000 subpages has them moved up instead.'
+		);
+		// The cap is filterable, so its noun follows the number.
+		expect(
+			bulkSentence(
+				{
+					pages: [ team, { ...team, fallback: null } ],
+					total: { count: 1, capped: true },
+					more: 0,
+				},
+				'trash_children',
+				2,
+				1
+			)
+		).toContain(
+			'A page with more than 1 subpage has them moved up instead.'
 		);
 	} );
 
@@ -236,12 +255,36 @@ describe( 'the trash dialog', () => {
 		).toBe( 'Not available: there are more than 1,000.' );
 	} );
 
+	it( 'says “it” or “them” for the subpages a restore brings back, as many as there are', () => {
+		expect(
+			optionDescription(
+				'trash_children',
+				{
+					...team,
+					title: 'Solo',
+					descendants: { count: 1, capped: false },
+				},
+				1000
+			)
+		).toBe( 'Restoring “Solo” restores it with its original status.' );
+		expect(
+			optionDescription(
+				'trash_children',
+				{ ...team, descendants: { count: 3, capped: false } },
+				1000
+			)
+		).toBe( 'Restoring “Team” restores them with their original status.' );
+		expect( optionDescription( 'trash_children', null, 1000 ) ).toBe(
+			'Restoring their parent restores them with their original status.'
+		);
+	} );
+
 	it( 'names the right that is missing, and what an error leads to', () => {
 		expect( deniedSentence( 'reparent' ) ).toBe(
 			'You can’t edit some of the subpages. They’ll stay where they are.'
 		);
 		expect( deniedSentence( 'trash_children' ) ).toBe(
-			'You can’t delete some of the subpages. They’ll stay where they are.'
+			'You can’t move some of the subpages to the Trash. They’ll stay where they are.'
 		);
 		expect( previewError( 'keep' ) ).toBe(
 			'The subpages couldn’t be checked. If you continue, they’ll stay where they are.'
@@ -252,22 +295,31 @@ describe( 'the trash dialog', () => {
 describe( 'warnings and outcomes', () => {
 	it( 'warns before a save changes subpage URLs', () => {
 		expect( saveWarning( 12, false, false ) ).toBe(
-			'Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving.'
+			'Saving will change the URLs of this page and of its 12 subpages. After you save, you’ll see the redirects to add.'
 		);
 		expect( saveWarning( 1, false, true ) ).toBe(
-			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones.'
+			'Saving will change the URL of this page and of its 1 subpage. The old URLs will redirect to the new ones.'
 		);
 		expect( quickEditWarning( 5, false ) ).toBe(
-			'Saving changes this page’s URL and the URLs of 5 subpages.'
+			'Saving will change the URLs of this page and of its 5 subpages.'
+		);
+	} );
+
+	it( 'warns in Bulk Edit with the same next step', () => {
+		expect( bulkEditWarning( 2, false ) ).toBe(
+			'Saving will change the URLs of the pages it moves, and of the subpages under 2 of them. After you save, you’ll see the redirects to add.'
+		);
+		expect( bulkEditWarning( 1, true ) ).toBe(
+			'Saving will change the URLs of the pages it moves, and of the subpages under 1 of them. The old URLs will redirect to the new ones.'
 		);
 	} );
 
 	it( 'composes the classic confirmation from the save warning', () => {
 		expect( classicConfirm( 12, false, false ) ).toBe(
-			'Saving changes this page’s URL and the URLs of 12 subpages. You’ll get the redirects to add after saving. Continue?'
+			'Saving will change the URLs of this page and of its 12 subpages. After you save, you’ll see the redirects to add. Continue?'
 		);
 		expect( classicConfirm( 1, false, true ) ).toBe(
-			'Saving changes this page’s URL and the URL of 1 subpage. The old URLs will redirect to the new ones. Continue?'
+			'Saving will change the URL of this page and of its 1 subpage. The old URLs will redirect to the new ones. Continue?'
 		);
 	} );
 
@@ -282,7 +334,7 @@ describe( 'warnings and outcomes', () => {
 			'2 URLs changed. Add their redirects in your redirect plugin.'
 		);
 		expect( changedSentence( 1, false, false, null ) ).toBe(
-			'1 old URL now shows “Page not found”.'
+			'1 old URL may now show “Page not found”.'
 		);
 		expect( changedStatus( true, null ) ).toBe( 'success' );
 		expect( changedStatus( false, { name: 'Redirection' } ) ).toBe(
@@ -358,6 +410,46 @@ describe( 'warnings and outcomes', () => {
 	} );
 } );
 
+describe( 'the CSV download', () => {
+	it( 'names the redirect plugin only for a file in its own layout', () => {
+		expect( csvLabel( { name: 'Redirection', csv: 'redirection' } ) ).toBe(
+			'Download CSV for Redirection'
+		);
+		expect( csvLabel( { name: 'SEOPress PRO', csv: 'generic' } ) ).toBe(
+			'Download CSV'
+		);
+		expect( csvLabel( { name: '', csv: 'yoast' } ) ).toBe( 'Download CSV' );
+		expect( csvLabel( null ) ).toBe( 'Download CSV' );
+	} );
+
+	it( 'says what to know before importing, the plugin’s own note first', () => {
+		expect(
+			importNotes( {
+				name: 'Rank Math',
+				note: 'Rank Math imports a CSV only in its PRO version.',
+			} )
+		).toEqual( [
+			'Rank Math imports a CSV only in its PRO version.',
+			'If Rank Math already added any of these redirects itself, skip those rows.',
+		] );
+		expect( importNotes( { name: '', note: '' } ) ).toEqual( [
+			'If your redirect plugin already added any of these redirects itself, skip those rows.',
+		] );
+		expect( importNotes( null ) ).toEqual( [] );
+	} );
+
+	it( 'shows the import notes whenever the CSV button shows, built-in redirects on or off', () => {
+		const provider = { name: 'Redirection', note: '' };
+		const serving = config.serving;
+		config.serving = true;
+		expect( shownImportNotes( { total: 3 }, provider ) ).toEqual( [
+			'If Redirection already added any of these redirects itself, skip those rows.',
+		] );
+		config.serving = serving;
+		expect( shownImportNotes( { total: 0 }, provider ) ).toEqual( [] );
+	} );
+} );
+
 describe( 'what redirects the pairs', () => {
 	it( 'follows the pairs, not the page, when the page itself is not redirected to', () => {
 		const redirects = pairsRedirects( {
@@ -408,9 +500,9 @@ describe( 'the Tree view', () => {
 		);
 	} );
 
-	it( 'says past the cap that only the first are shown', () => {
+	it( 'says past the cap that only the oldest are shown', () => {
 		expect( treeCappedSentence( 1000 ) ).toBe(
-			'Only the first 1,000 subpages are shown.'
+			'Only the 1,000 oldest subpages are shown.'
 		);
 	} );
 

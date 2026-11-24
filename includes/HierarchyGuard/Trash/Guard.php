@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * While the plugin trashes or restores a subpage itself, its own hooks must
  * not treat that call as a new editor action. The guard covers only the post

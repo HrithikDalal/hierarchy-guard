@@ -10,9 +10,14 @@ declare( strict_types=1 );
 namespace HierarchyGuard\Trash;
 
 use HierarchyGuard\Ledger;
+use HierarchyGuard\Meta_Guard;
 use HierarchyGuard\Paths;
 use HierarchyGuard\Subtree;
 use WP_Post;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * Moves, trashes and restores subpages in bounded steps. A job is a plain
@@ -70,6 +75,8 @@ final class Operations {
 		/**
 		 * Filters how many subpages one step moves with a direct update.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param int $threshold Moves per step, 200 by default.
 		 */
 		return max( 1, (int) apply_filters( 'hierarchy_guard_batch_threshold', self::DEFAULT_THRESHOLD ) );
@@ -84,6 +91,8 @@ final class Operations {
 		/**
 		 * Filters how many subpages one step trashes or restores through core,
 		 * which runs every plugin's save hooks for each of them.
+		 *
+		 * @since 1.0.0
 		 *
 		 * @param int $threshold Core calls per step, 25 by default.
 		 */
@@ -263,6 +272,8 @@ final class Operations {
 			 * when their parent is trashed and again when it is restored. No
 			 * save_post runs for them, so search indexes and SEO plugins that cache
 			 * permalinks can re-sync these IDs here.
+			 *
+			 * @since 1.0.0
 			 *
 			 * @param int[] $ids  Moved post IDs.
 			 * @param int   $from The parent they left: the trashed page, or on restore the page they had moved up to, 0 for top level.
@@ -540,7 +551,7 @@ final class Operations {
 		foreach ( is_array( $aliases ) ? $aliases : [] as $alias ) {
 			$this->ledger->forget_alias( (string) $job['post_type'], (int) ( $alias['to'] ?? 0 ), (string) ( $alias['path'] ?? '' ) );
 		}
-		delete_post_meta( $root, Markers::ALIASES );
+		Meta_Guard::writing( static fn() => delete_post_meta( $root, Markers::ALIASES ) );
 		$this->ledger->prune( $root );
 	}
 
@@ -614,7 +625,7 @@ final class Operations {
 
 		if ( [] !== $written ) {
 			$stored = get_post_meta( $root, Markers::ALIASES, true );
-			update_post_meta( $root, Markers::ALIASES, array_merge( is_array( $stored ) ? $stored : [], $written ) );
+			Meta_Guard::writing( static fn() => update_post_meta( $root, Markers::ALIASES, array_merge( is_array( $stored ) ? $stored : [], $written ) ) );
 		}
 		return $job;
 	}

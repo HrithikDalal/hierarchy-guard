@@ -11,6 +11,10 @@ namespace HierarchyGuard;
 
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Stores the paths a post (or its moved children) used to live at.
  *
@@ -30,8 +34,26 @@ final class Ledger {
 	public const CACHE_GROUP   = 'hierarchy_guard';
 	public const ROOT_CAP      = 200;
 
-	private const CACHE_MISS = -1;
-	private const CACHE_TTL  = 12 * HOUR_IN_SECONDS;
+	/**
+	 * Prefixes of a path find_prefixes() reads in one query and keeps in one
+	 * cache entry.
+	 */
+	public const PREFIXES_PER_READ = 50;
+
+	private const CACHE_TTL = 12 * HOUR_IN_SECONDS;
+
+	/**
+	 * Most old URLs one request asks VIP's edge to purge. VIP purges at most
+	 * 100 a request and drops the rest, its own purges included.
+	 */
+	private const PURGE_LIMIT = 50;
+
+	/**
+	 * Old URLs this request asked VIP's edge to purge.
+	 *
+	 * @var array<string,true>
+	 */
+	private static array $purged = [];
 
 	/**
 	 * Nesting depth of deferred() calls.
@@ -114,6 +136,8 @@ final class Ledger {
 		/**
 		 * Filters whether an old path is recorded for a post.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param bool    $record   Whether to record.
 		 * @param WP_Post $post     The post the path maps to.
 		 * @param string  $old_path The normalized old path.
@@ -127,10 +151,11 @@ final class Ledger {
 			return false;
 		}
 
-		$meta_id = add_post_meta( $post_id, $key, $old_path, true );
+		$meta_id = Meta_Guard::writing( static fn() => add_post_meta( $post_id, $key, $old_path, true ) );
 		if ( is_int( $meta_id ) ) {
 			self::remember( (string) $post->post_type, [ $meta_id ] );
 		}
+		self::purge( (string) $post->post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -155,14 +180,21 @@ final class Ledger {
 			return false;
 		}
 
-		$list[] = $old_path;
+		$list[]  = $old_path;
+		$evicted = [];
 		if ( count( $list ) > self::ROOT_CAP ) {
-			$this->drop_root_targets( $post_type, array_slice( $list, 0, count( $list ) - self::ROOT_CAP ) );
+			$evicted = array_slice( $list, 0, count( $list ) - self::ROOT_CAP );
+			$this->drop_root_targets( $post_type, $evicted );
 			$list = array_slice( $list, -self::ROOT_CAP );
 		}
 		$roots[ $post_type ] = array_values( $list );
 
 		update_option( self::ROOT_OPTION, $roots, false );
+		// The oldest entry past the cap, one per new entry, no longer redirects.
+		foreach ( $evicted as $gone ) {
+			self::purge( $post_type, (string) $gone );
+		}
+		self::purge( $post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -214,9 +246,10 @@ final class Ledger {
 		$dropped = false;
 		foreach ( array_unique( array_map( 'intval', $ids ) ) as $id ) {
 			$this->drop_target( $id, $type, $path );
-			$dropped = delete_post_meta( $id, $key ) || $dropped;
+			$dropped = Meta_Guard::writing( static fn() => delete_post_meta( $id, $key ) ) || $dropped;
 		}
 		if ( $dropped ) {
+			self::purge( $type, $path );
 			$this->bump();
 		}
 
@@ -248,7 +281,8 @@ final class Ledger {
 		}
 
 		$this->drop_target( $post_id, (string) $post->post_type, $old_path );
-		delete_post_meta( $post_id, $key );
+		Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
+		self::purge( (string) $post->post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -272,6 +306,7 @@ final class Ledger {
 		$roots[ $post_type ] = array_values( array_diff( $list, [ $old_path ] ) );
 		update_option( self::ROOT_OPTION, $roots, false );
 		$this->drop_root_targets( $post_type, [ $old_path ] );
+		self::purge( $post_type, $old_path );
 		$this->bump();
 
 		return true;
@@ -338,13 +373,18 @@ final class Ledger {
 	}
 
 	/**
-	 * Whether a post holds any ledger entry.
+	 * Whether a post holds any ledger entry. For a post being deleted for
+	 * good, begin_delete() has read its entries already.
 	 *
 	 * @param int $post_id Post ID.
 	 * @return bool
 	 */
 	public static function has_entries( int $post_id ): bool {
 		global $wpdb;
+
+		if ( isset( self::$deleting[ $post_id ] ) ) {
+			return [] !== self::$deleting[ $post_id ];
+		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the post_id index that stops at the first entry; once per post trashed, restored or deleted.
 		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s LIMIT 1", $post_id, $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
@@ -385,7 +425,9 @@ final class Ledger {
 		}
 
 		$this->drop_target( $post_id, (string) $post->post_type, $path );
-		delete_post_meta( $post_id, $key );
+		Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
+		// The edge may still send this URL to where the page was; it leads to the page itself now.
+		self::purge( (string) $post->post_type, $path );
 		$this->bump();
 
 		return 1;
@@ -400,35 +442,88 @@ final class Ledger {
 	 */
 	public function find( string $post_type, string $path ): ?int {
 		$path = Paths::normalize( $path );
+		return '' === $path ? null : $this->find_prefixes( $post_type, $path )[ $path ];
+	}
+
+	/**
+	 * What a path and the next shorter prefixes of it used to lead to, as
+	 * find() answers each: holders() read through answer().
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return array<string,int|null> By prefix, the path itself first: post ID, 0 for the root list, null when unknown.
+	 */
+	public function find_prefixes( string $post_type, string $path ): array {
+		$out = [];
+		foreach ( $this->holders( $post_type, $path ) as $prefix => $id ) {
+			$out[ $prefix ] = $this->answer( $post_type, (string) $prefix, $id );
+		}
+		return $out;
+	}
+
+	/**
+	 * The entries' holders of a path and the next shorter prefixes of it: up
+	 * to PREFIXES_PER_READ of them, read in one query and cached under the
+	 * path as one holder per prefix. So a 404 several segments deep costs
+	 * what a one-segment one does, and a path of any depth costs a bounded
+	 * query, cache entry and memory per call. A caller that needs a shorter
+	 * prefix than those answered asks again from it, so every depth is
+	 * looked up. The holders' status is not read here: see answer().
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Path, any form; normalized here.
+	 * @return array<string,int|null> By prefix, the path itself first: the live holder, else one in the trash; 0 for the root list; null when unknown.
+	 */
+	public function holders( string $post_type, string $path ): array {
+		$path = Paths::normalize( $path );
 		if ( '' === $path ) {
-			return null;
+			return [];
+		}
+		$segments = explode( '/', $path );
+		$longest  = count( $segments );
+		$shortest = max( 1, $longest - self::PREFIXES_PER_READ + 1 );
+		$prefixes = [];
+		for ( $length = $longest; $length >= $shortest; $length-- ) {
+			$prefixes[] = implode( '/', array_slice( $segments, 0, $length ) );
 		}
 
-		$cache_key = 'find:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
-		$cached    = wp_cache_get( $cache_key, self::CACHE_GROUP );
-		if ( false !== $cached ) {
-			$found = self::CACHE_MISS === (int) $cached ? null : (int) $cached;
-		} else {
-			$found = $this->seek( $post_type, $path );
-			if ( null === $found ) {
-				$roots = $this->roots();
-				if ( in_array( $path, $roots[ $post_type ] ?? [], true ) ) {
-					$found = 0;
+		$cache_key = 'prefixes:' . md5( $post_type . ':' . $path ) . ':' . wp_cache_get_last_changed( self::CACHE_GROUP );
+		$found     = wp_cache_get( $cache_key, self::CACHE_GROUP );
+		if ( ! is_array( $found ) ) {
+			$found = $this->seek( $post_type, $prefixes );
+			$roots = $this->roots()[ $post_type ] ?? [];
+			foreach ( $found as $i => $id ) {
+				if ( null === $id && in_array( $prefixes[ $i ], $roots, true ) ) {
+					$found[ $i ] = 0;
 				}
 			}
-
 			// phpcs:ignore WordPressVIPMinimum.Performance.LowExpiryCacheTime.CacheTimeUndetermined -- CACHE_TTL is 12 hours, well above 300 seconds.
-			wp_cache_set( $cache_key, null === $found ? self::CACHE_MISS : $found, self::CACHE_GROUP, self::CACHE_TTL );
+			wp_cache_set( $cache_key, $found, self::CACHE_GROUP, self::CACHE_TTL );
 		}
 
-		// The cache keeps the holder; its status is read on every call, because
-		// trashing, restoring or deleting the holder does not touch the ledger.
-		if ( null !== $found && $found > 0 && in_array( get_post_status( $found ), [ false, 'trash' ], true ) ) {
-			$roots = $this->roots();
-			return in_array( $path, $roots[ $post_type ] ?? [], true ) ? 0 : null;
+		$out = [];
+		foreach ( $prefixes as $i => $prefix ) {
+			$out[ $prefix ] = $found[ $i ] ?? null;
 		}
+		return $out;
+	}
 
-		return $found;
+	/**
+	 * What find() answers for a prefix whose holder holders() read. The
+	 * holder's status is read on every call, because trashing, restoring or
+	 * deleting it does not touch the ledger: a holder gone or in the trash
+	 * answers as if it held nothing.
+	 *
+	 * @param string   $post_type Post type name.
+	 * @param string   $prefix    Normalized path.
+	 * @param int|null $holder    What holders() read for it.
+	 * @return int|null Post ID, 0 for the root list, null when unknown.
+	 */
+	public function answer( string $post_type, string $prefix, ?int $holder ): ?int {
+		if ( null !== $holder && $holder > 0 && in_array( get_post_status( $holder ), [ false, 'trash' ], true ) ) {
+			return in_array( $prefix, $this->roots()[ $post_type ] ?? [], true ) ? 0 : null;
+		}
+		return $holder;
 	}
 
 	/**
@@ -568,12 +663,16 @@ final class Ledger {
 			]
 		);
 
+		if ( null !== $target ) {
+			$target['url'] = self::stored_url( $target['url'] );
+		}
+
 		if ( $holder > 0 ) {
 			$key = self::target_key( $post_type, $path );
 			if ( null === $target ) {
-				delete_post_meta( $holder, $key );
+				Meta_Guard::writing( static fn() => delete_post_meta( $holder, $key ) );
 			} else {
-				update_post_meta( $holder, $key, $target );
+				Meta_Guard::writing( static fn() => update_post_meta( $holder, $key, $target ) );
 			}
 		} else {
 			$all = $this->root_targets();
@@ -585,12 +684,31 @@ final class Ledger {
 			$this->save_root_targets( $all );
 		}
 
+		self::purge( $post_type, $path );
 		$this->bump();
 	}
 
 	/**
+	 * A URL target as it is stored: a URL on this site as its path from the
+	 * home URL, with its query and fragment, so it follows the site to a new
+	 * domain, as after a WordPress import there; any other URL as it is.
+	 *
+	 * @param string $url An http(s) URL, or ''.
+	 * @return string
+	 */
+	private static function stored_url( string $url ): string {
+		if ( '' === $url || ! Redirects\Server::is_here( $url ) ) {
+			return $url;
+		}
+		$fragment = (string) wp_parse_url( $url, PHP_URL_FRAGMENT );
+		// One leading slash: "//about/" would read back as a protocol-relative URL, and WordPress trims the extra slashes from a request anyway.
+		return '/' . ltrim( Paths::relative( $url ), '/' ) . ( '' !== $fragment ? '#' . $fragment : '' );
+	}
+
+	/**
 	 * An override as stored, checked: an http(s) URL with a host or none,
-	 * and 301, 302 or 0. Null when nothing is left.
+	 * and 301, 302 or 0. Null when nothing is left. A target stored as a path
+	 * on this site is read against the home URL.
 	 *
 	 * @param mixed $value Stored value.
 	 * @return array{url:string,code:int}|null
@@ -599,7 +717,10 @@ final class Ledger {
 		if ( ! is_array( $value ) ) {
 			return null;
 		}
-		$url    = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
+		$url = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
+		if ( str_starts_with( $url, '/' ) && ! str_starts_with( $url, '//' ) ) {
+			$url = Paths::home_absolute( $url );
+		}
 		$code   = isset( $value['code'] ) && is_numeric( $value['code'] ) ? (int) $value['code'] : 0;
 		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
 		if ( '' !== $url && ( ! in_array( $scheme, [ 'http', 'https' ], true ) || '' === (string) wp_parse_url( $url, PHP_URL_HOST ) ) ) {
@@ -657,23 +778,25 @@ final class Ledger {
 	}
 
 	/**
-	 * Makes sure the daily rebuild of the newest-records list is scheduled,
-	 * on activation and on admin_init: one single event, which schedules
-	 * the next one a day later when it runs, so on a site where the plugin
-	 * is no longer active nothing schedules it again. Until a first build
-	 * has completed, the list reads as being built and the rebuild runs on
-	 * the next cron run. A type supported later is built by the next daily
-	 * run, with no notice. It never runs in a web request, and once built a
-	 * page load only reads autoloaded options here.
+	 * Makes sure the daily rebuild of the newest-records list is scheduled
+	 * once the ledger holds an entry, on activation and after an update: one
+	 * single event, which schedules the next one a day later when it runs, so
+	 * on a site where the plugin is no longer active nothing schedules it
+	 * again. A site with no entry schedules nothing; its first entry
+	 * schedules the run (remember()). Until a first build has completed, the
+	 * list reads as being built and the rebuild runs on the next cron run. A
+	 * type supported later is built by the next daily run, with no notice.
+	 * It never runs in a web request.
 	 */
 	public static function schedule_rebuild(): void {
 		$state = (string) get_option( self::RECENT_STATE );
 		if ( str_starts_with( $state, 'done' ) ) {
-			// Missing, or a recurring event from an earlier build: one single run, a day ahead.
-			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) || false !== wp_get_schedule( self::REBUILD_HOOK ) ) {
-				self::clear_leftovers();
+			if ( false === wp_next_scheduled( self::REBUILD_HOOK ) && self::has_any_entry() ) {
 				wp_schedule_single_event( time() + DAY_IN_SECONDS, self::REBUILD_HOOK );
 			}
+			return;
+		}
+		if ( ! self::has_any_entry() ) {
 			return;
 		}
 		if ( 'building' !== $state ) {
@@ -684,24 +807,22 @@ final class Ledger {
 
 	/**
 	 * Brings the rebuild forward to the next cron run, the one event moved
-	 * rather than another added, unless it is due within a minute already.
+	 * rather than another added, unless it is due within a minute already:
+	 * when deletes leave a full list short, and for entries an import adds,
+	 * which reach the list only through the rebuild.
 	 */
-	private static function rebuild_soon(): void {
-		$next  = wp_next_scheduled( self::REBUILD_HOOK );
-		$older = false !== $next && false !== wp_get_schedule( self::REBUILD_HOOK );
-		if ( false !== $next && ! $older && $next <= time() + MINUTE_IN_SECONDS ) {
+	public static function rebuild_soon(): void {
+		$next = wp_next_scheduled( self::REBUILD_HOOK );
+		if ( false !== $next && $next <= time() + MINUTE_IN_SECONDS ) {
 			return;
-		}
-		if ( false === $next || $older ) {
-			self::clear_leftovers();
 		}
 		wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		wp_schedule_single_event( time(), self::REBUILD_HOOK );
 	}
 
 	/**
-	 * Schedules the next daily run, from the rebuild itself, unless one is
-	 * scheduled already.
+	 * Schedules the next daily run, from the rebuild itself and when an entry
+	 * is recorded, unless one is scheduled already.
 	 */
 	private static function schedule_next(): void {
 		if ( false === wp_next_scheduled( self::REBUILD_HOOK ) ) {
@@ -710,16 +831,16 @@ final class Ledger {
 	}
 
 	/**
-	 * Upgrade cleanup, when the rebuild is first scheduled on a site: the
-	 * one-time backfill's event, the list's lock and queue rows, and a
-	 * recurring rebuild event, which development builds before the single
-	 * daily event left behind.
+	 * Whether any post holds an entry: one range read on the meta_key index
+	 * that stops at the first, on activation and after an update only.
+	 *
+	 * @return bool
 	 */
-	private static function clear_leftovers(): void {
-		wp_clear_scheduled_hook( 'hierarchy_guard_backfill_recent' );
-		wp_clear_scheduled_hook( self::REBUILD_HOOK );
-		delete_option( 'hierarchy_guard_recent_lock' );
-		delete_option( 'hierarchy_guard_recent_queue' );
+	private static function has_any_entry(): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Range on the meta_key index, LIMIT 1; on activation and after an update only.
+		return null !== $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$wpdb->postmeta} WHERE meta_key LIKE %s LIMIT 1", $wpdb->esc_like( self::KEY_PREFIX ) . '%' ) );
 	}
 
 	/**
@@ -767,7 +888,8 @@ final class Ledger {
 	 * Running it again changes nothing. It first schedules the next daily
 	 * run. The first build marks the list as built, for those types; when
 	 * a query fails, that type's list is left as it was and the list is
-	 * not marked built.
+	 * not marked built. When no supported type has an entry left, nothing is
+	 * scheduled after it: the next entry recorded schedules the run again.
 	 */
 	public static function rebuild_recent(): void {
 		global $wpdb;
@@ -779,8 +901,10 @@ final class Ledger {
 		$found  = [];
 		$failed = false;
 		foreach ( $types as $type ) {
+			// The meta_key range reads the ledger's rows only, then sorts them; left alone, the planner walks
+			// postmeta's primary key backwards from the newest row, through every newer row of other meta.
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- From WP-Cron only: the newest entries of one type, LIMIT the cap plus one.
-			$ids = $wpdb->get_col( $wpdb->prepare( "SELECT pm.meta_id FROM {$wpdb->postmeta} pm STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key LIKE %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT %d", $wpdb->esc_like( self::KEY_PREFIX ) . '%', $type, $cap + 1 ) );
+			$ids = $wpdb->get_col( $wpdb->prepare( "SELECT pm.meta_id FROM {$wpdb->postmeta} pm FORCE INDEX ( meta_key ) STRAIGHT_JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key LIKE %s AND p.post_type = %s ORDER BY pm.meta_id DESC LIMIT %d", $wpdb->esc_like( self::KEY_PREFIX ) . '%', $type, $cap + 1 ) );
 			if ( '' !== (string) $wpdb->last_error ) {
 				$failed = true;
 				continue;
@@ -815,6 +939,9 @@ final class Ledger {
 		self::merge_back( $kept, array_keys( $found ), $cap );
 		if ( ! $failed ) {
 			update_option( self::RECENT_STATE, self::done_state( $types ), true );
+		}
+		if ( ! $failed && [] === array_filter( $kept, static fn( array $by_type ): bool => [] !== $by_type['ids'] ) ) {
+			wp_clear_scheduled_hook( self::REBUILD_HOOK );
 		}
 	}
 
@@ -1039,26 +1166,34 @@ final class Ledger {
 	}
 
 	/**
-	 * Single index seek on the hashed key: a live holder first, newest entry first.
-	 * A post in the trash comes back only when no live post holds the key; find()
-	 * then answers as if it held nothing.
+	 * Index seeks on the hashed keys of several paths, in one query: for
+	 * each, a live holder first, newest entry first. A post in the trash
+	 * comes back only when no live post holds the key; find() then answers
+	 * as if it held nothing. The rows are the holders of these paths.
 	 *
-	 * @param string $post_type Post type name.
-	 * @param string $path      Normalized path.
+	 * @param string   $post_type Post type name.
+	 * @param string[] $paths     Normalized paths, as a list.
+	 * @return array<int,int|null> Holder or null, in the order of $paths.
 	 */
-	private function seek( string $post_type, string $path ): ?int {
+	private function seek( string $post_type, array $paths ): array {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Point lookup on the meta_key index; cached by the caller.
-		$id = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key = %s AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC LIMIT 1",
-				self::key( $post_type, $path ),
-				$post_type
-			)
-		);
+		$index = [];
+		foreach ( $paths as $i => $path ) {
+			$index[ self::key( $post_type, $path ) ] = $i;
+		}
+		$placeholders = implode( ',', array_fill( 0, count( $index ), '%s' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare,WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- $placeholders holds only %s, one per path, and the values come as one array; seeks on the meta_key index, cached by the caller.
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT pm.meta_key, pm.post_id FROM {$wpdb->postmeta} pm INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id WHERE pm.meta_key IN ( {$placeholders} ) AND p.post_type = %s ORDER BY ( p.post_status = 'trash' ) ASC, pm.meta_id DESC", array_merge( array_keys( $index ), [ $post_type ] ) ), ARRAY_A );
 
-		return $id ? (int) $id : null;
+		$found = array_fill( 0, count( $paths ), null );
+		foreach ( (array) $rows as $row ) {
+			$i = $index[ (string) $row['meta_key'] ] ?? null;
+			if ( null !== $i && null === $found[ $i ] ) {
+				$found[ $i ] = (int) $row['post_id'];
+			}
+		}
+		return $found;
 	}
 
 	/**
@@ -1080,6 +1215,7 @@ final class Ledger {
 	 * @param int[]  $meta_ids  Meta IDs, oldest first.
 	 */
 	private static function remember( string $post_type, array $meta_ids ): void {
+		self::schedule_next();
 		if ( self::$defer_depth > 0 ) {
 			self::$recent_pending[ $post_type ] = array_merge( self::$recent_pending[ $post_type ] ?? [], $meta_ids );
 			return;
@@ -1163,8 +1299,35 @@ final class Ledger {
 	private function drop_target( int $post_id, string $post_type, string $path ): void {
 		$key = self::target_key( $post_type, $path );
 		if ( metadata_exists( 'post', $post_id, $key ) ) {
-			delete_post_meta( $post_id, $key );
+			Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
 		}
+	}
+
+	/**
+	 * Asks WordPress VIP's edge to forget an old URL whose redirect changed,
+	 * once a request, up to PURGE_LIMIT URLs. VIP's edge keeps a 301 for 30
+	 * minutes and a 302 for a minute whatever the response's headers say, and
+	 * a purge clears that exact URL only: URLs under it keep a cached
+	 * redirect until it expires. Entries a page's permanent deletion takes
+	 * with it are not purged: the edge keeps their redirect to a URL that is
+	 * gone until it expires.
+	 *
+	 * @param string $post_type Post type name.
+	 * @param string $path      Normalized path.
+	 */
+	private static function purge( string $post_type, string $path ): void {
+		// VIP's current name, else the one it deprecated.
+		$purge = function_exists( 'wpvip_purge_edge_cache_for_url' ) ? 'wpvip_purge_edge_cache_for_url' : 'wpcom_vip_purge_edge_cache_for_url';
+		if ( '' === $path || ! function_exists( $purge ) || count( self::$purged ) >= self::PURGE_LIMIT ) {
+			return;
+		}
+		$prefix = Redirects\Server::prefix( $post_type );
+		$url    = home_url( user_trailingslashit( '' !== $prefix ? $prefix . '/' . $path : $path ) );
+		if ( isset( self::$purged[ $url ] ) ) {
+			return;
+		}
+		self::$purged[ $url ] = true;
+		$purge( $url );
 	}
 
 	/**

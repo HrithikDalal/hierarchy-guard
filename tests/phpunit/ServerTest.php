@@ -72,6 +72,59 @@ final class ServerTest extends WP_UnitTestCase {
 		$this->assertSame( 9, has_action( 'template_redirect', [ $this->server_from_plugin(), 'maybe_redirect' ] ) );
 	}
 
+	public function test_a_served_redirect_goes_out_through_wp_redirect_with_its_status(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/' );
+		$sent = [];
+		$stop = static function ( $location, $status ) use ( &$sent ) {
+			$sent = [ (string) $location, (int) $status ];
+			return false;
+		};
+		add_filter( 'wp_redirect', $stop, 10, 2 );
+
+		$this->server->maybe_redirect();
+
+		remove_filter( 'wp_redirect', $stop, 10 );
+		$this->assertSame( [ get_permalink( $this->team ), 301 ], $sent );
+	}
+
+	/**
+	 * In a process of its own, where nothing is printed before the test, so
+	 * core sends headers.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_served_redirect_goes_out_with_core_s_no_cache_headers(): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/' );
+		$order = [];
+		$cache = static function ( array $headers ) use ( &$order ): array {
+			$order[] = 'no-cache';
+			return $headers;
+		};
+		$stop  = static function () use ( &$order ) {
+			$order[] = 'redirect';
+			return false;
+		};
+		add_filter( 'nocache_headers', $cache );
+		add_filter( 'wp_redirect', $stop );
+
+		$this->server->maybe_redirect();
+
+		$this->assertSame( [ 'no-cache', 'redirect' ], $order );
+	}
+
 	public function test_redirects_an_old_subpage_url_to_the_new_permalink(): void {
 		wp_update_post(
 			[
@@ -184,6 +237,54 @@ final class ServerTest extends WP_UnitTestCase {
 
 		$this->assertTrue( is_404() );
 		$this->assertSame( get_permalink( $this->team ) . '?utm_source=x', $this->server->target_for_current_request()['url'] );
+	}
+
+	/**
+	 * Query strings a link never carries: what a filter on the redirect URL
+	 * sees of each, read through esc_url_raw(), and what the redirect sends,
+	 * after wp_validate_redirect().
+	 *
+	 * @return array<string,array{0:string,1:string,2:string}>
+	 */
+	public static function crafted_queries(): array {
+		return [
+			'markup'                => [ 'q=<script>alert(1)</script>', 'q=scriptalert(1)/script', 'q=scriptalert(1)/script' ],
+			'encoded line break'    => [ 'a=1%0d%0aSet-Cookie:x=1', 'a=1Set-Cookie:x=1', 'a=1Set-Cookie:x=1' ],
+			'quotes'                => [ 'a="b"&c=\'d\'', 'a=b&c=\'d\'', 'a=b&c=d' ],
+			'space and braces'      => [ 'a=b c&d={e}', 'a=b%20c&d=e', 'a=b%20c&d=e' ],
+			'percent-encoded UTF-8' => [ 'q=caf%C3%A9', 'q=caf%C3%A9', 'q=caf%C3%A9' ],
+			'raw UTF-8'             => [ 'q=café', 'q=café', 'q=caf%C3%A9' ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_queries
+	 *
+	 * @param string $query The request's query string.
+	 * @param string $seen  What a filter on the redirect URL sees of it.
+	 * @param string $sent  What the redirect carries over.
+	 */
+	public function test_a_crafted_query_string_is_carried_over_only_as_url_characters( string $query, string $seen, string $sent ): void {
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'company-info',
+			]
+		);
+		$this->go_to( '/company/about/team/' );
+		$_SERVER['REQUEST_URI'] = '/company/about/team/?' . $query;
+		$filtered               = '';
+		$see                    = static function ( string $url ) use ( &$filtered ): string {
+			$filtered = $url;
+			return $url;
+		};
+		add_filter( 'hierarchy_guard_redirect_url', $see );
+
+		$target = $this->server->target_for_current_request();
+		remove_filter( 'hierarchy_guard_redirect_url', $see );
+
+		$this->assertSame( get_permalink( $this->team ) . '?' . $seen, $filtered, 'Read sanitized: a filter on the URL never sees the raw request.' );
+		$this->assertSame( get_permalink( $this->team ) . '?' . $sent, $target['url'] );
 	}
 
 	public function test_preserves_feed_and_embed_suffixes(): void {
@@ -525,6 +626,36 @@ final class ServerTest extends WP_UnitTestCase {
 
 		$this->go_to( '/old/sub/about/team/' );
 		$this->assertSame( get_permalink( $this->team ), $this->server->target_for_current_request()['url'], 'A longer path goes past the URL target to the shorter prefix.' );
+	}
+
+	public function test_a_same_site_url_target_is_sent_with_the_scheme_core_gives_permalinks(): void {
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		$home  = static fn(): string => 'http://example.org';
+		add_filter( 'pre_option_home', $home );
+		try {
+			$ledger = new Ledger();
+			$ledger->record( $this->about, 'old-about' );
+			$ledger->set_target( 'page', 'old-about', $this->about, 'http://example.org/careers/', 0 );
+			$this->assertSame( '/careers/', get_post_meta( $this->about, Ledger::target_key( 'page', 'old-about' ), true )['url'], 'Precondition: stored as its path.' );
+
+			$this->go_to( '/old-about/' );
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertSame( 'https://example.org/careers/', $this->server->target_for_current_request()['url'], 'An https visitor stays on https, as a page target does.' );
+
+			unset( $_SERVER['HTTPS'] );
+			$this->assertSame( 'http://example.org/careers/', $this->server->target_for_current_request()['url'], 'Otherwise the home URL\'s scheme.' );
+
+			$ledger->set_target( 'page', 'old-about', $this->about, 'http://jobs.example.net/careers/', 0 );
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertSame( 'http://jobs.example.net/careers/', $this->server->target_for_current_request()['url'], 'Another site keeps its own scheme.' );
+		} finally {
+			remove_filter( 'pre_option_home', $home );
+			if ( null === $https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $https;
+			}
+		}
 	}
 
 	public function test_a_chosen_code_is_sent_as_chosen(): void {

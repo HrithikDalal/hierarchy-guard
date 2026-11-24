@@ -95,6 +95,35 @@ final class SettingsTest extends WP_UnitTestCase {
 		];
 	}
 
+	/**
+	 * Trash policies as they may arrive, the form's and others, and what is saved for each.
+	 *
+	 * @return array<string,array{0:mixed,1:string}>
+	 */
+	public static function trash_policy_inputs(): array {
+		return [
+			'an array'       => [ [ 'keep' ], 'reparent' ],
+			'a nested array' => [ [ [ 'keep' ] ], 'reparent' ],
+			'empty'          => [ '', 'reparent' ],
+			'wrong case'     => [ 'KEEP', 'keep' ],
+			'slashed'        => [ 'k\\eep', 'keep' ],
+			'null'           => [ null, 'reparent' ],
+			'true'           => [ true, 'reparent' ],
+			'unknown'        => [ 'delete', 'reparent' ],
+			'a known one'    => [ 'trash_children', 'trash_children' ],
+		];
+	}
+
+	/**
+	 * @dataProvider trash_policy_inputs
+	 *
+	 * @param mixed  $policy What arrives.
+	 * @param string $saved  What is saved.
+	 */
+	public function test_a_trash_policy_is_read_as_the_key_it_spells_or_replaced_by_the_default_without_a_warning( $policy, string $saved ): void {
+		$this->assertSame( $saved, Settings::sanitize( [ 'trash_policy' => $policy ] )['trash_policy'], 'Read as the key it spells, else replaced by the default; a PHP warning fails the test.' );
+	}
+
 	public function test_sanitize_reads_the_string_false_as_off(): void {
 		$this->assertFalse( Settings::sanitize( [ 'serve_redirects' => 'false' ] )['serve_redirects'] );
 	}

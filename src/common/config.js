@@ -8,6 +8,7 @@ const defaults = {
 	settingsUrl: '',
 	policyUrl: '',
 	policy: 'reparent',
+	policies: [],
 	postTypes: [],
 	cap: 1000,
 	locale: '',

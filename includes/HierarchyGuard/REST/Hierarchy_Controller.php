@@ -22,6 +22,10 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_REST_Server;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Backs the editor panel, the Quick Edit warning, the trash dialog and the
  * Tree view's subpages, 50 at a time with tree=1. Every route is read-only
@@ -100,7 +104,7 @@ final class Hierarchy_Controller {
 			[
 				'methods'             => WP_REST_Server::READABLE,
 				'callback'            => [ $this, 'trash_preview' ],
-				'permission_callback' => 'is_user_logged_in',
+				'permission_callback' => [ $this, 'can_trash_some' ],
 				'args'                => [
 					'ids' => [
 						'type'     => 'array',
@@ -115,6 +119,22 @@ final class Hierarchy_Controller {
 				],
 			]
 		);
+	}
+
+	/**
+	 * Whether the current user may trash posts of some supported type: the
+	 * preview answers only those who can, and checks each page it reads.
+	 *
+	 * @return bool
+	 */
+	public function can_trash_some(): bool {
+		foreach ( Post_Types::supported() as $type ) {
+			$object = get_post_type_object( $type );
+			if ( null !== $object && current_user_can( $object->cap->delete_posts ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

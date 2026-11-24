@@ -14,6 +14,10 @@ use HierarchyGuard\Paths;
 use HierarchyGuard\Subtree;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Lists the old URLs a change left behind and where each leads now.
  *
@@ -472,7 +476,7 @@ final class Pairs {
 		}
 		$level = array_keys( array_filter( $below, static fn( int $left ): bool => $left >= 1 ) );
 		$depth = 0;
-		while ( [] !== $level && $visited <= $cap && $depth < 50 ) {
+		while ( [] !== $level && $visited <= $cap && $depth < Subtree::WALK_DEPTH ) {
 			++$depth;
 			$rows = Subtree::ordered_children( $level, $type, $cap + 1 - $visited );
 			$next = [];

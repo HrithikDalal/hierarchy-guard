@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Trash;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Feeds the outcome notice and Undo. One change per request, so a bulk trash
  * of three parents is one change with three roots, and a later change
@@ -236,16 +240,6 @@ final class Change_Log {
 		}
 		$change['shown'] = true;
 		self::save( $user_id, $change );
-	}
-
-	/**
-	 * Clears a user's summary.
-	 *
-	 * @param int $user_id User ID.
-	 */
-	public function forget( int $user_id ): void {
-		unset( self::$pending[ get_current_blog_id() ][ $user_id ] );
-		delete_transient( self::key( $user_id ) );
 	}
 
 	/**

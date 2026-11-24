@@ -38,7 +38,7 @@ jobs:
       - run: npm run build
 
   test:
-    name: PHPUnit (PHP ${{ matrix.php }}, WP ${{ matrix.wp }})
+    name: PHPUnit (PHP ${{ matrix.php }}, WP ${{ matrix.wp }}${{ matrix.multisite && ', multisite' || '' }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -48,9 +48,17 @@ jobs:
         # PHPCompatibilityWP (testVersion 8.0-) keeps 8.0 syntax covered.
         php: [ '8.1', '8.3' ]
         wp: [ 'latest' ]
+        multisite: [ false ]
         include:
           - php: '8.2'
             wp: 'WordPress/WordPress#6.6-branch'
+            multisite: false
+          - php: '8.2'
+            wp: 'latest'
+            multisite: true
+          - php: '8.2'
+            wp: 'WordPress/WordPress#6.6-branch'
+            multisite: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -70,4 +78,4 @@ jobs:
         env:
           WP_ENV_PHP_VERSION: ${{ matrix.php }}
           WP_ENV_CORE: ${{ matrix.wp == 'latest' && 'https://wordpress.org/latest.zip' || matrix.wp }}
-      - run: npm run test:php
+      - run: npm run ${{ matrix.multisite && 'test:php:multisite' || 'test:php' }}

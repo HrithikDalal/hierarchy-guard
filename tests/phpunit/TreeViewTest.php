@@ -301,20 +301,6 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertStringContainsString( 'post_type=page&#038;hierarchy_guard_view=tree', esc_url( Tree_View::url( 'page' ) ) );
 	}
 
-	public function test_the_tree_and_its_search_ask_for_their_stylesheet_as_the_screen_loads(): void {
-		$_GET = [ 'post_type' => 'page' ];
-		$this->tree->load();
-		$this->assertSame( 0, did_action( Tree_View::STYLE ), 'The list prints its own when it needs it.' );
-
-		$_GET[ Tree_View::QUERY_VAR ] = Tree_View::VIEW;
-		$this->tree->load();
-		$this->assertSame( 1, did_action( Tree_View::STYLE ), 'Before admin_enqueue_scripts, so the indents print in the head.' );
-
-		$_GET['s'] = 'team';
-		$this->tree->load();
-		$this->assertSame( 2, did_action( Tree_View::STYLE ) );
-	}
-
 	public function test_loading_the_tree_hooks_its_pieces_into_core_s_list(): void {
 		$this->tree->load();
 
@@ -624,7 +610,7 @@ final class TreeViewTest extends WP_UnitTestCase {
 		$this->assertSame( html_entity_decode( $title[1], ENT_QUOTES, 'UTF-8' ), $loaded['title'], 'The text core’s row shows.' );
 	}
 
-	public function test_past_the_cap_the_opened_page_says_only_the_first_are_shown(): void {
+	public function test_past_the_cap_the_opened_page_pages_up_to_the_cap_and_is_marked_capped(): void {
 		add_filter( 'hierarchy_guard_count_cap', static fn(): int => 60 );
 		$this->subpages( $this->ids['team'], 70 );
 		$_GET[ Tree_View::OPEN_VAR ]          = (string) $this->ids['team'];

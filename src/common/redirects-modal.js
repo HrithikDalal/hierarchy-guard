@@ -10,14 +10,17 @@ import {
 	Spinner,
 } from '@wordpress/components';
 import { useEffect, useRef, useState } from '@wordpress/element';
-import { __, sprintf } from '@wordpress/i18n';
+import { __, _x, sprintf } from '@wordpress/i18n';
 import { csvUrl, fetchPairs } from './api';
 import config from './config';
+import { loadingText, speakLoading, waiting } from './loading';
 import {
 	copiedSentence,
+	csvLabel,
 	formatCount,
 	pairsRedirects,
 	pairsText,
+	shownImportNotes,
 	unresolvedSentence,
 } from './copy';
 import Url from './url';
@@ -121,6 +124,14 @@ export default function RedirectsModal( {
 		setPage( data.page + ( 'next' === direction ? 1 : -1 ) );
 	};
 
+	// The spinner shows until the first page of pairs or an error does.
+	const spinning = waiting( loading, data, error );
+	useEffect( () => {
+		if ( spinning ) {
+			speakLoading();
+		}
+	}, [ spinning ] );
+
 	useEffect( () => {
 		if ( copy.text ) {
 			fallback.current?.focus();
@@ -192,7 +203,7 @@ export default function RedirectsModal( {
 		intro = __( 'Add these in your redirect plugin.', 'hierarchy-guard' );
 	} else {
 		intro = __(
-			'Nothing on this site redirects these old URLs yet.',
+			'Nothing on this site redirects these old URLs to their new pages yet.',
 			'hierarchy-guard'
 		);
 	}
@@ -201,7 +212,7 @@ export default function RedirectsModal( {
 		<Modal
 			title={
 				serving
-					? __( 'Redirects', 'hierarchy-guard' )
+					? _x( 'Redirects', 'modal title', 'hierarchy-guard' )
 					: __( 'Redirects needed', 'hierarchy-guard' )
 			}
 			onRequestClose={ onClose }
@@ -213,7 +224,14 @@ export default function RedirectsModal( {
 					{ error }
 				</Notice>
 			) }
-			{ ! data && loading && <Spinner /> }
+			{ spinning && (
+				<>
+					<Spinner />
+					<span className="screen-reader-text">
+						{ loadingText() }
+					</span>
+				</>
+			) }
 			{ data && (
 				<>
 					{ data.total > 0 && <p>{ intro }</p> }
@@ -335,16 +353,7 @@ export default function RedirectsModal( {
 								href={ csvUrl( source, layout ) }
 								download
 							>
-								{ name
-									? sprintf(
-											/* translators: %s: name of the redirect plugin. */
-											__(
-												'Download CSV for %s',
-												'hierarchy-guard'
-											),
-											name
-										)
-									: __( 'Download CSV', 'hierarchy-guard' ) }
+								{ csvLabel( provider ) }
 							</Button>
 						) }
 						{ /* Never offered while redirects are on for the site, even when this page isn't served. */ }
@@ -362,6 +371,11 @@ export default function RedirectsModal( {
 								</Button>
 							) }
 					</div>
+					{ shownImportNotes( data, provider ).map( ( note ) => (
+						<p key={ note } className="description">
+							{ note }
+						</p>
+					) ) }
 				</>
 			) }
 		</Modal>

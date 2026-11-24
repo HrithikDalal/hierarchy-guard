@@ -14,6 +14,10 @@ use WP_MatchesMapRegex;
 use WP_Post;
 use WP_Rewrite;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Longest-prefix rewriting with a bounded number of rounds, and the test a
  * page must pass to be redirected to. The one copy of these rules: the

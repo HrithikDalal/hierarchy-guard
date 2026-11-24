@@ -15,6 +15,10 @@ use HierarchyGuard\Subtree;
 use HierarchyGuard\Trash\Markers;
 use WP_Post;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * The block sources: one per page a save moved or renamed, one per root of a
  * trash change that is still in the trash. A block names its old path, its
@@ -280,8 +284,12 @@ final class Pairs_Blocks {
 	private static function rows( array $ids, string $type ): array {
 		global $wpdb;
 
-		$in = implode( ',', array_map( 'intval', $ids ) );
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $in holds integers only, bounded by the cap; a primary-key range.
-		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC", $type ), ARRAY_A );
+		$ids = array_map( 'intval', $ids );
+		if ( [] === $ids ) {
+			return [];
+		}
+		$in = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $in holds only %d, one per post, bounded by the cap; a primary-key range.
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_parent, post_name, post_status FROM {$wpdb->posts} WHERE ID IN ( {$in} ) AND post_type = %s AND post_status NOT IN ( 'trash', 'auto-draft', 'inherit' ) ORDER BY menu_order ASC, post_title ASC, ID ASC", ...array_merge( $ids, [ $type ] ) ), ARRAY_A );
 	}
 }

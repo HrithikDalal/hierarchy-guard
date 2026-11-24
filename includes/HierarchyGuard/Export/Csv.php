@@ -9,20 +9,73 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Export;
 
+use HierarchyGuard\Paths;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
- * Builds the CSV a detected redirect plugin imports without editing.
- * Redirection and Safe Redirect Manager read source, target, regex and code;
- * every other plugin gets a plain source, target and code layout. The code
- * is the one the built-in server answers with: 302 while a restore from the
- * trash could still undo the move a redirect follows, 301 otherwise.
+ * Builds the CSV a detected redirect plugin imports. Each layout maps a header
+ * to what its cells hold: the old URL, the new one, the regex flag, the code
+ * or Yoast's format. A plugin whose import format isn't documented gets the
+ * plain generic layout. The code is the one the built-in server answers
+ * with: 302 while a restore from the trash could still undo the move a
+ * redirect follows, 301 otherwise.
  */
 final class Csv {
 
 	public const LAYOUTS = [
-		'redirection' => [ 'source', 'target', 'regex', 'code' ],
-		'srm'         => [ 'source', 'target', 'regex', 'code' ],
-		'generic'     => [ 'source', 'target', 'code' ],
+		'redirection' => [
+			'source' => 'old',
+			'target' => 'new',
+			'regex'  => 'regex',
+			'code'   => 'code',
+		],
+		'srm'         => [
+			'source' => 'old',
+			'target' => 'new',
+			'regex'  => 'regex',
+			'code'   => 'code',
+		],
+		'yoast'       => [
+			'Origin' => 'old',
+			'Target' => 'new',
+			'Type'   => 'code',
+			'Format' => 'format',
+		],
+		'rank-math'   => [
+			'source'      => 'old',
+			'destination' => 'new',
+			'type'        => 'code',
+		],
+		'simple-301'  => [
+			'request'     => 'old',
+			'destination' => 'new',
+		],
+		'generic'     => [
+			'source' => 'old',
+			'target' => 'new',
+			'code'   => 'code',
+		],
 	];
+
+	/**
+	 * Layouts whose importer refuses Windows line endings.
+	 */
+	private const UNIX_LINES = [ 'yoast' ];
+
+	/**
+	 * Layouts whose plugin matches the whole request path, so their paths
+	 * carry the site's home path: /blog/about/ on a site at /blog/.
+	 */
+	private const FROM_ROOT = [ 'redirection' ];
+
+	/**
+	 * Layouts whose plugin strips the home path from the request but sends a
+	 * path target from the domain root, so their targets are full URLs.
+	 */
+	private const FULL_TARGETS = [ 'srm' ];
 
 	/**
 	 * A known layout name, falling back to generic.
@@ -35,7 +88,9 @@ final class Csv {
 	}
 
 	/**
-	 * The whole file: a header row, then one row per pair.
+	 * The whole file: a header row, then one row per pair. A protocol-relative
+	 * target gets the home URL's scheme, since Yoast SEO Premium and Simple
+	 * 301 Redirects would read it as a path.
 	 *
 	 * @param string                                                  $layout Layout name.
 	 * @param array<int,array{old:string,new:string,temporary?:bool}> $pairs  Old URLs relative to the home URL, new ones relative too or a URL target as set, and whether each is temporary.
@@ -43,11 +98,24 @@ final class Csv {
 	 */
 	public static function build( string $layout, array $pairs ): string {
 		$layout = self::layout( $layout );
-		$lines  = [ self::line( self::LAYOUTS[ $layout ] ) ];
+		// The home URL's scheme, not the request's, as Paths::home_absolute() decides it.
+		$home   = Paths::home_absolute( '/' );
+		$scheme = (string) wp_parse_url( $home, PHP_URL_SCHEME );
+		$base   = in_array( $layout, self::FROM_ROOT, true ) ? untrailingslashit( (string) wp_parse_url( $home, PHP_URL_PATH ) ) : '';
+		$full   = in_array( $layout, self::FULL_TARGETS, true );
+		$lines  = [ self::line( array_keys( self::LAYOUTS[ $layout ] ) ) ];
 		foreach ( $pairs as $pair ) {
-			$lines[] = self::line( self::row( $layout, (string) $pair['old'], (string) $pair['new'], ! empty( $pair['temporary'] ) ) );
+			$old = $base . (string) $pair['old'];
+			$new = (string) $pair['new'];
+			if ( str_starts_with( $new, '//' ) ) {
+				$new = $scheme . ':' . $new;
+			} elseif ( str_starts_with( $new, '/' ) ) {
+				$new = $full ? Paths::home_absolute( $new ) : $base . $new;
+			}
+			$lines[] = self::line( self::row( $layout, $old, $new, ! empty( $pair['temporary'] ) ) );
 		}
-		return implode( "\r\n", $lines ) . "\r\n";
+		$end = in_array( $layout, self::UNIX_LINES, true ) ? "\n" : "\r\n";
+		return implode( $end, $lines ) . $end;
 	}
 
 	/**
@@ -61,12 +129,13 @@ final class Csv {
 	 */
 	public static function row( string $layout, string $old_url, string $new_url, bool $temporary = false ): array {
 		$cells = [
-			'source' => $old_url,
-			'target' => $new_url,
+			'old'    => $old_url,
+			'new'    => $new_url,
 			'regex'  => '0',
 			'code'   => $temporary ? '302' : '301',
+			'format' => 'plain',
 		];
-		return array_map( static fn( string $column ): string => $cells[ $column ], self::LAYOUTS[ self::layout( $layout ) ] );
+		return array_values( array_map( static fn( string $field ): string => $cells[ $field ], self::LAYOUTS[ self::layout( $layout ) ] ) );
 	}
 
 	/**

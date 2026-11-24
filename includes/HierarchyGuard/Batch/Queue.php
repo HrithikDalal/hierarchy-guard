@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Batch;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * One job slot per root page, so a trash job and a restore job for the same
  * page can never both be pending. Only the holder of the root's lock writes
@@ -18,7 +22,8 @@ namespace HierarchyGuard\Batch;
  * Slots, offers and locks are option rows read and written with direct
  * queries. They are not autoloaded, and get_option() would cache values that
  * another process changes underneath, or fill the notoptions cache with one
- * entry per page.
+ * entry per page. However many roots wait, a site has one scheduled run,
+ * which works through them, so a bulk trash writes the cron option once.
  */
 final class Queue {
 
@@ -29,6 +34,30 @@ final class Queue {
 	public const OFFER_SUFFIX = '_next';
 	public const LOCK_PREFIX  = 'hierarchy_guard_lock_';
 	public const LOCK_TTL     = 300;
+	public const STEPPING     = 'hierarchy_guard_stepping';
+	public const PASSED_CAP   = 20;
+
+	/**
+	 * Whether this request has the run queued in Action Scheduler, so a bulk
+	 * trash asks Action Scheduler once rather than once per parent.
+	 *
+	 * @var bool
+	 */
+	private bool $queued_in_as = false;
+
+	/**
+	 * The stepping note as this process last wrote or took it over, '' for none.
+	 *
+	 * @var string
+	 */
+	private string $note = '';
+
+	/**
+	 * This run's mark in its notes, so two runs never write the same value.
+	 *
+	 * @var string
+	 */
+	private string $run = '';
 
 	/**
 	 * Option name of a root's job slot.
@@ -141,16 +170,18 @@ final class Queue {
 	}
 
 	/**
-	 * Roots with a stored job or offer, oldest first.
+	 * Roots with a stored job or offer, oldest first. A root has at most two
+	 * rows, so twice the limit in rows holds the limit in roots.
 	 *
-	 * @param int $limit Most option rows to read.
+	 * @param int $limit Most roots to return.
 	 * @return int[]
 	 */
 	public function roots( int $limit = 100 ): array {
 		global $wpdb;
 
+		$limit = max( 1, $limit );
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Prefix range on the option_name index, bounded by LIMIT.
-		$names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s ORDER BY option_id ASC LIMIT %d", $wpdb->esc_like( self::JOB_PREFIX ) . '%', max( 1, $limit ) ) );
+		$names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s ORDER BY option_id ASC LIMIT %d", $wpdb->esc_like( self::JOB_PREFIX ) . '%', 2 * $limit ) );
 
 		$roots = [];
 		foreach ( $names as $name ) {
@@ -158,7 +189,140 @@ final class Queue {
 				$roots[ (int) $match[1] ] = true;
 			}
 		}
-		return array_keys( $roots );
+		return array_slice( array_keys( $roots ), 0, $limit );
+	}
+
+	/**
+	 * Drops a root's job or offer row that does not decode, so it keeps no
+	 * run or check scheduled. A row written meanwhile has another value, and
+	 * stays.
+	 *
+	 * @param int $root_id Root page.
+	 */
+	public function drop_unreadable( int $root_id ): void {
+		global $wpdb;
+
+		foreach ( [ self::job_option( $root_id ), self::offer_option( $root_id ) ] as $name ) {
+			$raw = $this->read( $name );
+			if ( null !== $raw && null === $this->decode( $raw ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Delete only the value read.
+				$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", $name, $raw ) );
+			}
+		}
+	}
+
+	/**
+	 * Starts a run's stepping note: the roots the note says runs before
+	 * passed over, and the root a run died on, which the run passes over
+	 * too. The run takes over whatever note it finds, so beside a live run
+	 * it also passes that run's root over, until a run ends or the watchdog
+	 * retries it. The watchdog retries only the roots it reads, the oldest
+	 * 100.
+	 *
+	 * @return int[] At most PASSED_CAP roots, the newest last.
+	 */
+	public function passed_over(): array {
+		$raw        = $this->read( self::STEPPING );
+		$this->note = $raw ?? '';
+		$this->run  = wp_generate_uuid4();
+		$note       = $this->noted();
+		$roots      = $note['passed'];
+		if ( $note['root'] > 0 ) {
+			$roots[] = $note['root'];
+		}
+		return array_slice( array_values( array_unique( $roots ) ), -self::PASSED_CAP );
+	}
+
+	/**
+	 * Writes the run's note: the root it is about to step, 0 between roots,
+	 * and the roots it passes over, so that if the run dies of an error
+	 * nothing can catch, the next run passes that root over too, and the run
+	 * after a time stop keeps passing the others over. Runs that overlap
+	 * share the one row: a run writes only over the note it wrote or took
+	 * over, as unlock() releases only its own lock, so a run beside it keeps
+	 * its note.
+	 *
+	 * @param int   $root_id Root page, or 0.
+	 * @param int[] $passed  Roots the run passes over.
+	 */
+	public function mark_stepping( int $root_id, array $passed ): void {
+		global $wpdb;
+
+		$value = maybe_serialize(
+			[
+				'run'    => $this->run,
+				'root'   => $root_id,
+				'passed' => array_values( array_map( 'intval', $passed ) ),
+			]
+		);
+		if ( $value === $this->note ) {
+			return;
+		}
+		if ( '' !== $this->note ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Replaces only this run's own note.
+			$updated = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $value, self::STEPPING, $this->note ) );
+			if ( 1 === $updated ) {
+				$this->note = $value;
+				return;
+			}
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Writes the note only where no run has one.
+		$inserted   = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' )", self::STEPPING, $value ) );
+		$this->note = 1 === $inserted ? $value : '';
+	}
+
+	/**
+	 * Deletes the run's note when the run ends without a time stop, so the
+	 * next run, as the watchdog starts it, tries the roots it passed over
+	 * again. Only the note this run wrote is deleted.
+	 */
+	public function end_stepping(): void {
+		global $wpdb;
+
+		if ( '' !== $this->note ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Deletes only this run's own note.
+			$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::STEPPING, $this->note ) );
+		}
+		$this->note = '';
+	}
+
+	/**
+	 * Takes roots out of the note's passed-over list, so the next run tries
+	 * them: the watchdog's retry of a root left waiting. A note a run
+	 * rewrites meanwhile is left as it is.
+	 *
+	 * @param int[] $roots Roots to try again.
+	 */
+	public function retry( array $roots ): void {
+		global $wpdb;
+
+		$raw  = $this->read( self::STEPPING );
+		$note = $this->decode( $raw );
+		if ( null === $raw || null === $note ) {
+			return;
+		}
+		$was            = $this->noted();
+		$note['passed'] = array_values( array_diff( $was['passed'], $roots ) );
+		$note['root']   = in_array( $was['root'], $roots, true ) ? 0 : $was['root'];
+		if ( $note['passed'] === $was['passed'] && $note['root'] === $was['root'] ) {
+			return;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Replaces only the value read.
+		$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", maybe_serialize( $note ), self::STEPPING, $raw ) );
+	}
+
+	/**
+	 * What the stepping note holds: the root a run is stepping, or died on,
+	 * and the roots runs pass over.
+	 *
+	 * @return array{root:int,passed:int[]}
+	 */
+	public function noted(): array {
+		$note = $this->decode( $this->read( self::STEPPING ) );
+		return [
+			'root'   => (int) ( $note['root'] ?? 0 ),
+			'passed' => array_values( array_filter( array_map( 'intval', (array) ( $note['passed'] ?? [] ) ), static fn( int $id ): bool => $id > 0 ) ),
+		];
 	}
 
 	/**
@@ -219,22 +383,27 @@ final class Queue {
 	}
 
 	/**
-	 * Schedules a run for a root through Action Scheduler when a site has it,
-	 * else WP-Cron. A run already in progress does not count: it may be the one
-	 * about to finish.
+	 * Schedules the site's run through Action Scheduler when a site has it,
+	 * else WP-Cron, unless one is scheduled already, and the watchdog with
+	 * it. A run already in progress does not count: it may be the one about
+	 * to finish. With a delay the run is due that many seconds ahead rather
+	 * than now.
 	 *
-	 * @param int $root_id Root page.
+	 * @param int $delay Seconds until the run is due, 0 for now.
 	 * @return bool Whether a run is scheduled.
 	 */
-	public function schedule( int $root_id ): bool {
-		$args = [ $root_id ];
+	public function schedule( int $delay = 0 ): bool {
+		Processor::schedule_watchdog();
 
 		if ( function_exists( 'as_enqueue_async_action' ) ) {
+			if ( $this->queued_in_as ) {
+				return true;
+			}
 			$pending = function_exists( 'as_get_scheduled_actions' )
 				? as_get_scheduled_actions(
 					[
 						'hook'     => self::HOOK,
-						'args'     => $args,
+						'args'     => [],
 						'group'    => self::GROUP,
 						'status'   => 'pending',
 						'per_page' => 1,
@@ -242,33 +411,53 @@ final class Queue {
 					'ids'
 				)
 				: [];
-			if ( [] !== $pending ) {
-				return true;
-			}
-			if ( as_enqueue_async_action( self::HOOK, $args, self::GROUP ) ) {
+			$queued  = [] !== $pending || ( $delay > 0
+				? as_schedule_single_action( time() + $delay, self::HOOK, [], self::GROUP )
+				: as_enqueue_async_action( self::HOOK, [], self::GROUP ) );
+			if ( $queued ) {
+				$this->queued_in_as = true;
 				return true;
 			}
 			// Action Scheduler returns 0 before it has initialized; WP-Cron takes over.
 		}
 
-		if ( false !== wp_next_scheduled( self::HOOK, $args ) ) {
+		if ( false !== wp_next_scheduled( self::HOOK ) ) {
 			return true;
 		}
-		return true === wp_schedule_single_event( time(), self::HOOK, $args );
+		return true === wp_schedule_single_event( time() + max( 0, $delay ), self::HOOK );
 	}
 
 	/**
-	 * Whether a run is scheduled for a root.
+	 * Whether the site's run is scheduled.
 	 *
-	 * @param int $root_id Root page.
 	 * @return bool
 	 */
-	public function is_scheduled( int $root_id ): bool {
-		$args = [ $root_id ];
-		if ( false !== wp_next_scheduled( self::HOOK, $args ) ) {
+	public function is_scheduled(): bool {
+		if ( false !== wp_next_scheduled( self::HOOK ) ) {
 			return true;
 		}
-		return function_exists( 'as_has_scheduled_action' ) && as_has_scheduled_action( self::HOOK, $args, self::GROUP );
+		return function_exists( 'as_has_scheduled_action' ) && as_has_scheduled_action( self::HOOK, [], self::GROUP );
+	}
+
+	/**
+	 * Forgets that this request queued the run in Action Scheduler. A run
+	 * that starts is that action, no longer pending, so the next schedule()
+	 * asks Action Scheduler again, even in a process that runs action after
+	 * action.
+	 */
+	public function forget_queued(): void {
+		$this->queued_in_as = false;
+	}
+
+	/**
+	 * Clears the site's scheduled run.
+	 */
+	public function unschedule(): void {
+		$this->queued_in_as = false;
+		wp_clear_scheduled_hook( self::HOOK );
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( self::HOOK, [], self::GROUP );
+		}
 	}
 
 	/**

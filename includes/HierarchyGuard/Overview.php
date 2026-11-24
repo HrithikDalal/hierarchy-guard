@@ -10,11 +10,14 @@ declare( strict_types=1 );
 namespace HierarchyGuard;
 
 use HierarchyGuard\Admin\List_Table;
-use HierarchyGuard\Export\Csv;
 use HierarchyGuard\Redirects\Providers;
 use HierarchyGuard\Trash\Change_Log;
 use HierarchyGuard\Trash\Trash_Handler;
 use WP_Post;
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /**
  * Builds the hierarchy summary of one post. Children are paged, counts are
@@ -87,11 +90,7 @@ final class Overview {
 				'serving'      => Settings::serve_redirects() && is_post_publicly_viewable( $post ) && ! Paths::has_trashed_segment( Paths::uri( $post ) ),
 				// The pairs list only pages the server redirects to, so it serves them whenever it serves the type.
 				'pairs_served' => Settings::serve_redirects() && is_post_type_viewable( $type ),
-				'provider'     => null === $provider ? null : [
-					'name' => (string) ( $provider['name'] ?? '' ),
-					'url'  => esc_url_raw( (string) ( $provider['url'] ?? '' ) ),
-					'csv'  => Csv::layout( (string) ( $provider['csv'] ?? 'generic' ) ),
-				],
+				'provider'     => Providers::described( $provider ),
 			],
 			'trash_policy'   => $fallback ? Settings::POLICY_REPARENT : $policy,
 			'trash_fallback' => $fallback,
@@ -197,7 +196,7 @@ final class Overview {
 	public static function ref( int $post_id ): array {
 		return [
 			'id'        => $post_id,
-			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : __( '(private page)', 'hierarchy-guard' ),
+			'title'     => current_user_can( 'read_post', $post_id ) ? self::title( $post_id ) : _x( '(private)', 'title of a page the user can’t read', 'hierarchy-guard' ),
 			'edit_link' => 'trash' !== get_post_status( $post_id ) ? self::edit_link( $post_id ) : null,
 		];
 	}
@@ -264,7 +263,7 @@ final class Overview {
 			return [];
 		}
 
-		// The first $cap children in menu order, read without sorting every child of a large parent.
+		// The $cap oldest children, in menu order: read without sorting every child of a large parent.
 		$rows = array_slice( Subtree::ordered_children( [ $parent_id ], $type, $cap ), $offset, $per_page );
 		$ids  = array_map( static fn( array $row ): int => (int) $row['ID'], $rows );
 		// Their meta and terms too, in one query each, so each row's edit lock and classes are read from the cache.

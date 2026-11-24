@@ -1343,6 +1343,43 @@ final class PairsTest extends WP_UnitTestCase {
 		$this->assertSame( home_url( '/careers/?from=about#jobs' ), $this->target_on_request( 'company/about' )['url'], 'As the server sends it.' );
 	}
 
+	public function test_every_csv_layout_lists_a_same_site_url_target_with_the_home_url_s_scheme_and_path(): void {
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		$home  = static fn(): string => 'http://example.org/blog';
+		add_filter( 'pre_option_home', $home );
+		try {
+			$change = $this->rename( $this->ids['about'], 'about-us' );
+			( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], 'http://example.org/blog/careers/', 302 );
+			$_SERVER['HTTPS'] = 'on';
+			$pairs            = $this->pairs->all( $this->pairs->collect_change( $change ) );
+			$files            = [];
+			foreach ( array_keys( Csv::LAYOUTS ) as $layout ) {
+				$files[ $layout ] = Csv::build( $layout, $pairs );
+			}
+		} finally {
+			remove_filter( 'pre_option_home', $home );
+			if ( null === $https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $https;
+			}
+		}
+
+		$this->assertSame( '/careers/', get_post_meta( $this->ids['about'], Ledger::target_key( 'page', 'company/about' ), true )['url'], 'Precondition: stored as its path.' );
+		$this->assertSame(
+			[
+				'redirection' => "source,target,regex,code\r\n/blog/company/about/,http://example.org/blog/careers/,0,302\r\n",
+				'srm'         => "source,target,regex,code\r\n/company/about/,http://example.org/blog/careers/,0,302\r\n",
+				'yoast'       => "Origin,Target,Type,Format\n/company/about/,http://example.org/blog/careers/,302,plain\n",
+				'rank-math'   => "source,destination,type\r\n/company/about/,http://example.org/blog/careers/,302\r\n",
+				'simple-301'  => "request,destination\r\n/company/about/,http://example.org/blog/careers/\r\n",
+				'generic'     => "source,target,code\r\n/company/about/,http://example.org/blog/careers/,302\r\n",
+			],
+			$files,
+			'A full URL with the home URL’s scheme and path in every layout, in an admin forced to SSL too.'
+		);
+	}
+
 	public function test_a_url_target_with_a_chosen_302_is_listed_and_served_as_a_302(): void {
 		$change = $this->rename( $this->ids['about'], 'about-us' );
 		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], 'https://example.org/about/', 302 );
@@ -1368,9 +1405,11 @@ final class PairsTest extends WP_UnitTestCase {
 		$change = $this->rename( $this->ids['about'], 'about-us' );
 		( new Ledger() )->set_target( 'page', 'company/about', $this->ids['about'], home_url( '/careers/' ), 302 );
 
-		$csv = Csv::build( 'redirection', $this->pairs->all( $this->pairs->collect_change( $change ) ) );
+		$pairs = $this->pairs->all( $this->pairs->collect_change( $change ) );
 
-		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", $csv );
+		$this->assertSame( '/careers/', get_post_meta( $this->ids['about'], Ledger::target_key( 'page', 'company/about' ), true )['url'], 'Precondition: a URL on this site is stored as its path.' );
+		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", Csv::build( 'redirection', $pairs ) );
+		$this->assertSame( "source,target,regex,code\r\n/company/about/," . home_url( '/careers/' ) . ",0,302\r\n", Csv::build( 'srm', $pairs ), 'Safe Redirect Manager gets a full URL.' );
 		$this->assertSame( home_url( '/careers/' ), $this->target_on_request( 'company/about' )['url'] );
 	}
 

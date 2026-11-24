@@ -64,7 +64,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		foreach ( [ 'tab', 'action', 'action2', 'redirect', '_wpnonce', '_wp_http_referer', 's', 'redirect_type', 'paged', 'filter_action' ] as $key ) {
+		foreach ( [ 'tab', 'action', 'action2', 'redirect', '_wpnonce', '_wp_http_referer', 's', 'hierarchy_guard_type', 'paged', 'filter_action' ] as $key ) {
 			unset( $_GET[ $key ], $_REQUEST[ $key ], $_POST[ $key ] );
 		}
 		$GLOBALS['wp_settings_errors'] = [];
@@ -132,7 +132,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$html = $this->rendered();
 
 		$this->assertMatchesRegularExpression( '#<a href="[^"]*page=hierarchy-guard&\#038;tab=redirects" class="nav-tab nav-tab-active" aria-current="page">Redirects</a>#', $html );
-		$this->assertStringContainsString( 'class="wp-list-table widefat fixed striped table-view-list redirects"', $html );
+		$this->assertStringContainsString( 'class="wp-list-table widefat fixed striped table-view-list hierarchy_guard_redirects"', $html );
 		foreach ( [ 'Old URL', 'Redirects to', 'Code', 'Status' ] as $column ) {
 			$this->assertMatchesRegularExpression( '#<th scope="col" id=\'[a-z_]+\' class=\'manage-column column-[a-z_]+[^\']*\'\s*>' . $column . '</th>#', $html, $column );
 		}
@@ -165,9 +165,14 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<code>/old-about/</code></a> and the URLs under it', $html, 'In code, so it reads left to right in a right-to-left language too.' );
-		$this->assertStringContainsString( '<code>/careers/</code><', $html, 'A URL target covers its exact old URL only.' );
-		$this->assertStringContainsString( '<code>/archive/</code></a> and the URLs under it', $html );
+		$this->assertStringContainsString( '<span class="code">/old-about/</span></a> and the URLs under it', $html, 'Core’s monospace, left to right in a right-to-left language too, without code’s grey fill behind the link.' );
+		$this->assertStringNotContainsString( '<code>/old-about/</code></a>', $html );
+		$this->assertStringContainsString( '<span class="code">/careers/</span><', $html, 'A URL target covers its exact old URL only.' );
+		$this->assertStringContainsString( '>The URLs under <a class="row-title"', $html, 'A top-level entry never redirects its old URL itself.' );
+		$this->assertStringContainsString( '<span class="code">/archive/</span></a>', $html );
+		$this->assertStringNotContainsString( '<span class="code">/archive/</span></a> and the URLs under it', $html );
+		$this->assertStringContainsString( '<span class="code">/archive/</span></a><p class="description">This redirect stays even after the pages under it are gone, so delete it once you no longer need it.</p>', $html );
+		$this->assertSame( 1, substr_count( $html, 'This redirect stays even after the pages under it are gone' ), 'Only the root-list record says so: the others go when their page does.' );
 		$this->assertStringContainsString( '<a href="' . esc_url( get_edit_post_link( $this->ids['about'] ) ) . '">About</a><br><span dir="ltr">/company/about/</span>', $html );
 		$this->assertStringContainsString( '">Whats-on</a> &mdash; <span class=\'post-state\'>Draft</span><br><span dir="ltr">/?page_id=' . $draft . '</span>', $html );
 		$this->assertStringContainsString( '<span dir="ltr">https://jobs.example.org/</span>', $html );
@@ -196,7 +201,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 	public function test_the_post_type_filter_appears_only_when_two_types_are_supported(): void {
 		$this->recorded( $this->ids['about'], 'old-about' );
-		$this->assertStringNotContainsString( 'name="redirect_type"', $this->rendered() );
+		$this->assertStringNotContainsString( 'name="hierarchy_guard_type"', $this->rendered() );
 
 		register_post_type(
 			'hg_docs',
@@ -208,13 +213,13 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		);
 		Post_Types::reset();
 		$html = $this->rendered();
-		$this->assertStringContainsString( '<select name="redirect_type" id="hierarchy-guard-post-type">', $html );
+		$this->assertStringContainsString( '<select name="hierarchy_guard_type" id="hierarchy-guard-post-type">', $html );
 		$this->assertStringContainsString( '<option value="">All post types</option>', $html );
 		$this->assertStringContainsString( '<option value="hg_docs">Docs</option>', $html );
 
-		$_GET['redirect_type']     = 'hg_docs';
-		$_REQUEST['redirect_type'] = 'hg_docs';
-		$html                      = $this->rendered();
+		$_GET['hierarchy_guard_type']     = 'hg_docs';
+		$_REQUEST['hierarchy_guard_type'] = 'hg_docs';
+		$html                             = $this->rendered();
 		$this->assertStringContainsString( '<option value="hg_docs" selected=\'selected\'>Docs</option>', $html );
 		$this->assertStringContainsString( 'No redirects found.', $html, 'Under a filter, not “No redirects have been recorded yet.”' );
 	}
@@ -228,10 +233,10 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 			]
 		);
 		Post_Types::reset();
-		$id                        = $this->recorded( $this->ids['about'], 'old-about' );
-		$_GET['redirect_type']     = 'page';
-		$_REQUEST['redirect_type'] = 'page';
-		$html                      = $this->rendered();
+		$id                               = $this->recorded( $this->ids['about'], 'old-about' );
+		$_GET['hierarchy_guard_type']     = 'page';
+		$_REQUEST['hierarchy_guard_type'] = 'page';
+		$html                             = $this->rendered();
 		$this->follow( Redirect_Edit::delete_url( $id ) );
 		$after = ( new Redirect_Edit( $this->records ) )->handle();
 
@@ -239,7 +244,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		preg_match_all( '#name="([^"]+)"#', $html, $names );
 		$this->assertEmpty( array_intersect( [ 'post_type', 'taxonomy' ], $names[1] ) );
 		$this->assertStringNotContainsString( 'post_type=', $html );
-		$this->assertStringContainsString( 'redirect_type=page', $after );
+		$this->assertStringContainsString( 'hierarchy_guard_type=page', $after );
 		$this->assertStringNotContainsString( 'post_type=', $after );
 	}
 
@@ -263,21 +268,25 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->recorded( $this->ids['about'], 'old-about' );
 
 		$html = $this->rendered();
-		$this->assertStringContainsString( 'Built-in redirects are off, so these redirects aren’t served. Turn them on in the <a href="' . esc_url( Settings_Page::redirects_url() ) . '">Settings tab</a>.', $html );
+		$this->assertStringContainsString( 'Built-in redirects are off, so these redirects aren’t served. Turn on built-in redirects in the <a href="' . esc_url( Settings_Page::redirects_url() ) . '">Settings tab</a>.', $html );
 		$this->assertStringContainsString( 'notice notice-warning inline', $html );
 		$this->assertStringNotContainsString( 'is active.', $html );
 
-		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
 		$provider = static function ( array $providers ): array {
 			$providers['redirection']['active'] = true;
 			return $providers;
 		};
 		add_filter( 'hierarchy_guard_redirect_providers', $provider );
 		$html = $this->rendered();
+		$this->assertStringContainsString( 'Redirection is active. After each URL change, Hierarchy Guard’s notice offers to add these redirects to Redirection.', $html, 'Built-in redirects off: the notices offer the redirects to add.' );
+
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$html = $this->rendered();
 		remove_filter( 'hierarchy_guard_redirect_providers', $provider );
 
 		$this->assertStringNotContainsString( 'Built-in redirects are off', $html );
-		$this->assertStringContainsString( 'Redirection is active. These are the redirects Hierarchy Guard recorded; its notices after each change offer to add them in Redirection.', $html );
+		$this->assertStringContainsString( '<p>Redirection is active.</p>', $html );
+		$this->assertStringNotContainsString( 'offers to add these redirects', $html, 'Built-in redirects on: the notices say the old URLs redirect and offer nothing to add.' );
 
 		$cap = static fn(): int => 1;
 		add_filter( 'hierarchy_guard_count_cap', $cap );
@@ -286,6 +295,25 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		remove_filter( 'hierarchy_guard_count_cap', $cap );
 		$this->assertStringContainsString( 'Only the newest 1 recorded redirect is listed. To find another, search for its full old URL.', $html );
 		$this->assertStringContainsString( '<span class="displaying-num">1+ item</span>', $html, 'Past the cap, the count is a lower bound.' );
+	}
+
+	public function test_a_redirect_plugin_without_a_name_is_named_generically_with_built_in_redirects_off_or_on(): void {
+		$this->recorded( $this->ids['about'], 'old-about' );
+		$provider = static fn(): array => [
+			'custom' => [
+				'active' => true,
+				'url'    => '',
+				'csv'    => 'generic',
+			],
+		];
+		add_filter( 'hierarchy_guard_redirect_providers', $provider );
+		$off      = $this->rendered();
+		update_option( Settings::OPTION, [ 'serve_redirects' => true ] );
+		$on = $this->rendered();
+		remove_filter( 'hierarchy_guard_redirect_providers', $provider );
+
+		$this->assertStringContainsString( '<p>A redirect plugin is active. After each URL change, Hierarchy Guard’s notice offers to add these redirects to that plugin.</p>', $off );
+		$this->assertStringContainsString( '<p>A redirect plugin is active.</p>', $on );
 	}
 
 	public function test_under_plain_permalinks_a_notice_says_why_nothing_is_served(): void {
@@ -298,11 +326,12 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$html = $this->rendered();
 
 		$this->assertStringContainsString( $notice, $html );
-		$this->assertStringContainsString( '>Not active: built-in redirects are off<', $html );
+		$this->assertStringContainsString( '>Not active: permalinks are set to Plain<', $html );
+		$this->assertStringNotContainsString( 'Not active: built-in redirects are off', $html, 'The switch is on: the permalinks are why.' );
 		$this->assertStringNotContainsString( 'Built-in redirects are off, so', $html, 'The switch is on: only the permalinks notice.' );
 	}
 
-	public function test_delete_from_a_row_deletes_the_record_and_says_its_old_url_no_longer_redirects_through_it(): void {
+	public function test_delete_from_a_row_deletes_the_record_and_says_which_redirect_was_deleted(): void {
 		$id = $this->recorded( $this->ids['about'], 'old-about' );
 		$this->ledger->set_target( 'page', 'old-about', $this->ids['about'], '', 302 );
 		$this->follow( Redirect_Edit::delete_url( $id ) );
@@ -314,7 +343,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertFalse( metadata_exists( 'post', $this->ids['about'], Ledger::target_key( 'page', 'old-about' ) ) );
 		$this->assertSame(
 			[
-				'message' => 'Redirect deleted. <code>/old-about/</code> no longer redirects through it.',
+				'message' => 'The redirect from <code>/old-about/</code> was deleted.',
 				'type'    => 'success',
 			],
 			$this->kept_notice()
@@ -351,7 +380,77 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertSame( [], $this->ledger->paths_for( $this->ids['about'] ) );
 		$this->assertSame( [], $this->ledger->paths_for( $this->ids['team'] ) );
 		$this->assertSame( [ 'old-history' ], $this->ledger->paths_for( $this->ids['history'] ) );
-		$this->assertSame( '2 redirects deleted. Their old URLs no longer redirect through them.', $this->kept_notice()['message'] );
+		$this->assertSame( '2 redirects deleted.', $this->kept_notice()['message'] );
+	}
+
+	/**
+	 * Nonces a bulk Delete never carries: none at all, the action the list's
+	 * old name shared with any other plugin's "redirects" table, another
+	 * list's, the Edit view's save of the same record, and the right action
+	 * in the wrong case.
+	 *
+	 * @return array<string,array{0:string|null}> The nonce action, null for no nonce.
+	 */
+	public static function foreign_nonce_actions(): array {
+		return [
+			'none at all'           => [ null ],
+			'the old shared action' => [ 'bulk-redirects' ],
+			'another list'          => [ 'bulk-posts' ],
+			'the edit view’s save'  => [ Redirect_Edit::NONCE_SAVE ],
+			'wrong case'            => [ 'BULK-HIERARCHY_GUARD_REDIRECTS' ],
+		];
+	}
+
+	/**
+	 * @dataProvider foreign_nonce_actions
+	 *
+	 * @param string|null $action Nonce action the request was signed for, null for none; the Edit view's save gets the record's ID.
+	 */
+	public function test_a_bulk_delete_signed_for_another_action_deletes_nothing( ?string $action ): void {
+		$id                   = $this->recorded( $this->ids['about'], 'old-about' );
+		$_REQUEST['action']   = 'delete';
+		$_REQUEST['redirect'] = [ $id ];
+		if ( null !== $action ) {
+			$_REQUEST['_wpnonce'] = wp_create_nonce( Redirect_Edit::NONCE_SAVE === $action ? $action . $id : $action );
+		}
+
+		try {
+			( new Redirect_Edit( $this->records ) )->handle();
+			$this->fail( 'A foreign nonce must stop the request.' );
+		} catch ( WPDieException $stopped ) {
+			$this->assertSame( [ 'old-about' ], $this->ledger->paths_for( $this->ids['about'] ) );
+		}
+	}
+
+	/**
+	 * Post type filter values the select never sends, and what the tab filters on.
+	 *
+	 * @return array<string,array{0:mixed,1:string}>
+	 */
+	public static function crafted_types(): array {
+		return [
+			'array'            => [ [ 'page' ], '' ],
+			'unknown'          => [ 'nope', '' ],
+			'not hierarchical' => [ 'post', '' ],
+			'empty'            => [ '', '' ],
+			'markup'           => [ 'page<script>', '' ],
+			'upper case'       => [ 'PAGE', 'page' ],
+			'slashed'          => [ 'pa\\ge', 'page' ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_types
+	 *
+	 * @param mixed  $value    The hierarchy_guard_type argument.
+	 * @param string $expected The type filtered on, '' for all.
+	 */
+	public function test_a_crafted_post_type_filter_falls_back_to_every_type( $value, string $expected ): void {
+		$_GET['hierarchy_guard_type']     = $value;
+		$_REQUEST['hierarchy_guard_type'] = $value;
+
+		$this->assertSame( $expected, Redirects_Table::post_type() );
+		$this->assertStringContainsString( 'id="hierarchy-guard-redirects"', $this->rendered(), 'The tab renders without a warning.' );
 	}
 
 	public function test_a_bulk_delete_without_the_table_s_nonce_deletes_nothing(): void {
@@ -455,7 +554,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		( new Redirect_Edit( $this->records ) )->handle();
 
 		$this->assertCount( 5, $this->ledger->paths_for( $this->ids['about'] ), 'Twenty deleted, one page of the table.' );
-		$this->assertSame( '20 redirects deleted. Their old URLs no longer redirect through them.', $this->kept_notice()['message'] );
+		$this->assertSame( '20 redirects deleted.', $this->kept_notice()['message'] );
 	}
 
 	public function test_filter_never_runs_a_bulk_delete_and_an_empty_selection_returns_to_the_list(): void {
@@ -495,7 +594,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 
 		$html = $this->rendered();
 
-		$this->assertStringContainsString( '<code>/café/équipe/</code>', $html );
+		$this->assertStringContainsString( '<span class="code">/café/équipe/</span>', $html );
 		$this->assertStringNotContainsString( '/other/', $html );
 		$this->assertStringContainsString( '<span class="subtitle">Search results for: <strong><span dir="ltr">' . esc_html( home_url( '/café/équipe/' ) ) . '</span></strong></span>', $html, 'A URL searched reads left to right in a right-to-left admin too.' );
 	}
@@ -534,9 +633,9 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		}
 		$id = Records::id( $this->ids['about'], 'page', 'old-21' );
 		foreach ( [
-			's'             => 'old',
-			'redirect_type' => 'page',
-			'paged'         => '2',
+			's'                    => 'old',
+			'hierarchy_guard_type' => 'page',
+			'paged'                => '2',
 		] as $key => $value ) {
 			$_GET[ $key ]     = $value;
 			$_REQUEST[ $key ] = $value;
@@ -545,16 +644,16 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$html = $this->rendered();
 		$edit = Redirect_Edit::edit_url( $id );
 
-		foreach ( [ 's=old', 'redirect_type=page', 'paged=2' ] as $arg ) {
+		foreach ( [ 's=old', 'hierarchy_guard_type=page', 'paged=2' ] as $arg ) {
 			$this->assertStringContainsString( $arg, $edit );
 			$this->assertStringContainsString( $arg, Redirect_Edit::delete_url( $id ) );
 		}
-		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '"><code>/old-21/</code></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do, named by its own text.' );
+		$this->assertStringContainsString( '<a class="row-title" href="' . esc_url( $edit ) . '"><span class="code">/old-21/</span></a> and the URLs under it', $html, 'The old URL links to Edit, as core’s row titles do, named by its own text.' );
 		$this->assertStringContainsString( '<a href="' . esc_url( $edit ) . '" aria-label="Edit the redirect from /old-21/">Edit</a>', $html );
 		$this->assertStringContainsString( '<a href="' . esc_url( Redirect_Edit::delete_url( $id ) ) . '" class="submitdelete"', $html );
 
 		$this->follow( Redirect_Edit::delete_url( $id ) );
-		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=old&redirect_type=page&paged=2&settings-updated=true' ), ( new Redirect_Edit( $this->records ) )->handle(), 'A row’s Delete returns to the same list.' );
+		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard&tab=redirects&s=old&hierarchy_guard_type=page&paged=2&settings-updated=true' ), ( new Redirect_Edit( $this->records ) )->handle(), 'A row’s Delete returns to the same list.' );
 	}
 
 	public function test_while_the_list_is_first_built_an_empty_table_says_so(): void {
@@ -587,7 +686,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->recorded( $this->ids['about'], 'old-about' );
 
 		$this->assertStringContainsString( '</table>', $this->rendered() );
-		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">Status checks posts and pages at each old URL. Other WordPress URLs, such as archives or other plugins’ rules, aren’t checked. When two recorded redirects share an old URL, at most one is served, and both can read Active.</p>#s', $this->rendered() );
+		$this->assertMatchesRegularExpression( '#</table>.*<p class="description">At each old URL, the Status column checks only for a post or page. It doesn’t check archives or other plugins’ redirect rules. If two recorded redirects have the same old URL, only one is served, though both may show Active.</p>#s', $this->rendered() );
 	}
 
 	public function test_while_the_newest_list_is_built_the_tab_says_so(): void {
@@ -595,7 +694,7 @@ final class RedirectsTabTest extends WP_UnitTestCase {
 		$this->assertStringNotContainsString( 'still being built', $this->rendered() );
 
 		update_option( Ledger::RECENT_STATE, 'building' );
-		$this->assertStringContainsString( '<div class="notice notice-info inline"><p>The list of recorded redirects is still being built. Older redirects appear here once it’s done.</p></div>', $this->rendered() );
+		$this->assertStringContainsString( '<div class="notice notice-info inline"><p>The list of recorded redirects is still being built. Older redirects will appear when it’s finished.</p></div>', $this->rendered() );
 
 		update_option( Ledger::RECENT_STATE, 'done' );
 		$this->assertStringNotContainsString( 'still being built', $this->rendered() );

@@ -41,7 +41,6 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		delete_option( Settings::OPTION );
 		delete_option( Ledger::ROOT_OPTION );
 		Post_Types::reset();
-		Change_Listener::suspend( false );
 		Change_Log::reset_request();
 		$this->set_permalink_structure( '/%postname%/' );
 		// These tests exercise core's own trash behaviour, which the keep policy leaves untouched.
@@ -72,7 +71,6 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down(): void {
-		Change_Listener::suspend( false );
 		$this->set_permalink_structure( '' );
 		parent::tear_down();
 	}
@@ -227,16 +225,8 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 				'post_title' => 'About us',
 			]
 		);
-		Change_Listener::suspend( true );
-		wp_update_post(
-			[
-				'ID'        => $this->team,
-				'post_name' => 'crew',
-			]
-		);
-		Change_Listener::suspend( false );
 
-		$this->assertNull( $this->log->latest( $user ), 'A draft has no URL, a title is no URL, and a suspended listener records nothing.' );
+		$this->assertNull( $this->log->latest( $user ), 'A draft has no URL, and a title is no URL.' );
 	}
 
 	public function test_a_save_the_ledger_does_not_record_is_no_change(): void {
@@ -484,19 +474,6 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
 	}
 
-	public function test_suspended_listener_records_nothing(): void {
-		Change_Listener::suspend( true );
-		wp_update_post(
-			[
-				'ID'        => $this->about,
-				'post_name' => 'company-info',
-			]
-		);
-
-		$this->assertTrue( Change_Listener::is_suspended() );
-		$this->assertSame( [], $this->ledger->paths_for( $this->about ) );
-	}
-
 	public function test_deleting_a_parent_records_its_path_on_the_grandparent(): void {
 		wp_delete_post( $this->about, true );
 
@@ -611,6 +588,69 @@ final class ChangeListenerTest extends WP_UnitTestCase {
 		$resolved = ( new Resolver( $this->ledger ) )->resolve( 'page', 'company/about/team/leadership' );
 		$this->assertNotNull( $resolved );
 		$this->assertSame( $leadership, $resolved->ID );
+	}
+
+	public function test_deleting_a_page_reads_its_entries_once_and_its_children_without_a_sort(): void {
+		global $wpdb;
+		$queries = [];
+		$keep    = static function ( string $sql ) use ( &$queries ): string {
+			$queries[] = $sql;
+			return $sql;
+		};
+		add_filter( 'query', $keep );
+
+		wp_delete_post( $this->team, true );
+
+		remove_filter( 'query', $keep );
+		$entries  = array_filter( $queries, fn( string $sql ): bool => str_contains( $sql, "post_id = {$this->team} AND meta_key LIKE" ) );
+		$children = array_filter( $queries, fn( string $sql ): bool => str_contains( $sql, "post_parent = {$this->team}" ) );
+		$this->assertCount( 1, $entries, 'begin_delete() reads the entries; has_entries() reuses that read.' );
+		$own = "SELECT ID FROM {$wpdb->posts} WHERE post_parent = {$this->team} AND post_type = 'page' ORDER BY ID ASC LIMIT 1";
+		$this->assertContains( $own, $children, 'One child, read in the post_parent index order.' );
+		foreach ( array_diff( $children, [ $own ] ) as $sql ) {
+			$this->assertStringNotContainsString( 'ORDER BY', $sql, 'No other query sorts the children: core’s own reads are unsorted.' );
+		}
+	}
+
+	public function test_a_subpage_another_plugin_hides_from_queries_still_gets_its_path_when_its_parent_is_deleted(): void {
+		$hidden = self::factory()->post->create(
+			[
+				'post_type'   => 'page',
+				'post_name'   => 'hidden',
+				'post_parent' => $this->team,
+			]
+		);
+		wp_trash_post( $this->team );
+		Markers::add( $this->team, Markers::trashed_key( $this->about ), '1' );
+		$hide = static function ( \WP_Query $query ) use ( $hidden ): void {
+			$query->set( 'post__not_in', [ $hidden ] );
+		};
+		add_action( 'pre_get_posts', $hide );
+
+		wp_delete_post( $this->team, true );
+
+		remove_action( 'pre_get_posts', $hide );
+		$this->assertSame( [ 'company/about/team/hidden' ], $this->ledger->paths_for( $hidden ) );
+	}
+
+	public function test_a_subpage_trashed_with_its_parent_and_deleted_for_good_records_each_published_subpage_past_a_hundred(): void {
+		$kids = [];
+		for ( $i = 1; $i <= 120; $i++ ) {
+			$kids[] = self::factory()->post->create(
+				[
+					'post_type'   => 'page',
+					'post_name'   => "kid-{$i}",
+					'post_parent' => $this->team,
+				]
+			);
+		}
+		wp_trash_post( $this->team );
+		Markers::add( $this->team, Markers::trashed_key( $this->about ), '1' );
+
+		wp_delete_post( $this->team, true );
+
+		$this->assertSame( [ 'company/about/team/kid-120' ], $this->ledger->paths_for( end( $kids ) ) );
+		$this->assertSame( [ 'company/about/team/kid-1' ], $this->ledger->paths_for( $kids[0] ) );
 	}
 
 	public function test_deleting_a_subpage_trashed_with_its_parent_records_nothing(): void {

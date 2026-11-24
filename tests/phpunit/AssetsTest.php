@@ -38,7 +38,7 @@ final class AssetsTest extends WP_UnitTestCase {
 		}
 		rmdir( $this->dir . '/build' );
 		rmdir( $this->dir );
-		foreach ( [ 'list-table', 'redirects' ] as $bundle ) {
+		foreach ( [ 'list-table', 'tree', 'redirects', 'editor' ] as $bundle ) {
 			wp_dequeue_script( 'hierarchy-guard-' . $bundle );
 			wp_deregister_script( 'hierarchy-guard-' . $bundle );
 		}
@@ -84,6 +84,24 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertTrue( wp_style_is( 'wp-components', 'enqueued' ), 'Components need their styles.' );
 	}
 
+	public function test_the_editor_bundle_loads_in_the_block_editor_of_a_supported_type_and_in_the_site_editor(): void {
+		$this->build( 'editor', [] );
+		$assets = new Assets( new Providers(), $this->dir );
+
+		set_current_screen( 'post' );
+		$assets->enqueue_editor();
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-editor', 'enqueued' ), 'Posts are not hierarchical.' );
+
+		set_current_screen( 'site-editor' );
+		$assets->enqueue_editor();
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-editor', 'enqueued' ), 'The Site Editor’s Pages screen edits pages: the panel checks the type it edits.' );
+		wp_dequeue_script( 'hierarchy-guard-editor' );
+
+		set_current_screen( 'page' );
+		$assets->enqueue_editor();
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-editor', 'enqueued' ) );
+	}
+
 	public function test_a_bundle_s_right_to_left_stylesheet_replaces_it_right_to_left(): void {
 		$assets = new Assets( new Providers(), $this->dir );
 		foreach ( [ 'list-table', 'editor' ] as $bundle ) {
@@ -117,6 +135,8 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-redirects' ), $config['settingsUrl'] );
 		$this->assertSame( admin_url( 'options-general.php?page=hierarchy-guard#hierarchy-guard-trash-policy' ), $config['policyUrl'] );
 		$this->assertSame( Settings::POLICY_REPARENT, $config['policy'] );
+		$this->assertSame( [ 'reparent', 'trash_children', 'keep' ], $config['policies'], 'The trash dialog’s options, in order.' );
+		$this->assertSame( Settings::POLICIES, $config['policies'], 'Every policy the setting accepts.' );
 		$this->assertContains( 'page', $config['postTypes'] );
 		$this->assertSame( 1000, $config['cap'] );
 		$this->assertSame( 'en-US', $config['locale'] );
@@ -143,6 +163,47 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertContains( 'inline-edit-post', $deps, 'It wraps Quick Edit, so Quick Edit loads first.' );
 	}
 
+	public function test_only_the_tree_view_gets_the_tree_s_bundle_after_the_list_s(): void {
+		$this->build( 'list-table', [] );
+		$this->build( 'tree', [ 'wp-a11y' ] );
+		set_current_screen( 'edit-page' );
+		$assets = new Assets( new Providers(), $this->dir );
+		$assets->want_list_table();
+
+		$assets->enqueue_list_table();
+		$this->assertFalse( wp_script_is( 'hierarchy-guard-tree', 'enqueued' ), 'The flat list never runs the tree.' );
+
+		$assets->want_tree();
+		$assets->enqueue_list_table();
+		$this->assertTrue( wp_script_is( 'hierarchy-guard-tree', 'enqueued' ) );
+		$this->assertSame( [ 'wp-a11y', 'hierarchy-guard-list-table', 'wp-i18n' ], wp_scripts()->registered['hierarchy-guard-tree']->deps, 'Its own, from its asset file; the list’s, whose settings it reads and whose trash dialog it uses; and wp-i18n, which core adds for its translations.' );
+		$this->assertSame( 'hierarchy-guard', wp_scripts()->registered['hierarchy-guard-tree']->textdomain );
+		$this->assertFalse( wp_scripts()->get_data( 'hierarchy-guard-tree', 'before' ), 'The settings print once, with the list’s bundle.' );
+	}
+
+	public function test_the_tree_view_asks_for_the_tree_s_bundle(): void {
+		global $wp_filter;
+		$found = false;
+		foreach ( $wp_filter[ Tree_View::SCRIPT ]->callbacks[10] ?? [] as $callback ) {
+			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets && 'want_tree' === $callback['function'][1] );
+		}
+		$this->assertTrue( $found );
+
+		$pagenow = $GLOBALS['pagenow'] ?? '';
+		set_current_screen( 'edit-page' );
+		$GLOBALS['pagenow'] = 'edit.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- As the list screen sets it.
+		$_GET               = [
+			'post_type'          => 'page',
+			Tree_View::QUERY_VAR => Tree_View::VIEW,
+		];
+		ob_start();
+		( new Tree_View() )->controls( 'page' );
+		ob_end_clean();
+		$_GET               = [];
+		$GLOBALS['pagenow'] = $pagenow; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Put back.
+		$this->assertSame( 1, did_action( Tree_View::SCRIPT ) );
+	}
+
 	public function test_an_unsupported_screen_gets_nothing(): void {
 		$this->build( 'list-table', [] );
 		set_current_screen( 'edit-post' );
@@ -164,30 +225,17 @@ final class AssetsTest extends WP_UnitTestCase {
 		$this->assertTrue( $found );
 	}
 
-	public function test_the_tree_s_stylesheet_loads_in_the_head_and_its_script_in_the_footer(): void {
+	public function test_the_list_s_stylesheet_loads_in_the_head_of_every_list_screen_and_its_script_in_the_footer(): void {
 		$this->build( 'list-table', [] );
 		file_put_contents( $this->dir . '/build/list-table.css', '' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- A throwaway file in the temp directory.
 		set_current_screen( 'edit-page' );
 		$assets = new Assets( new Providers(), $this->dir );
 
 		$assets->enqueue_admin( 'edit.php' );
-		$this->assertFalse( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The list keeps its stylesheet in the footer.' );
 
-		$assets->want_list_style();
-		$assets->enqueue_admin( 'edit.php' );
-		$this->assertTrue( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The tree’s indents print with the head, before its rows.' );
+		$this->assertTrue( wp_style_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The column’s width and the tree’s indents are there as the rows paint.' );
 		$this->assertSame( 'abc123', wp_styles()->registered['hierarchy-guard-list-table']->ver );
 		$this->assertFalse( wp_script_is( 'hierarchy-guard-list-table', 'enqueued' ), 'The script still waits for the footer.' );
-	}
-
-	public function test_the_plugin_listens_for_the_tree_s_stylesheet(): void {
-		global $wp_filter;
-		$found = false;
-		foreach ( $wp_filter[ Tree_View::STYLE ]->callbacks[10] ?? [] as $callback ) {
-			$found = $found || ( is_array( $callback['function'] ) && $callback['function'][0] instanceof Assets );
-		}
-
-		$this->assertTrue( $found );
 	}
 
 	public function test_the_redirects_tab_gets_the_bundle_that_asks_before_a_delete(): void {

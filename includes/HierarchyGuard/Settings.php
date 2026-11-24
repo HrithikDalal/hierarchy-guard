@@ -9,6 +9,10 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Reads, defaults and sanitizes the single settings option.
  */
@@ -87,6 +91,8 @@ final class Settings {
 		/**
 		 * Filters the default trash policy.
 		 *
+		 * @since 1.0.0
+		 *
 		 * @param string $policy One of Settings::POLICIES.
 		 */
 		$policy = (string) apply_filters( 'hierarchy_guard_default_trash_policy', $policy );
@@ -141,7 +147,7 @@ final class Settings {
 			}
 		}
 
-		$policy = isset( $input['trash_policy'] ) ? sanitize_key( (string) $input['trash_policy'] ) : self::POLICY_REPARENT;
+		$policy = isset( $input['trash_policy'] ) && is_string( $input['trash_policy'] ) ? sanitize_key( $input['trash_policy'] ) : self::POLICY_REPARENT;
 		if ( ! in_array( $policy, self::POLICIES, true ) ) {
 			$policy = self::POLICY_REPARENT;
 		}

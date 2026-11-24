@@ -18,6 +18,8 @@ use WP_UnitTestCase;
  */
 final class MarkersTest extends WP_UnitTestCase {
 
+	use Inactive_Plugin;
+
 	public function test_both_filters_are_registered_by_the_plugin(): void {
 		global $wp_filter;
 		foreach ( [
@@ -93,6 +95,40 @@ final class MarkersTest extends WP_UnitTestCase {
 		$this->assertSame( [], Markers::rows( Markers::moved_key( 9 ), 10 ) );
 		$this->assertSame( '', get_post_meta( $a, Markers::moved_key( 9 ), true ), 'The meta cache is cleared.' );
 		$this->assertCount( 1, Markers::rows( Markers::moved_key( 10 ), 10 ), 'Other roots are untouched.' );
+	}
+
+	public function test_a_moved_row_counts_only_while_its_root_exists(): void {
+		$early = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$root  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$gone  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$moved = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$left  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		$both  = self::factory()->post->create( [ 'post_type' => 'page' ] );
+		wp_trash_post( $root );
+		Markers::add( $moved, Markers::moved_key( $root ), '0|a|a|1' );
+		Markers::add( $left, Markers::moved_key( $gone ), '0|b|b|1' );
+		// The live root's row between two stale ones, by key and by insertion alike.
+		Markers::add( $both, Markers::moved_key( $early ), '0|c|c|1' );
+		Markers::add( $both, Markers::moved_key( $root ), '0|c|c|1' );
+		Markers::add( $both, Markers::moved_key( $gone ), '0|c|c|1' );
+		// Roots deleted for good while the plugin was inactive leave their rows behind.
+		$this->delete_for_good_while_inactive( $early );
+		$this->delete_for_good_while_inactive( $gone );
+		$this->assertCount( 2, Markers::rows( Markers::moved_key( $gone ), 10 ), 'Precondition: the rows outlived their root.' );
+
+		$this->assertTrue( Markers::has_moved_row( $moved ), 'A restore of its root can still move it back.' );
+		$this->assertFalse( Markers::has_moved_row( $left ), 'Nothing can move it back any more.' );
+		$this->assertTrue( Markers::has_moved_row( $both ), 'Its live root can still move it back.' );
+		$found = Markers::moved_among( [ $moved, $left, $both ] );
+		ksort( $found );
+		$this->assertSame(
+			[
+				$moved => true,
+				$both  => true,
+			],
+			$found,
+			'Every row of a post is read, the stale ones and the live one alike.'
+		);
 	}
 
 	public function test_count_covers_both_kinds_and_stops_at_the_cap(): void {

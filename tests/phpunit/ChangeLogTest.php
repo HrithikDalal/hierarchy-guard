@@ -393,19 +393,21 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$entry         = $this->entry( 4, [] );
 		$entry['path'] = 'beta';
 		$blog          = (int) $GLOBALS['blog_id'];
-		// As switch_to_blog() sets it, which a single site does not have.
-		$GLOBALS['blog_id'] = $blog + 1;
+		// As switch_to_blog() sets it: a real site under multisite, where the
+		// change is written to that site's tables; any other ID on a single site.
+		$GLOBALS['blog_id'] = is_multisite() ? self::factory()->blog->create() : $blog + 1;
 		try {
 			$other = $this->log->record( $this->admin, 'save', 'page', $entry );
 			$this->assertNotSame( $main, $other, 'A save on another site is a change of its own.' );
 			$this->assertSame( 'beta', $this->log->latest( $this->admin )['roots'][4]['path'] );
 		} finally {
-			$this->log->forget( $this->admin );
 			$GLOBALS['blog_id'] = $blog;
 		}
 
 		$this->assertSame( $main, $this->log->latest( $this->admin )['id'] );
 		$this->assertSame( 'company/about', $this->log->latest( $this->admin )['roots'][4]['path'], 'This site’s change keeps its own root.' );
+		// Writes both changes now, so neither is left for the next test to write.
+		Change_Log::reset_request();
 	}
 
 	public function test_a_request_that_saves_on_two_sites_leaves_each_its_own_change(): void {
@@ -424,7 +426,7 @@ final class ChangeLogTest extends WP_UnitTestCase {
 	 */
 	private function two_site_saves( bool $end_switched ): void {
 		if ( ! is_multisite() ) {
-			$this->markTestSkipped( 'Run with WP_MULTISITE=1.' );
+			$this->markTestSkipped( 'Multisite only: run with npm run test:php:multisite.' );
 		}
 		wp_set_current_user( $this->admin );
 		Post_Types::reset();
@@ -470,28 +472,15 @@ final class ChangeLogTest extends WP_UnitTestCase {
 		$this->assertSame( [ '/alpha/' ], array_column( $pairs->page( $pairs->collect_change( $main ), 1, 100 )['pairs'], 'old' ) );
 	}
 
-	public function test_forgetting_drops_the_change_waiting_to_be_written(): void {
-		$this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [] ) );
-
-		$this->log->forget( $this->admin );
-		Change_Log::reset_request();
-
-		$this->assertNull( $this->log->latest( $this->admin ) );
-		$this->assertFalse( get_transient( Change_Log::key( $this->admin ) ) );
-	}
-
 	public function test_nothing_is_stored_without_a_user(): void {
 		$this->assertSame( '', $this->log->record( 0, 'trash', 'page', $this->entry( 12, [] ) ) );
 		$this->assertFalse( get_transient( Change_Log::key( 0 ) ) );
 	}
 
-	public function test_mark_shown_and_forget(): void {
+	public function test_mark_shown(): void {
 		$id = $this->log->record( $this->admin, 'trash', 'page', $this->entry( 12, [] ) );
 
 		$this->log->mark_shown( $this->admin, $id );
 		$this->assertTrue( $this->log->latest( $this->admin )['shown'] );
-
-		$this->log->forget( $this->admin );
-		$this->assertNull( $this->log->latest( $this->admin ) );
 	}
 }
