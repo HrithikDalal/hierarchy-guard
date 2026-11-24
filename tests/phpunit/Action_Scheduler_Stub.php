@@ -44,6 +44,13 @@ final class Action_Scheduler_Stub {
 	public static array $queued = [];
 
 	/**
+	 * When each pending action is due, as a Unix time, in the order queued.
+	 *
+	 * @var int[]
+	 */
+	public static array $due = [];
+
+	/**
 	 * Turns the stubs off and forgets what they were asked.
 	 */
 	public static function reset(): void {
@@ -51,5 +58,6 @@ final class Action_Scheduler_Stub {
 		self::$asked   = 0;
 		self::$checked = 0;
 		self::$queued  = [];
+		self::$due     = [];
 	}
 }

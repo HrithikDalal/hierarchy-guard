@@ -23,6 +23,23 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 			return 0;
 		}
 		Action_Scheduler_Stub::$queued[] = (string) $hook;
+		Action_Scheduler_Stub::$due[]    = time();
+		return count( Action_Scheduler_Stub::$queued );
+	}
+
+	/**
+	 * Queues an action due at a time, or returns 0 as before initialization.
+	 *
+	 * @param int    $timestamp When it is due.
+	 * @param string $hook      Hook.
+	 * @return int Action ID.
+	 */
+	function as_schedule_single_action( $timestamp, $hook ): int {
+		if ( ! Action_Scheduler_Stub::$on ) {
+			return 0;
+		}
+		Action_Scheduler_Stub::$queued[] = (string) $hook;
+		Action_Scheduler_Stub::$due[]    = (int) $timestamp;
 		return count( Action_Scheduler_Stub::$queued );
 	}
 
@@ -58,6 +75,7 @@ if ( ! function_exists( 'as_enqueue_async_action' ) ) {
 	function as_unschedule_all_actions(): void {
 		if ( Action_Scheduler_Stub::$on ) {
 			Action_Scheduler_Stub::$queued = [];
+			Action_Scheduler_Stub::$due    = [];
 		}
 	}
 }

@@ -386,11 +386,13 @@ final class Queue {
 	 * Schedules the site's run through Action Scheduler when a site has it,
 	 * else WP-Cron, unless one is scheduled already, and the watchdog with
 	 * it. A run already in progress does not count: it may be the one about
-	 * to finish.
+	 * to finish. With a delay the run is due that many seconds ahead rather
+	 * than now.
 	 *
+	 * @param int $delay Seconds until the run is due, 0 for now.
 	 * @return bool Whether a run is scheduled.
 	 */
-	public function schedule(): bool {
+	public function schedule( int $delay = 0 ): bool {
 		Processor::schedule_watchdog();
 
 		if ( function_exists( 'as_enqueue_async_action' ) ) {
@@ -409,7 +411,10 @@ final class Queue {
 					'ids'
 				)
 				: [];
-			if ( [] !== $pending || as_enqueue_async_action( self::HOOK, [], self::GROUP ) ) {
+			$queued  = [] !== $pending || ( $delay > 0
+				? as_schedule_single_action( time() + $delay, self::HOOK, [], self::GROUP )
+				: as_enqueue_async_action( self::HOOK, [], self::GROUP ) );
+			if ( $queued ) {
 				$this->queued_in_as = true;
 				return true;
 			}
@@ -419,7 +424,7 @@ final class Queue {
 		if ( false !== wp_next_scheduled( self::HOOK ) ) {
 			return true;
 		}
-		return true === wp_schedule_single_event( time(), self::HOOK );
+		return true === wp_schedule_single_event( time() + max( 0, $delay ), self::HOOK );
 	}
 
 	/**

@@ -228,14 +228,15 @@ final class ProcessorTest extends WP_UnitTestCase {
 
 	/**
 	 * Processors of one request that started at 1000 seconds, whose clock
-	 * each step moves 25 seconds on, under PHP's time limit in seconds.
+	 * starts at a time given and each step moves 25 seconds on, under PHP's
+	 * time limit in seconds.
 	 *
-	 * @param int $max     PHP's time limit, 0 for none.
-	 * @param int $stepped Steps taken so far, counted.
+	 * @param int   $max     PHP's time limit, 0 for none.
+	 * @param int   $stepped Steps taken so far, counted.
+	 * @param float $now     The clock's first reading.
 	 * @return Processor
 	 */
-	private function in_request( int $max, int &$stepped ): Processor {
-		$now                           = 1000.0;
+	private function in_request( int $max, int &$stepped, float $now = 1000.0 ): Processor {
 		$_SERVER['REQUEST_TIME_FLOAT'] = 1000.0;
 		add_action(
 			'hierarchy_guard_children_reparented',
@@ -268,6 +269,40 @@ final class ProcessorTest extends WP_UnitTestCase {
 		$this->assertSame( 1, $stepped, 'The request has no time left, so the second run starts no step.' );
 		$this->assertTrue( $this->queue->is_scheduled(), 'The next run is left to step them.' );
 		$this->assertCount( 2, $this->queue->roots(), 'Both roots still wait.' );
+	}
+
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_under_a_time_limit_a_run_that_finds_the_request_budget_spent_queues_its_successor_seconds_ahead(): void {
+		require_once __DIR__ . '/stubs/action-scheduler.php';
+		Action_Scheduler_Stub::$on     = true;
+		$stepped                       = 0;
+		$processor                     = $this->in_request( 40, $stepped, 1021.0 );
+		Action_Scheduler_Stub::$queued = [];
+		Action_Scheduler_Stub::$due    = [];
+
+		$processor->handle();
+
+		$this->assertSame( 0, $stepped );
+		$this->assertSame( [ Queue::HOOK ], Action_Scheduler_Stub::$queued, 'One successor.' );
+		$this->assertGreaterThanOrEqual( time() + 4, Action_Scheduler_Stub::$due[0], 'Not due now, so a runner that claims again in this request finds nothing of it due.' );
+		$this->assertLessThanOrEqual( time() + 5, Action_Scheduler_Stub::$due[0], 'Due about 5 seconds later.' );
+	}
+
+	public function test_under_a_time_limit_a_run_that_finds_the_request_budget_spent_schedules_its_wp_cron_successor_seconds_ahead(): void {
+		$stepped   = 0;
+		$processor = $this->in_request( 40, $stepped, 1021.0 );
+		wp_unschedule_hook( Queue::HOOK );
+
+		$processor->handle();
+
+		$this->assertSame( 0, $stepped );
+		$this->assertCount( 1, array_filter( _get_cron_array(), static fn( array $hooks ): bool => isset( $hooks[ Queue::HOOK ] ) ), 'One successor.' );
+		$next = (int) wp_next_scheduled( Queue::HOOK );
+		$this->assertGreaterThanOrEqual( time() + 4, $next, 'Not due now.' );
+		$this->assertLessThanOrEqual( time() + 5, $next, 'Due about 5 seconds later.' );
 	}
 
 	public function test_under_a_time_limit_a_missing_request_start_gives_the_run_a_box_of_its_own(): void {

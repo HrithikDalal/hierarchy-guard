@@ -40,6 +40,13 @@ final class Processor {
 	private const ROOTS_PER_READ = 100;
 
 	/**
+	 * Seconds ahead a run that finds the request's box spent queues its
+	 * successor: about the pause Action Scheduler takes before it chains its
+	 * next request.
+	 */
+	private const SPENT_DELAY = 5;
+
+	/**
 	 * Queue.
 	 *
 	 * @var Queue
@@ -121,6 +128,13 @@ final class Processor {
 		$shared  = $max > 0;
 		$start   = self::box_start( $max, $this->now() );
 		$stepped = false;
+		if ( $shared && (int) floor( $limit - ( $this->now() - $start ) ) < 1 ) {
+			// The request's box is spent before the run starts. Its successor is due a few seconds
+			// ahead, so a runner that claims due actions again in this request doesn't spin on it.
+			$this->queue->forget_queued();
+			$this->queue->schedule( self::SPENT_DELAY );
+			return;
+		}
 		$carried = $this->queue->passed_over();
 		$passed  = $carried;
 		$skip    = $carried;
