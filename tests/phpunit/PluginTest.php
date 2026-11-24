@@ -104,7 +104,12 @@ final class PluginTest extends WP_UnitTestCase {
 		$this->assertTrue( remove_action( 'template_redirect', [ $server, 'maybe_redirect' ], Server::PRIORITY ) );
 		add_action( 'template_redirect', [ $server, 'maybe_redirect' ], Server::PRIORITY );
 		$this->assertInstanceOf( Ledger::class, Plugin::instance()->get( Ledger::class ) );
-		$this->assertNull( Plugin::instance()->get( 'Nope' ) );
+	}
+
+	public function test_asking_for_a_class_the_plugin_has_no_object_of_says_so_in_development(): void {
+		$this->setExpectedIncorrectUsage( 'HierarchyGuard\\Plugin::get' );
+
+		$this->assertNull( Plugin::instance()->get( 'HierarchyGuard\\Redirects\\Sever' ), 'Null, as the signature says, with a notice naming the class.' );
 	}
 
 	public function test_every_public_hook_says_since_when(): void {
@@ -112,21 +117,30 @@ final class PluginTest extends WP_UnitTestCase {
 		$seen      = [];
 		$elsewhere = 0;
 		$root      = dirname( __DIR__, 2 ) . '/includes';
+		$files     = [ dirname( __DIR__, 2 ) . '/hierarchy-guard.php' ];
 		foreach ( new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $root, \FilesystemIterator::SKIP_DOTS ) ) as $file ) {
-			$code  = (string) file_get_contents( $file->getPathname() ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local source file.
-			$class = basename( $file->getPathname(), '.php' );
+			$files[] = $file->getPathname();
+		}
+		foreach ( $files as $path ) {
+			$code  = (string) file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- A local source file.
+			$class = basename( $path, '.php' );
 			preg_match_all( '#\b(?:apply_filters|do_action)(?:_ref_array|_deprecated)?\(\s*([^,)]+?)\s*[,)]#', $code, $calls, PREG_OFFSET_CAPTURE );
 			foreach ( $calls[1] as [ $hook, $offset ] ) {
-				$hook   = str_replace( 'self::', $class . '::', $hook );
-				$seen[] = $hook;
-				if ( 1 !== preg_match( "#^'(hierarchy_guard_[a-z_]+)'$#", $hook, $name ) ) {
-					continue;
-				}
+				$declared = str_starts_with( $hook, 'self::' );
+				$hook     = str_replace( 'self::', $class . '::', $hook );
+				$seen[]   = $hook;
 				// The docblock right above the call's own line.
 				$before = substr( $code, 0, $offset );
 				$end    = (int) strrpos( $before, '*/' );
 				$doc    = substr( $before, (int) strrpos( substr( $before, 0, $end ), '/**' ), $end );
-				$this->assertSame( 1, preg_match( '#\A[ \t]*\n[^\n;{}]*\z#', substr( $before, $end + 2 ) ), $name[1] . ' has a docblock right above it.' );
+				$above  = 1 === preg_match( '#\A[ \t]*\n[^\n;{}]*\z#', substr( $before, $end + 2 ) );
+				if ( ! $declared && in_array( $hook, [ 'List_Table::SCRIPT', 'Tree_View::SCRIPT' ], true ) ) {
+					$this->assertTrue( $above && str_contains( $doc, 'This action is documented in includes/HierarchyGuard/Admin/' . strstr( $hook, '::', true ) . '.php' ), $class . ' points ' . $hook . ' at the docblock that declares it.' );
+				}
+				if ( 1 !== preg_match( "#^'(hierarchy_guard_[a-z_]+)'$#", $hook, $name ) ) {
+					continue;
+				}
+				$this->assertTrue( $above, $name[1] . ' has a docblock right above it.' );
 				if ( str_contains( $doc, 'is documented in' ) ) {
 					++$elsewhere;
 					$this->assertSame( 'hierarchy_guard_children_reparented', $name[1], 'Only the restore\'s second call refers to another docblock.' );

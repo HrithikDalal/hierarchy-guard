@@ -257,6 +257,7 @@ final class Notices {
 		if ( null !== $this->shown ) {
 			$notice = $this->urls_notice( $this->shown );
 			if ( null !== $notice ) {
+				/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
 				do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 				self::print_urls( $notice );
 			}
@@ -278,6 +279,7 @@ final class Notices {
 		}
 
 		if ( $this->wants_nudge() ) {
+			/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
 			do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 			wp_admin_notice(
 				sprintf(
@@ -344,6 +346,7 @@ final class Notices {
 			return false;
 		}
 		// The list script turns its download link into the modal's button.
+		/** This action is documented in includes/HierarchyGuard/Admin/List_Table.php */
 		do_action( List_Table::SCRIPT ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.DynamicHooknameFound -- The plugin's own hook, by its constant: hierarchy_guard_list_script.
 		self::print_urls( $notice );
 		return true;

@@ -57,7 +57,9 @@ final class Plugin {
 	/**
 	 * The plugin's object of a class, as it was hooked in, or null. With it
 	 * an integration can unhook one part, for example the redirect server:
-	 * remove_action( 'template_redirect', [ Plugin::instance()->get( Redirects\Server::class ), 'maybe_redirect' ], 9 ).
+	 * remove_action( 'template_redirect', [ Plugin::instance()->get( Redirects\Server::class ), 'maybe_redirect' ], Redirects\Server::PRIORITY ).
+	 * A class the plugin keeps no object of, as a misspelt name, gives null
+	 * and a _doing_it_wrong() notice naming it.
 	 *
 	 * @since 1.0.0
 	 *
@@ -65,7 +67,13 @@ final class Plugin {
 	 * @return object|null
 	 */
 	public function get( string $class_name ): ?object {
-		return $this->services[ ltrim( $class_name, '\\' ) ] ?? null;
+		$class_name = ltrim( $class_name, '\\' );
+		if ( ! isset( $this->services[ $class_name ] ) ) {
+			/* translators: %s: the class name asked for, such as HierarchyGuard\Redirects\Server. */
+			_doing_it_wrong( __METHOD__, esc_html( sprintf( __( 'Hierarchy Guard keeps no object of the class %s.', 'hierarchy-guard' ), $class_name ) ), '1.0.0' );
+			return null;
+		}
+		return $this->services[ $class_name ];
 	}
 
 	/**
