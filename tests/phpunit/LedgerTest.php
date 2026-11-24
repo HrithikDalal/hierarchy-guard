@@ -66,17 +66,18 @@ final class LedgerTest extends WP_UnitTestCase {
 	/**
 	 * Each method that changes an old URL's record, and the URL it purges.
 	 *
-	 * @return array<string,array{0:string}>
+	 * @return array<string,string[]>
 	 */
 	public static function purge_sites(): array {
 		return [
-			'record'      => [ '/old-about/' ],
-			'record_root' => [ '/section/' ],
-			'set_target'  => [ '/old-about/' ],
-			'forget'      => [ '/old-about/' ],
-			'forget_root' => [ '/section/' ],
-			'claim'       => [ '/spot/' ],
-			'prune'       => [ '/about-us/' ],
+			'record'                   => [ '/old-about/' ],
+			'record_root'              => [ '/section/' ],
+			'set_target'               => [ '/old-about/' ],
+			'forget'                   => [ '/old-about/' ],
+			'forget_root'              => [ '/section/' ],
+			'claim'                    => [ '/spot/' ],
+			'prune'                    => [ '/about-us/' ],
+			'record_root past the cap' => [ '/root-1/', '/newest/' ],
 		];
 	}
 
@@ -89,9 +90,9 @@ final class LedgerTest extends WP_UnitTestCase {
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
 	 *
-	 * @param string $url The URL the method purges.
+	 * @param string ...$urls The URLs the method purges, in order.
 	 */
-	public function test_each_change_to_an_old_url_s_record_purges_it_from_a_vip_edge_cache( string $url ): void {
+	public function test_each_change_to_an_old_url_s_record_purges_it_from_a_vip_edge_cache( string ...$urls ): void {
 		global $wpdb;
 		require_once __DIR__ . '/stubs/vip.php';
 		$site = $this->dataName();
@@ -114,6 +115,9 @@ final class LedgerTest extends WP_UnitTestCase {
 				// Takes the path without a save, so only claim() acts on it.
 				$wpdb->update( $wpdb->posts, [ 'post_name' => 'spot' ], [ 'ID' => $spot ] );
 				clean_post_cache( $spot );
+				break;
+			case 'record_root past the cap':
+				update_option( Ledger::ROOT_OPTION, [ 'page' => array_map( static fn( int $i ): string => "root-{$i}", range( 1, Ledger::ROOT_CAP ) ) ], false );
 				break;
 			case 'prune':
 				$this->ledger->record( $this->about, 'about-us' );
@@ -146,9 +150,12 @@ final class LedgerTest extends WP_UnitTestCase {
 			case 'prune':
 				$this->ledger->prune( $this->about );
 				break;
+			case 'record_root past the cap':
+				$this->ledger->record_root( 'page', 'newest' );
+				break;
 		}
 
-		$this->assertSame( [ home_url( $url ) ], $GLOBALS['hierarchy_guard_purged'], 'VIP\'s current function, for the URL this method changed.' );
+		$this->assertSame( array_map( 'home_url', $urls ), $GLOBALS['hierarchy_guard_purged'], 'VIP\'s current function, for each URL this method changed.' );
 		$this->assertSame( [], $GLOBALS['hierarchy_guard_purged_deprecated'] );
 	}
 
@@ -167,6 +174,22 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->ledger->forget( $this->about, 'old-about' );
 
 		$this->assertSame( [ home_url( '/old-about/' ) ], $GLOBALS['hierarchy_guard_purged'] );
+	}
+
+	/**
+	 * In a process of its own, with only the purge function VIP deprecated.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_vip_site_with_only_the_deprecated_purge_function_still_purges(): void {
+		require_once __DIR__ . '/stubs/vip-deprecated.php';
+		$this->forget_purges();
+
+		$this->ledger->record( $this->about, 'old-about' );
+
+		$this->assertFalse( function_exists( 'wpvip_purge_edge_cache_for_url' ), 'Precondition: an older VIP platform.' );
+		$this->assertSame( [ home_url( '/old-about/' ) ], $GLOBALS['hierarchy_guard_purged_deprecated'] );
 	}
 
 	/**

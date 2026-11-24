@@ -180,14 +180,20 @@ final class Ledger {
 			return false;
 		}
 
-		$list[] = $old_path;
+		$list[]  = $old_path;
+		$evicted = [];
 		if ( count( $list ) > self::ROOT_CAP ) {
-			$this->drop_root_targets( $post_type, array_slice( $list, 0, count( $list ) - self::ROOT_CAP ) );
+			$evicted = array_slice( $list, 0, count( $list ) - self::ROOT_CAP );
+			$this->drop_root_targets( $post_type, $evicted );
 			$list = array_slice( $list, -self::ROOT_CAP );
 		}
 		$roots[ $post_type ] = array_values( $list );
 
 		update_option( self::ROOT_OPTION, $roots, false );
+		// The oldest entry past the cap, one per new entry, no longer redirects.
+		foreach ( $evicted as $gone ) {
+			self::purge( $post_type, (string) $gone );
+		}
 		self::purge( $post_type, $old_path );
 		$this->bump();
 
@@ -1302,7 +1308,9 @@ final class Ledger {
 	 * once a request, up to PURGE_LIMIT URLs. VIP's edge keeps a 301 for 30
 	 * minutes and a 302 for a minute whatever the response's headers say, and
 	 * a purge clears that exact URL only: URLs under it keep a cached
-	 * redirect until it expires.
+	 * redirect until it expires. Entries a page's permanent deletion takes
+	 * with it are not purged: the edge keeps their redirect to a URL that is
+	 * gone until it expires.
 	 *
 	 * @param string $post_type Post type name.
 	 * @param string $path      Normalized path.
@@ -1310,12 +1318,12 @@ final class Ledger {
 	private static function purge( string $post_type, string $path ): void {
 		// VIP's current name, else the one it deprecated.
 		$purge = function_exists( 'wpvip_purge_edge_cache_for_url' ) ? 'wpvip_purge_edge_cache_for_url' : 'wpcom_vip_purge_edge_cache_for_url';
-		if ( '' === $path || ! function_exists( $purge ) ) {
+		if ( '' === $path || ! function_exists( $purge ) || count( self::$purged ) >= self::PURGE_LIMIT ) {
 			return;
 		}
 		$prefix = Redirects\Server::prefix( $post_type );
 		$url    = home_url( user_trailingslashit( '' !== $prefix ? $prefix . '/' . $path : $path ) );
-		if ( isset( self::$purged[ $url ] ) || count( self::$purged ) >= self::PURGE_LIMIT ) {
+		if ( isset( self::$purged[ $url ] ) ) {
 			return;
 		}
 		self::$purged[ $url ] = true;

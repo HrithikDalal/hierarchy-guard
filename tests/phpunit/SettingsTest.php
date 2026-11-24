@@ -95,8 +95,33 @@ final class SettingsTest extends WP_UnitTestCase {
 		];
 	}
 
-	public function test_a_trash_policy_that_is_not_text_falls_back_without_a_warning(): void {
-		$this->assertSame( Settings::POLICY_REPARENT, Settings::sanitize( [ 'trash_policy' => [ 'keep' ] ] )['trash_policy'] );
+	/**
+	 * Trash policies the form never sends, and what is saved for each.
+	 *
+	 * @return array<string,array{0:mixed,1:string}>
+	 */
+	public static function crafted_policies(): array {
+		return [
+			'an array'       => [ [ 'keep' ], 'reparent' ],
+			'a nested array' => [ [ [ 'keep' ] ], 'reparent' ],
+			'empty'          => [ '', 'reparent' ],
+			'wrong case'     => [ 'KEEP', 'keep' ],
+			'slashed'        => [ 'k\\eep', 'keep' ],
+			'null'           => [ null, 'reparent' ],
+			'true'           => [ true, 'reparent' ],
+			'unknown'        => [ 'delete', 'reparent' ],
+			'a known one'    => [ 'trash_children', 'trash_children' ],
+		];
+	}
+
+	/**
+	 * @dataProvider crafted_policies
+	 *
+	 * @param mixed  $policy What arrives.
+	 * @param string $saved  What is saved.
+	 */
+	public function test_a_trash_policy_the_form_never_sends_is_replaced_by_the_default_without_a_warning( $policy, string $saved ): void {
+		$this->assertSame( $saved, Settings::sanitize( [ 'trash_policy' => $policy ] )['trash_policy'], 'Read as the key it spells, else replaced by the default; a PHP warning fails the test.' );
 	}
 
 	public function test_sanitize_reads_the_string_false_as_off(): void {

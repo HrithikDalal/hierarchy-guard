@@ -1065,8 +1065,11 @@ final class HierarchyControllerTest extends WP_UnitTestCase {
 	}
 
 	public function test_the_trash_preview_answers_only_users_who_can_trash_some_supported_type(): void {
+		wp_set_current_user( 0 );
+		$this->assertSame( 401, $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_status(), 'A visitor is asked to log in.' );
+
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'subscriber' ] ) );
-		$this->assertSame( 403, $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_status(), 'Not the policy or the cap either.' );
+		$this->assertSame( 403, $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_status(), 'A subscriber can trash nothing, so the preview refuses before reading any ID.' );
 
 		wp_set_current_user( self::factory()->user->create( [ 'role' => 'author' ] ) );
 		$this->assertSame( 403, $this->get( '/trash-preview', [ 'ids' => [ $this->ids['about'] ] ] )->get_status(), 'An author can’t trash pages.' );
