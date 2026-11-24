@@ -254,6 +254,27 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->assertSame( 'https://new.example.com/blog/', $root['url'] );
 	}
 
+	public function test_a_target_kept_as_a_path_is_read_with_the_home_url_s_scheme_whatever_the_request_s(): void {
+		$https = $_SERVER['HTTPS'] ?? null; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Saved as it was, to put back.
+		$home  = static fn(): string => 'http://example.org';
+		add_filter( 'pre_option_home', $home );
+		try {
+			$this->ledger->record( $this->about, 'old-about' );
+			$this->ledger->set_target( 'page', 'old-about', $this->about, 'http://example.org/news/?ref=old#latest', 0 );
+			$_SERVER['HTTPS'] = 'on';
+			wp_cache_set_last_changed( Ledger::CACHE_GROUP );
+
+			$this->assertSame( 'http://example.org/news/?ref=old#latest', $this->ledger->target( 'page', 'old-about', $this->about )['url'], 'An admin forced to SSL reads what the home URL says.' );
+		} finally {
+			remove_filter( 'pre_option_home', $home );
+			if ( null === $https ) {
+				unset( $_SERVER['HTTPS'] );
+			} else {
+				$_SERVER['HTTPS'] = $https;
+			}
+		}
+	}
+
 	/**
 	 * URLs typed for a site at http://example.org/blog, and what is stored.
 	 *

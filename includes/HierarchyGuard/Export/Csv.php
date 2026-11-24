@@ -9,6 +9,8 @@ declare( strict_types=1 );
 
 namespace HierarchyGuard\Export;
 
+use HierarchyGuard\Paths;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -96,9 +98,9 @@ final class Csv {
 	 */
 	public static function build( string $layout, array $pairs ): string {
 		$layout = self::layout( $layout );
-		// The home option's scheme, not the request's: home_url() follows is_ssl(), as in an admin forced to SSL.
-		$scheme = (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_SCHEME );
-		$home   = home_url( '/', $scheme );
+		// The home URL's scheme, not the request's, as Paths::home_absolute() decides it.
+		$home   = Paths::home_absolute( '/' );
+		$scheme = (string) wp_parse_url( $home, PHP_URL_SCHEME );
 		$base   = in_array( $layout, self::FROM_ROOT, true ) ? untrailingslashit( (string) wp_parse_url( $home, PHP_URL_PATH ) ) : '';
 		$full   = in_array( $layout, self::FULL_TARGETS, true );
 		$lines  = [ self::line( array_keys( self::LAYOUTS[ $layout ] ) ) ];
@@ -108,7 +110,7 @@ final class Csv {
 			if ( str_starts_with( $new, '//' ) ) {
 				$new = $scheme . ':' . $new;
 			} elseif ( str_starts_with( $new, '/' ) ) {
-				$new = $full ? home_url( $new, $scheme ) : $base . $new;
+				$new = $full ? Paths::home_absolute( $new ) : $base . $new;
 			}
 			$lines[] = self::line( self::row( $layout, $old, $new, ! empty( $pair['temporary'] ) ) );
 		}

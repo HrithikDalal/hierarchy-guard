@@ -208,6 +208,19 @@ final class Paths {
 	}
 
 	/**
+	 * A path on this site as a full URL, with the home URL's own scheme
+	 * whatever the request's: home_url() takes https in any SSL request, as
+	 * in an admin forced to SSL on a site whose home URL is http.
+	 *
+	 * @param string $path Path from the home URL, with any query and fragment.
+	 * @return string
+	 */
+	public static function home_absolute( string $path ): string {
+		$scheme = strtolower( (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_SCHEME ) );
+		return home_url( $path, in_array( $scheme, [ 'http', 'https' ], true ) ? $scheme : null );
+	}
+
+	/**
 	 * A URL on this site as a path relative to the home URL, such as `/about/team/`.
 	 * This is the form redirect plugins expect for the old and the new URL.
 	 *

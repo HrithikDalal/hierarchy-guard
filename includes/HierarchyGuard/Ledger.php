@@ -712,7 +712,7 @@ final class Ledger {
 		}
 		$url = isset( $value['url'] ) && is_string( $value['url'] ) ? trim( $value['url'] ) : '';
 		if ( str_starts_with( $url, '/' ) && ! str_starts_with( $url, '//' ) ) {
-			$url = home_url( $url );
+			$url = Paths::home_absolute( $url );
 		}
 		$code   = isset( $value['code'] ) && is_numeric( $value['code'] ) ? (int) $value['code'] : 0;
 		$scheme = strtolower( (string) wp_parse_url( $url, PHP_URL_SCHEME ) );
