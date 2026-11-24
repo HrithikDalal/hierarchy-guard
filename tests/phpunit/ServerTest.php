@@ -644,6 +644,10 @@ final class ServerTest extends WP_UnitTestCase {
 
 			unset( $_SERVER['HTTPS'] );
 			$this->assertSame( 'http://example.org/careers/', $this->server->target_for_current_request()['url'], 'Otherwise the home URL\'s scheme.' );
+
+			$ledger->set_target( 'page', 'old-about', $this->about, 'http://jobs.example.net/careers/', 0 );
+			$_SERVER['HTTPS'] = 'on';
+			$this->assertSame( 'http://jobs.example.net/careers/', $this->server->target_for_current_request()['url'], 'Another site keeps its own scheme.' );
 		} finally {
 			remove_filter( 'pre_option_home', $home );
 			if ( null === $https ) {

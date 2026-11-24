@@ -118,7 +118,7 @@ final class Server {
 			return null;
 		}
 
-		// A URL target is sent as it was set: the suffixes are re-applied to a page only.
+		// A URL target is sent as it was set, one on this site in the scheme below; the suffixes are re-applied to a page only.
 		$post = $target instanceof WP_Post ? $target : null;
 		if ( null !== $post ) {
 			$url = get_permalink( $post );
