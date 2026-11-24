@@ -174,7 +174,7 @@ final class AssetsTest extends WP_UnitTestCase {
 		$assets->want_tree();
 		$assets->enqueue_list_table();
 		$this->assertTrue( wp_script_is( 'hierarchy-guard-tree', 'enqueued' ) );
-		$this->assertContains( 'hierarchy-guard-list-table', wp_scripts()->registered['hierarchy-guard-tree']->deps, 'After the list’s, whose settings it reads and whose trash dialog it uses.' );
+		$this->assertSame( [ 'wp-a11y', 'hierarchy-guard-list-table', 'wp-i18n' ], wp_scripts()->registered['hierarchy-guard-tree']->deps, 'Its own, from its asset file; the list’s, whose settings it reads and whose trash dialog it uses; and wp-i18n, which core adds for its translations.' );
 		$this->assertSame( 'hierarchy-guard', wp_scripts()->registered['hierarchy-guard-tree']->textdomain );
 		$this->assertFalse( wp_scripts()->get_data( 'hierarchy-guard-tree', 'before' ), 'The settings print once, with the list’s bundle.' );
 	}

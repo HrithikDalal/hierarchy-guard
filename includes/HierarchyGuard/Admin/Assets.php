@@ -112,8 +112,9 @@ final class Assets {
 		}
 		// Quick Edit's script defines the object the list-table script wraps.
 		$this->enqueue( 'list-table', [ 'jquery', 'inline-edit-post' ] );
-		if ( $this->tree && $this->enqueue( 'tree', [ self::HANDLE_PREFIX . 'list-table' ], false ) ) {
-			wp_set_script_translations( self::HANDLE_PREFIX . 'tree', 'hierarchy-guard' );
+		if ( $this->tree ) {
+			// Its strings are its own; the settings it reads print once, with the list's bundle.
+			$this->enqueue( 'tree', [ self::HANDLE_PREFIX . 'list-table' ], false );
 		}
 	}
 
@@ -142,7 +143,7 @@ final class Assets {
 	public function enqueue_admin( $hook_suffix ): void {
 		if ( 'settings_page_' . Settings_Page::SLUG === $hook_suffix && 'redirects' === Settings_Page::current_tab() ) {
 			// It reads only the questions the page prints: no settings, no strings.
-			$this->enqueue( 'redirects', [], false );
+			$this->enqueue( 'redirects', [], false, false );
 			return;
 		}
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
@@ -160,15 +161,16 @@ final class Assets {
 	}
 
 	/**
-	 * Enqueues one bundle with its styles and, unless it needs neither, its
+	 * Enqueues one bundle with its styles and, unless it needs them not, its
 	 * translations and settings.
 	 *
 	 * @param string   $name     Bundle name, as in build/{name}.js.
 	 * @param string[] $extra    Script handles the bundle uses without importing them.
-	 * @param bool     $settings Whether the bundle has strings and reads window.hierarchyGuard.
+	 * @param bool     $settings Whether the bundle reads window.hierarchyGuard printed before it.
+	 * @param bool     $strings  Whether the bundle has strings to translate.
 	 * @return bool Whether the bundle was built and enqueued.
 	 */
-	public function enqueue( string $name, array $extra = [], bool $settings = true ): bool {
+	public function enqueue( string $name, array $extra = [], bool $settings = true, bool $strings = true ): bool {
 		$asset = $this->asset( $name );
 		if ( null === $asset ) {
 			return false;
@@ -179,8 +181,10 @@ final class Assets {
 		$url    = plugins_url( 'build/' . $name . '.js', $this->dir . '/hierarchy-guard.php' );
 
 		wp_enqueue_script( $handle, $url, $deps, $asset['version'], true );
-		if ( $settings ) {
+		if ( $strings ) {
 			wp_set_script_translations( $handle, 'hierarchy-guard' );
+		}
+		if ( $settings ) {
 			wp_add_inline_script( $handle, 'window.hierarchyGuard = ' . wp_json_encode( $this->config() ) . ';', 'before' );
 		}
 		$this->style( $name, $deps, $asset['version'] );
