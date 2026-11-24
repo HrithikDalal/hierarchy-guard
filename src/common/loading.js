@@ -20,3 +20,16 @@ export function loadingText() {
 export function speakLoading() {
 	speak( loadingText(), 'polite' );
 }
+
+/**
+ * Whether a spinner shows: while its view is open or loading, until the
+ * data or an error comes.
+ *
+ * @param {boolean}     shown Whether the view is open, or loading.
+ * @param {Object|null} data  The data, once it came.
+ * @param {string}      error The error, once one came.
+ * @return {boolean} Whether it shows.
+ */
+export function waiting( shown, data, error ) {
+	return !! shown && ! data && ! error;
+}

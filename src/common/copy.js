@@ -757,6 +757,19 @@ export function importNotes( provider ) {
 }
 
 /**
+ * The import notes the modal shows under its buttons: whenever the CSV
+ * button shows, so whenever the change has redirects, whether or not
+ * built-in redirects are on.
+ *
+ * @param {Object}        data     A page of pairs: `total`.
+ * @param {(Object|null)} provider The detected redirect plugin: `name` and `note`.
+ * @return {string[]} Sentences.
+ */
+export function shownImportNotes( data, provider ) {
+	return data.total > 0 ? importNotes( provider ) : [];
+}
+
+/**
  * What handles the redirects of a page's pairs: the server redirects them
  * whenever it serves the type, even when the page itself is not viewable,
  * since the pairs list only pages it redirects to. A page's own old URL

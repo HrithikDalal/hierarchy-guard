@@ -13,14 +13,14 @@ import { useEffect, useRef, useState } from '@wordpress/element';
 import { __, _x, sprintf } from '@wordpress/i18n';
 import { csvUrl, fetchPairs } from './api';
 import config from './config';
-import { loadingText, speakLoading } from './loading';
+import { loadingText, speakLoading, waiting } from './loading';
 import {
 	copiedSentence,
 	csvLabel,
 	formatCount,
-	importNotes,
 	pairsRedirects,
 	pairsText,
+	shownImportNotes,
 	unresolvedSentence,
 } from './copy';
 import Url from './url';
@@ -125,12 +125,12 @@ export default function RedirectsModal( {
 	};
 
 	// The spinner shows until the first page of pairs or an error does.
-	const waiting = ! data && loading;
+	const spinning = waiting( loading, data, error );
 	useEffect( () => {
-		if ( waiting ) {
+		if ( spinning ) {
 			speakLoading();
 		}
-	}, [ waiting ] );
+	}, [ spinning ] );
 
 	useEffect( () => {
 		if ( copy.text ) {
@@ -224,7 +224,7 @@ export default function RedirectsModal( {
 					{ error }
 				</Notice>
 			) }
-			{ ! data && loading && (
+			{ spinning && (
 				<>
 					<Spinner />
 					<span className="screen-reader-text">
@@ -371,12 +371,11 @@ export default function RedirectsModal( {
 								</Button>
 							) }
 					</div>
-					{ data.total > 0 &&
-						importNotes( provider ).map( ( note ) => (
-							<p key={ note } className="description">
-								{ note }
-							</p>
-						) ) }
+					{ shownImportNotes( data, provider ).map( ( note ) => (
+						<p key={ note } className="description">
+							{ note }
+						</p>
+					) ) }
 				</>
 			) }
 		</Modal>

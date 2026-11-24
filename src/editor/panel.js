@@ -23,7 +23,7 @@ import {
 	trashNote,
 	viewAllLabel,
 } from '../common/copy';
-import { loadingText, speakLoading } from '../common/loading';
+import { loadingText, speakLoading, waiting } from '../common/loading';
 import RedirectsModal from '../common/redirects-modal';
 
 const PANEL = 'hierarchy-guard/hierarchy-guard';
@@ -242,12 +242,12 @@ export default function HierarchyPlugin() {
 	}, [ needed, load ] );
 
 	// The spinner shows in the open panel until the hierarchy or an error does.
-	const waiting = supported && opened && ! data && ! error;
+	const spinning = waiting( supported && opened, data, error );
 	useEffect( () => {
-		if ( waiting ) {
+		if ( spinning ) {
 			speakLoading();
 		}
-	}, [ waiting ] );
+	}, [ spinning ] );
 
 	// A save that changed the slug or parent moved the page: show where it
 	// is now, and the redirects of the change it recorded.

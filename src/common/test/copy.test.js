@@ -25,6 +25,7 @@ import {
 	previewError,
 	quickEditWarning,
 	saveWarning,
+	shownImportNotes,
 	subpagesLabel,
 	trashNote,
 	trashSentence,
@@ -435,6 +436,17 @@ describe( 'the CSV download', () => {
 			'If your redirect plugin already added any of these redirects itself, skip those rows.',
 		] );
 		expect( importNotes( null ) ).toEqual( [] );
+	} );
+
+	it( 'shows the import notes whenever the CSV button shows, built-in redirects on or off', () => {
+		const provider = { name: 'Redirection', note: '' };
+		const serving = config.serving;
+		config.serving = true;
+		expect( shownImportNotes( { total: 3 }, provider ) ).toEqual( [
+			'If Redirection already added any of these redirects itself, skip those rows.',
+		] );
+		config.serving = serving;
+		expect( shownImportNotes( { total: 0 }, provider ) ).toEqual( [] );
 	} );
 } );
 
