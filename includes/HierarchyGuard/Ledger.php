@@ -420,6 +420,8 @@ final class Ledger {
 
 		$this->drop_target( $post_id, (string) $post->post_type, $path );
 		Meta_Guard::writing( static fn() => delete_post_meta( $post_id, $key ) );
+		// The edge may still send this URL to where the page was; it leads to the page itself now.
+		self::purge( (string) $post->post_type, $path );
 		$this->bump();
 
 		return 1;

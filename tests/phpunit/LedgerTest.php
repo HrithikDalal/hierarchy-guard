@@ -86,6 +86,32 @@ final class LedgerTest extends WP_UnitTestCase {
 		$this->forget_purges();
 	}
 
+	/**
+	 * In a process of its own, so VIP's functions exist for this test only.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_a_page_moved_back_to_its_old_url_purges_that_url_from_a_vip_edge_cache(): void {
+		require_once __DIR__ . '/stubs/vip.php';
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about-us',
+			]
+		);
+		$this->forget_purges();
+
+		wp_update_post(
+			[
+				'ID'        => $this->about,
+				'post_name' => 'about',
+			]
+		);
+
+		$this->assertSame( [ home_url( '/about-us/' ), home_url( '/about/' ) ], $GLOBALS['hierarchy_guard_purged'], 'The edge forgets the redirect it keeps for /about/, which now leads to the page itself.' );
+	}
+
 	public function test_a_request_purges_at_most_fifty_old_urls_so_vip_keeps_its_own(): void {
 		require_once __DIR__ . '/stubs/vip.php';
 		$this->forget_purges();
